@@ -1,0 +1,154 @@
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { useLoaderData, Link, useRevalidator } from "@remix-run/react";
+import { requireUserId } from "~/backend/auth.server";
+import { prisma } from "~/database/db.server";
+import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink } from "lucide-react";
+import { useState, useEffect } from "react";
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const userId = await requireUserId(request);
+  const project = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+    include: { integrations: true },
+  });
+
+  if (!project) return redirect("/dashboard");
+
+  return json({ project });
+}
+
+export default function ProjectIntegrations() {
+  const { project } = useLoaderData<typeof loader>();
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const revalidator = useRevalidator();
+
+  useEffect(() => {
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        // Refresh data
+        revalidator.revalidate();
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, [revalidator]);
+
+  const handleConnect = async (provider: string) => {
+    setConnecting(provider);
+    try {
+      const endpoint = provider === 'notion' ? 'notion' : 'google';
+      const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
+      const data = await response.json();
+      if (data.url) {
+        // Open OAuth in new window
+        const width = 600;
+        const height = 700;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+        window.open(data.url, 'Connect Service', `width=${width},height=${height},left=${left},top=${top}`);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const integrations = [
+    {
+      id: "notion",
+      name: "Notion",
+      description: "Auto-sync your Notion workspace pages and databases.",
+      icon: <Database className="w-6 h-6 text-zinc-900" />,
+      connected: project.integrations.some(i => i.provider === 'notion'),
+    },
+    {
+      id: "google_drive",
+      name: "Google Drive",
+      description: "Extract knowledge from Docs, Sheets, and PDFs in your Drive.",
+      icon: <FileText className="w-6 h-6 text-blue-600" />,
+      connected: project.integrations.some(i => i.provider === 'google_drive'),
+    },
+    {
+      id: "slack",
+      name: "Slack",
+      description: "Respond to inquiries directly from Slack threads.",
+      icon: <Share2 className="w-6 h-6 text-purple-600" />,
+      connected: !!project.webhookUrl,
+    },
+    {
+      id: "zapier",
+      name: "Zapier",
+      description: "Connect triggers and actions to 5,000+ other apps.",
+      icon: <ZapIcon className="w-6 h-6 text-orange-600" />,
+      connected: false,
+    }
+  ];
+
+  return (
+    <div className="max-w-4xl">
+      <Link to={`/dashboard/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-6">
+        <ChevronLeft className="w-4 h-4" /> Back to project
+      </Link>
+      
+      <div className="mb-12">
+        <h1 className="text-4xl font-black mb-2">Integrations</h1>
+        <p className="text-text-muted">Connect your favorite tools to keep your AI's knowledge up to date automatically.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {integrations.map((item) => (
+          <div key={item.id} className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm hover:border-primary/20 transition-all group">
+            <div className="flex items-start justify-between mb-6">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-zinc-50 border border-zinc-100 group-hover:bg-white group-hover:shadow-lg transition-all`}>
+                {item.icon}
+              </div>
+              {item.connected ? (
+                <div className="flex items-center gap-1 text-xs font-black text-green-500 uppercase">
+                  <Check className="w-3 h-3" /> Connected
+                </div>
+              ) : (
+                <div className="text-[10px] font-black text-brand-orange uppercase px-2 py-1 bg-brand-orange/5 rounded">Available</div>
+              )}
+            </div>
+            <h3 className="text-xl font-bold mb-2">{item.name}</h3>
+            <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
+            
+            <button 
+              onClick={() => !item.connected && handleConnect(item.id)}
+              disabled={item.connected || connecting === item.id}
+              className={`w-full py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 ${
+                item.connected 
+                  ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
+                  : "bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98]"
+              }`}
+            >
+              {connecting === item.id ? "Connecting..." : item.connected ? "Already Integrated" : `Connect ${item.name}`}
+              {!item.connected && <ExternalLink className="w-4 h-4" />}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-12 p-8 bg-brand-orange/5 border border-brand-orange/10 rounded-[32px]">
+        <div className="flex items-start gap-4">
+          <AlertCircle className="w-6 h-6 text-brand-orange flex-shrink-0" />
+          <div>
+            <h4 className="font-bold text-brand-dark mb-1">Coming Soon: Auto-Sync</h4>
+            <p className="text-sm text-zinc-600 leading-relaxed">
+              We are currently finalizing the auto-sync engine. Once connected, your bot will automatically re-train itself every time you edit a file in Google Drive or a page in Notion.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ZapIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+  </svg>
+);

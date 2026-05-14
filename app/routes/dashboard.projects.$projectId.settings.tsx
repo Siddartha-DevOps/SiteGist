@@ -1,0 +1,441 @@
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-run/react";
+import { requireUserId } from "~/backend/auth.server";
+import { prisma } from "~/database/db.server";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check } from "lucide-react";
+import { useState } from "react";
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const userId = await requireUserId(request);
+  const project = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+  });
+
+  if (!project) return redirect("/dashboard");
+
+  return json({ project });
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const userId = await requireUserId(request);
+  const formData = await request.formData();
+  const name = formData.get("name") as string;
+  const systemPrompt = formData.get("systemPrompt") as string;
+  const primaryColor = formData.get("primaryColor") as string;
+  const assistantName = formData.get("assistantName") as string;
+  const assistantLogo = formData.get("assistantLogo") as string;
+  const greetingMessage = formData.get("greetingMessage") as string;
+  const suggestionsString = formData.get("suggestions") as string;
+  const webhookUrl = formData.get("webhookUrl") as string;
+  const customDomain = formData.get("customDomain") as string;
+  const allowedDomainsString = formData.get("allowedDomains") as string;
+  const removeBranding = formData.get("removeBranding") === "true";
+  
+  const leadPolicy = formData.get("leadPolicy") as string; // 'none', 'pre-chat', 'keywords'
+  
+  const bubbleShape = formData.get("bubbleShape") as string;
+  const position = formData.get("position") as string;
+  const font = formData.get("font") as string;
+  
+  const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
+  const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
+
+  const settings = {
+    systemPrompt,
+    allowedDomains,
+    branding: {
+      primaryColor,
+      assistantName,
+      assistantLogo,
+      greetingMessage,
+      suggestions,
+      bubbleShape,
+      position,
+      font,
+      removeBranding,
+      customDomain,
+      leadPolicy,
+    }
+  };
+
+  await prisma.project.update({
+    where: { id: params.projectId },
+    data: { 
+      name,
+      webhookUrl,
+      settings: settings as any,
+    },
+  });
+
+  return json({ success: true, message: "Bot settings updated successfully" });
+}
+
+export default function ProjectSettings() {
+  const { project } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const isSaving = navigation.state === "submitting";
+  
+  const currentSettings = (project.settings as any) || {};
+  const branding = currentSettings.branding || {};
+  const removeBranding = branding.removeBranding || false;
+  const customDomain = branding.customDomain || "";
+
+  return (
+    <div className="max-w-4xl">
+      <Link to={`/dashboard/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-6">
+        <ChevronLeft className="w-4 h-4" /> Back to project
+      </Link>
+      
+      <div className="mb-12">
+        <h1 className="text-4xl font-black mb-2">Bot Settings</h1>
+        <p className="text-text-muted">Customize how your AI assistant behaves and looks.</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
+        <div className="lg:col-span-3">
+          <Form method="post" className="space-y-8">
+            {/* General Settings */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Settings className="text-primary w-5 h-5" /> General Configuration
+              </h2>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-bold mb-2">Project Name</label>
+                  <input 
+                    type="text" 
+                    name="name" 
+                    defaultValue={project.name}
+                    required
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2 flex items-center justify-between">
+                    System Instructions (Prompt)
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Core Personality</span>
+                  </label>
+                  <textarea 
+                    name="systemPrompt" 
+                    rows={6}
+                    defaultValue={currentSettings.systemPrompt || "You are a helpful customer support assistant for a website. Use the provided context to answer questions accurately and concisely."}
+                    placeholder="E.g. You are a friendly sales rep..."
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                  />
+                  <p className="mt-2 text-xs text-zinc-400">This defines how the bot responds and its general persona.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Appearance & Branding */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Palette className="text-primary w-5 h-5" /> Branding & Theme Builder
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-bold mb-2">Assistant Name</label>
+                  <input 
+                    type="text" 
+                    name="assistantName" 
+                    id="assistantName"
+                    defaultValue={branding.assistantName || "Support AI"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold mb-2">Assistant Logo (URL)</label>
+                   <input 
+                     type="url" 
+                     name="assistantLogo" 
+                     placeholder="https://..."
+                     defaultValue={branding.assistantLogo || ""}
+                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2">Theme Color (Hex)</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="color" 
+                      name="primaryColor" 
+                      id="primaryColor"
+                      defaultValue={branding.primaryColor || "#6C5CE7"}
+                      className="h-14 w-20 bg-zinc-50 border border-zinc-100 rounded-2xl p-1 cursor-pointer"
+                    />
+                    <input 
+                      type="text" 
+                      value={branding.primaryColor || "#6C5CE7"}
+                      readOnly
+                      className="flex-1 px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl text-zinc-400 font-mono text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold mb-2">Font Family</label>
+                  <select 
+                    name="font" 
+                    defaultValue={branding.font || "sans"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  >
+                    <option value="sans">Modern Sans (Inter)</option>
+                    <option value="serif">Classic Serif</option>
+                    <option value="mono">Technical Mono</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold mb-2">Greeting Message</label>
+                  <input 
+                    type="text" 
+                    name="greetingMessage" 
+                    id="greetingMessage"
+                    defaultValue={branding.greetingMessage || "Hi there! How can I help you today?"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold mb-2">Bubble Shape</label>
+                  <select 
+                    name="bubbleShape" 
+                    defaultValue={branding.bubbleShape || "rounded-2xl"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  >
+                    <option value="rounded-none">Square</option>
+                    <option value="rounded-2xl">Modern (Default)</option>
+                    <option value="rounded-full">Pill</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold mb-2">Widget Position</label>
+                  <select 
+                    name="position" 
+                    defaultValue={branding.position || "bottom-right"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  >
+                    <option value="bottom-right">Bottom Right</option>
+                    <option value="bottom-left">Bottom Left</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            {/* Whitelabeling */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold flex items-center gap-3">
+                  <Zap className="text-brand-orange w-5 h-5" /> Whitelabeling (Pro)
+                </h2>
+                <div className="bg-brand-orange/10 text-brand-orange text-[10px] font-black uppercase px-2 py-1 rounded">Pro Feature</div>
+              </div>
+              <div className="space-y-6">
+                <div>
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <input 
+                      type="checkbox" 
+                      name="removeBranding" 
+                      value="true"
+                      defaultChecked={removeBranding}
+                      className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold">Remove "Powered by SiteGist"</span>
+                      <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">Hide the SiteGist logo and link from your widget.</span>
+                    </div>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2 text-brand-dark">Custom CNAME Domain</label>
+                  <input 
+                    type="text" 
+                    name="customDomain" 
+                    placeholder="chat.yourdomain.com"
+                    defaultValue={customDomain}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
+                  />
+                  <p className="mt-2 text-xs text-zinc-400 font-medium leading-relaxed">
+                    Point your CNAME record to <code className="bg-zinc-100 px-1 py-0.5 rounded">custom.sitegist.co</code> to enable custom domain hosting.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Behavior */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Zap className="text-primary w-5 h-5" /> Advanced Features
+              </h2>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-bold mb-2">Webhook URL (Slack/Discord/Custom)</label>
+                  <input 
+                    type="url" 
+                    name="webhookUrl" 
+                    defaultValue={project.webhookUrl || ""}
+                    placeholder="https://hooks.slack.com/services/..."
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
+                  />
+                  <p className="mt-2 text-xs text-zinc-400">Receive real-time alerts when leads are captured or human help is requested.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Lead Generation */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Users className="text-primary w-5 h-5" /> Lead Generation
+              </h2>
+              <div className="space-y-6">
+                <div>
+                   <label className="block text-sm font-bold mb-2">Collection Strategy</label>
+                   <select 
+                     name="leadPolicy" 
+                     defaultValue={branding.leadPolicy || "keywords"}
+                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                   >
+                     <option value="none">Disabled (No Form)</option>
+                     <option value="pre-chat">Pre-Chat (Ask immediately)</option>
+                     <option value="keywords">Intelligence (Ask when intent matches)</option>
+                     <option value="handoff">Handoff (Ask when human requested)</option>
+                   </select>
+                   <p className="mt-2 text-xs text-zinc-400 font-medium leading-relaxed">
+                     Choose when to show the lead collection form to your visitors.
+                   </p>
+                </div>
+                <div>
+                   <label className="block text-sm font-bold mb-2 text-brand-dark">Captured Fields</label>
+                   <div className="flex flex-wrap gap-2">
+                     {['Name', 'Email', 'Phone', 'Company'].map(field => (
+                       <div key={field} className="px-4 py-2 bg-zinc-50 border border-zinc-100 rounded-xl text-xs font-bold flex items-center gap-2 border shadow-sm">
+                         <Check className="w-3 h-3 text-green-500" /> {field}
+                       </div>
+                     ))}
+                   </div>
+                   <p className="mt-2 text-xs text-zinc-400 font-medium">Capture these details automatically when users request human help or special access.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Behavior */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <MessageSquare className="text-primary w-5 h-5" /> Conversation Starters
+              </h2>
+              <div>
+                <label className="block text-sm font-bold mb-2 uppercase tracking-widest text-zinc-400 text-[10px]">Suggestions (One per line)</label>
+                <textarea 
+                  name="suggestions" 
+                  rows={4}
+                  defaultValue={(branding.suggestions || []).join("\n")}
+                  placeholder="What are your hours?&#10;How does pricing work?&#10;Talk to a human"
+                  className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                />
+                <p className="mt-2 text-xs text-zinc-400">These chips appear when the chat first opens to help users start a conversation.</p>
+              </div>
+            </section>
+
+            <div className="flex items-center justify-between gap-4 pt-4">
+              {actionData?.success && <p className="text-green-500 font-bold">{actionData.message}</p>}
+              <div className="flex-1" />
+              <button 
+                type="submit" 
+                disabled={isSaving}
+                className="px-10 py-5 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-primary/20"
+              >
+                {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Save Bot Settings
+              </button>
+            </div>
+          </Form>
+        </div>
+
+        {/* Live Preview Column */}
+        <div className="lg:col-span-2 space-y-8">
+          <div className="sticky top-8">
+            <div className="mb-6 flex items-center justify-between">
+              <h3 className="font-black uppercase tracking-[0.2em] text-brand-gray text-[11px]">Studio Preview</h3>
+              <div className="flex items-center gap-2 text-[10px] font-bold text-brand-online">
+                <div className="w-1.5 h-1.5 bg-brand-online rounded-full animate-pulse" />
+                Live Sync
+              </div>
+            </div>
+
+            <div className="bg-[#F8F9FA] rounded-[48px] p-8 border border-brand-border aspect-[4/5] flex flex-col items-center justify-center relative overflow-hidden shadow-inner">
+              <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:24px_24px] opacity-50" />
+              
+              {/* Mock Widget UI */}
+              <div className="relative z-10 w-full max-w-xs bg-white rounded-[32px] shadow-2xl border border-zinc-100 overflow-hidden flex flex-col h-full translate-y-4">
+                <div className="p-4 flex items-center justify-between border-b border-zinc-50" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                      <Bot className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">{branding.assistantName || "Support AI"}</h4>
+                      <p className="text-[10px] text-white/70 font-bold">Online</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 p-4 space-y-4 overflow-y-auto bg-zinc-50/50">
+                  <div className="flex gap-2">
+                    <div className="w-8 h-8 bg-zinc-100 rounded-full flex-shrink-0 flex items-center justify-center">
+                      <Bot className="w-4 h-4 text-zinc-400" />
+                    </div>
+                    <div className="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-zinc-100 text-xs font-medium text-brand-dark">
+                      {branding.greetingMessage || "Hi there! How can I help you today?"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white border-t border-zinc-50">
+                  <div className="p-3 bg-zinc-50 rounded-xl text-xs text-text-muted flex items-center justify-between">
+                    Type a message...
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+                      <Bot className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Floating Trigger Button */}
+              <div className="absolute bottom-12 right-12 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center transform hover:scale-110 transition-transform cursor-pointer" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+                <MessageSquare className="text-white w-8 h-8" />
+              </div>
+            </div>
+
+            <div className="mt-8 p-6 bg-primary/5 border border-primary/10 rounded-3xl">
+              <p className="text-xs text-primary font-medium leading-relaxed">
+                <span className="font-black uppercase tracking-widest text-[9px] block mb-1">Pro Tip</span>
+                Changes are reflected in the live preview instantly. Tap "Save Bot Settings" to apply them to your live website widget.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-20 p-10 bg-zinc-900 rounded-[40px] text-white overflow-hidden relative group">
+        <Bot className="absolute -right-10 -bottom-10 w-64 h-64 opacity-5 group-hover:scale-110 transition-transform duration-700" />
+        <div className="relative z-10">
+          <h3 className="text-2xl font-bold mb-4">Preview your Bot</h3>
+          <p className="text-zinc-400 mb-8 max-w-md">Remember to test your changes in the playground to ensure the instructions are working as expected.</p>
+          <Link to={`/dashboard/projects/${project.id}/playground`} className="inline-flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-bold transition-all">
+            Open Playground <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ArrowRight = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5 12h14" />
+    <path d="m12 5 7 7-7 7" />
+  </svg>
+);

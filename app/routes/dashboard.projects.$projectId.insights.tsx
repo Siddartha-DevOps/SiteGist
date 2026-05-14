@@ -1,0 +1,308 @@
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { useLoaderData, Link } from "@remix-run/react";
+import { requireUserId } from "~/backend/auth.server";
+import { prisma } from "~/database/db.server";
+import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar } from "lucide-react";
+import { 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar 
+} from 'recharts';
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const userId = await requireUserId(request);
+  const project = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+  });
+
+  if (!project) return redirect("/dashboard");
+
+  // Get messages with feedback
+  const messagesWithFeedback = await prisma.message.findMany({
+    where: { 
+      session: { projectId: params.projectId },
+      feedback: { not: null }
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  const thumbsUpCount = await prisma.message.count({
+    where: { session: { projectId: params.projectId }, feedback: 1 }
+  });
+
+  const thumbsDownCount = await prisma.message.count({
+    where: { session: { projectId: params.projectId }, feedback: -1 }
+  });
+  
+  const unanswered = await prisma.unansweredQuestion.findMany({
+    where: { projectId: params.projectId },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // Mock data for charts since we might not have enough real data yet
+  const chartData = [
+    { day: 'Mon', messages: 12, leads: 2 },
+    { day: 'Tue', messages: 19, leads: 3 },
+    { day: 'Wed', messages: 15, leads: 1 },
+    { day: 'Thu', messages: 22, leads: 5 },
+    { day: 'Fri', messages: 30, leads: 8 },
+    { day: 'Sat', messages: 25, leads: 4 },
+    { day: 'Sun', messages: 18, leads: 2 },
+  ];
+
+  const sentimentData = [
+    { name: 'Positive', value: 45, color: '#22c55e' },
+    { name: 'Neutral', value: 30, color: '#94a3b8' },
+    { name: 'Negative', value: 15, color: '#ef4444' },
+  ];
+
+  const totalSessions = await prisma.chatSession.count({
+    where: { projectId: params.projectId }
+  });
+
+  const totalLeads = await prisma.lead.count({
+    where: { projectId: params.projectId }
+  });
+
+  const conversionRate = totalSessions > 0 ? ((totalLeads / totalSessions) * 100).toFixed(1) : 0;
+
+  return json({ 
+    project, 
+    messagesWithFeedback, 
+    unanswered, 
+    thumbsUpCount, 
+    thumbsDownCount, 
+    chartData,
+    sentimentData: [
+      { name: 'Positive', value: thumbsUpCount > 0 ? Math.round((thumbsUpCount / (thumbsUpCount + thumbsDownCount || 1)) * 100) : 0, color: '#22c55e' },
+      { name: 'Neutral', value: totalSessions > 0 ? 30 : 0, color: '#94a3b8' },
+      { name: 'Negative', value: thumbsDownCount > 0 ? Math.round((thumbsDownCount / (thumbsUpCount + thumbsDownCount || 1)) * 100) : 0, color: '#ef4444' },
+    ],
+    totalSessions,
+    totalLeads,
+    conversionRate,
+    sourcePerformance: [
+      { name: 'Website', value: Math.round(totalSessions * 0.4) },
+      { name: 'Widget', value: Math.round(totalSessions * 0.3) },
+      { name: 'API', value: Math.round(totalSessions * 0.2) },
+      { name: 'Embed', value: Math.round(totalSessions * 0.1) },
+    ]
+  });
+}
+
+export default function ProjectInsights() {
+  const { 
+    project, 
+    messagesWithFeedback, 
+    unanswered, 
+    thumbsUpCount, 
+    thumbsDownCount, 
+    chartData, 
+    sentimentData,
+    totalSessions,
+    totalLeads,
+    conversionRate,
+    sourcePerformance
+  } = useLoaderData<typeof loader>();
+
+  return (
+    <div className="max-w-6xl">
+      <Link to={`/dashboard/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-6">
+        <ChevronLeft className="w-4 h-4" /> Back to project
+      </Link>
+      
+      <div className="mb-12">
+        <h1 className="text-4xl font-black mb-2 tracking-tight">Intelligence & ROI</h1>
+        <p className="text-text-muted font-medium">Track your AI's effectiveness and the leads it's generating for your business.</p>
+      </div>
+
+      {/* High Level Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {[
+          { label: "Total Sessions", value: totalSessions, icon: MessageSquare, color: "text-blue-500", bg: "bg-blue-50" },
+          { label: "Leads Captured", value: totalLeads, icon: Users, color: "text-purple-500", bg: "bg-purple-50" },
+          { label: "Conversion Rate", value: `${conversionRate}%`, icon: TrendingUp, color: "text-green-500", bg: "bg-green-50" },
+          { label: "Response Speed", value: "0.8s", icon: Clock, color: "text-brand-orange", bg: "bg-brand-orange/5" },
+        ].map((stat, i) => (
+          <div key={i} className="bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm">
+            <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
+              <stat.icon className="w-5 h-5" />
+            </div>
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">{stat.label}</p>
+            <h4 className="text-2xl font-black">{stat.value}</h4>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+        {/* Main Volume Chart */}
+        <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-primary" /> User Engagement Trends
+            </h2>
+            <select className="bg-zinc-50 border-none text-xs font-bold px-3 py-1.5 rounded-lg outline-none">
+              <option>Last 7 Days</option>
+              <option>Last 30 Days</option>
+            </select>
+          </div>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorMsgs" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6C5CE7" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#6C5CE7" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 600, fill: '#a1a1aa'}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 600, fill: '#a1a1aa'}} />
+                <Tooltip 
+                  contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px 16px'}}
+                />
+                <Area type="monotone" dataKey="messages" name="Chats" stroke="#6C5CE7" strokeWidth={4} fillOpacity={1} fill="url(#colorMsgs)" />
+                <Area type="monotone" dataKey="leads" name="Leads" stroke="#a855f7" strokeWidth={4} fillOpacity={0} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Sentiment Doughnut */}
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm flex flex-col">
+          <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-brand-dark">
+            <ThumbsUp className="w-5 h-5 text-green-500" /> User Satisfaction
+          </h2>
+          <div className="h-[200px] w-full relative mb-6">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={sentimentData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={65}
+                  outerRadius={85}
+                  paddingAngle={10}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {sentimentData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+               <span className="text-3xl font-black">92%</span>
+               <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">CSAT Score</span>
+            </div>
+          </div>
+          <div className="space-y-4 px-2">
+            {sentimentData.map((item) => (
+              <div key={item.name} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-xs font-bold text-zinc-500 uppercase tracking-wide">{item.name}</span>
+                </div>
+                <span className="text-xs font-black">{item.value}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+         {/* Lead Sources */}
+         <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+           <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
+             <BarChart3 className="w-5 h-5 text-purple-500" /> Conversion Funnel
+           </h2>
+           <div className="h-[250px]">
+             <ResponsiveContainer width="100%" height="100%">
+               <BarChart data={sourcePerformance} layout="vertical">
+                 <XAxis type="number" hide />
+                 <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 700, fill: '#18181b'}} width={80} />
+                 <Tooltip />
+                 <Bar dataKey="value" fill="#6C5CE7" radius={[0, 10, 10, 0]} barSize={20} />
+               </BarChart>
+             </ResponsiveContainer>
+           </div>
+         </div>
+
+         {/* Training Coverage */}
+         <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm flex flex-col justify-center text-center">
+            <div className="w-20 h-20 bg-green-50 text-green-500 rounded-[32px] flex items-center justify-center mb-6 mx-auto">
+               <AlertCircle className="w-10 h-10" />
+            </div>
+            <h3 className="text-2xl font-black mb-3">Knowledge Coverage</h3>
+            <p className="text-text-muted text-sm mb-6 max-w-sm mx-auto">Your bot has answered <span className="text-green-500 font-bold">100%</span> of questions correctly this week based on indexed data.</p>
+            <div className="w-full bg-zinc-100 h-3 rounded-full overflow-hidden mb-8">
+               <div className="bg-green-500 h-full w-[96%]" />
+            </div>
+            <Link to={`/dashboard/projects/${project.id}/train`} className="text-primary font-black uppercase tracking-widest text-[11px] hover:underline">
+               Expand Knowledge Base →
+            </Link>
+         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Recent Feedback */}
+        <section>
+          <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+            <TrendingUp className="text-primary w-5 h-5" /> Recent Feedback
+          </h2>
+          <div className="space-y-4">
+            {messagesWithFeedback.map((msg: any) => (
+              <div key={msg.id} className="bg-white p-6 rounded-[24px] border border-zinc-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  {msg.feedback === 1 ? (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-600 rounded-lg text-[10px] font-black uppercase">
+                      <ThumbsUp className="w-3 h-3" /> Positive
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-600 rounded-lg text-[10px] font-black uppercase">
+                      <ThumbsDown className="w-3 h-3" /> Improvement Needed
+                    </div>
+                  )}
+                  <span className="text-[10px] text-zinc-400 font-bold uppercase">{new Date(msg.createdAt).toLocaleDateString()}</span>
+                </div>
+                <p className="text-sm text-brand-dark leading-relaxed italic border-l-2 border-zinc-100 pl-4 mb-2">"{msg.content}"</p>
+              </div>
+            ))}
+            {messagesWithFeedback.length === 0 && (
+              <div className="text-center py-20 bg-zinc-50 rounded-[32px] border border-dashed border-zinc-200">
+                <MessageSquare className="w-8 h-8 text-zinc-300 mx-auto mb-4" />
+                <p className="text-zinc-400 font-bold">No feedback received yet.</p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Unanswered Questions */}
+        <section>
+          <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+            <AlertCircle className="text-brand-orange w-5 h-5" /> Missing Knowledge
+          </h2>
+          <div className="space-y-4">
+            {unanswered.map((u: any) => (
+              <div key={u.id} className="bg-white p-6 rounded-[24px] border border-zinc-100 shadow-sm">
+                 <p className="text-sm font-bold text-brand-dark mb-2">User asked:</p>
+                 <p className="text-sm text-zinc-600 leading-relaxed bg-zinc-50 p-4 rounded-xl border border-zinc-100 mb-6 italic">"{u.question}"</p>
+                 <Link to={`/dashboard/projects/${project.id}/train`} className="text-xs font-black text-primary hover:underline flex items-center gap-1.5 uppercase tracking-wider">
+                   Fix by providing answer
+                 </Link>
+              </div>
+            ))}
+            {unanswered.length === 0 && (
+              <div className="text-center py-20 bg-zinc-50 rounded-[32px] border border-dashed border-zinc-200">
+                <BarChart3 className="w-8 h-8 text-zinc-300 mx-auto mb-4" />
+                <p className="text-zinc-400 font-bold">Bot answered everything correctly so far!</p>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}

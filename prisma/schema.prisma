@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String
+  role             String    @default("USER") // OWNER, ADMIN, USER
+  subscriptionTier String    @default("free")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  projects         Project[]
+  subscriptions    BillingSubscription[]
+  sessions         ChatSession[]
+  usageRecords     UsageRecord[]
+  blogPosts        BlogPost[]
+}
+
+model BlogPost {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  excerpt         String   @db.Text
+  content         String   @db.Text
+  coverImage      String?
+  metaTitle       String?
+  seoTitle        String?
+  metaDescription String?  @db.Text
+  seoDescription  String?  @db.Text
+  tags            String?  // Store as comma-separated string or Json
+  published       Boolean  @default(false)
+  authorId        String
+  author          User     @relation(fields: [authorId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Project {
+  id               String            @id @default(cuid())
+  name             String
+  userId           String
+  user             User              @relation(fields: [userId], references: [id])
+  settings         Json?             // systemPrompt, branding, colors, theme, customDomain, removeBranding
+  webhookUrl       String?           // For Slack/Discord or custom alerts
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  knowledgeSources KnowledgeSource[]
+  leads            Lead[]
+  sessions         ChatSession[]
+  unansweredQuestions UnansweredQuestion[]
+  analyticsSnapshots  AnalyticsSnapshot[]
+  integrations         Integration[]
+}
+
+model Integration {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  provider     String   // 'notion', 'google_drive'
+  accessToken  String
+  refreshToken String?
+  details      Json?    // e.g., workspace name, user email
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([projectId, provider])
+}
+
+model KnowledgeSource {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  type      String   // 'web', 'file', 'youtube', 'text'
+  source    String   // URL or Filename
+  title     String?
+  content   String?  @db.Text
+  metadata  Json?    // e.g., file size, specific youtube ID metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatSession {
+  id          String    @id @default(cuid())
+  projectId   String    
+  project     Project   @relation(fields: [projectId], references: [id])
+  userId      String?   
+  user        User?     @relation(fields: [userId], references: [id])
+  customerEmail String? // For guest identification
+  status      String    @default("active") // active, resolved
+  mode        String    @default("ai") // ai, human
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  messages    Message[]
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id])
+  role      String      // 'user' or 'assistant'
+  content   String      @db.Text
+  feedback  Int?        // 1 for thumbs up, -1 for thumbs down
+  createdAt DateTime    @default(now())
+}
+
+model UsageRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String   // 'chat_message', 'crawled_page', 'file_upload'
+  amount    Int      @default(1)
+  createdAt DateTime @default(now())
+}
+
+model BillingSubscription {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+  stripeSubscriptionId String   @unique
+  stripeCustomerId     String
+  status               String
+  planId               String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  name      String?
+  email     String?
+  phone     String?
+  company   String?
+  createdAt DateTime @default(now())
+}
+
+model UnansweredQuestion {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  question  String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model AnalyticsSnapshot {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id])
+  date            DateTime @default(now())
+  messagesCount   Int      @default(0)
+  leadsCaptured   Int      @default(0)
+  avgLatency      Float?
+  unansweredCount Int      @default(0)
+}

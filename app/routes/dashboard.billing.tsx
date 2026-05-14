@@ -1,0 +1,320 @@
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
+import { requireUserId, getUser } from "~/backend/auth.server";
+import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const userId = await requireUserId(request);
+  const user = await getUser(request);
+  return json({ user });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const userId = await requireUserId(request);
+  const user = await getUser(request);
+  const formData = await request.formData();
+  const planId = formData.get("plan") as string;
+
+  if (!planId) {
+    return json({ error: "Invalid plan" }, { status: 400 });
+  }
+
+  // Return Paddle signal to the client
+  return json({ checkoutPlanId: planId, userEmail: user?.email });
+}
+
+export default function Billing() {
+  const { user } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
+  const [activeFaq, setActiveFaq] = useState<number | null>(null);
+  const [calcMessages, setCalcMessages] = useState(5000);
+  
+  const isSubmitting = navigation.state === "submitting";
+  const submittingPlanId = navigation.formData?.get("plan");
+
+  useEffect(() => {
+    if (actionData && 'checkoutPlanId' in actionData) {
+       // @ts-ignore
+      if (typeof Paddle !== 'undefined') {
+        // @ts-ignore
+        Paddle.Checkout.open({ 
+          product: actionData.checkoutPlanId, 
+          email: actionData.userEmail || "" 
+        });
+      } else {
+        alert(`Paddle Checkout for ${actionData.checkoutPlanId} would open here.`);
+      }
+    }
+  }, [actionData]);
+
+  const plans = [
+    {
+      id: "starter_plan",
+      name: "Starter",
+      monthlyPrice: 39,
+      yearlyPrice: 19,
+      description: "Perfect for personal projects",
+      features: ["1 Chatbot", "1,000 Messages/mo", "50 Pages Crawled", "Basic AI Model"],
+      current: user?.subscriptionTier === "starter_plan",
+    },
+    {
+      id: "growth_plan",
+      name: "Growth",
+      monthlyPrice: 99,
+      yearlyPrice: 59,
+      popular: true,
+      description: "For growing businesses",
+      features: ["3 Chatbots", "5,000 Messages/mo", "500 Pages Crawled", "GPT-4o Access", "No Branding"],
+      current: user?.subscriptionTier === "growth_plan",
+    },
+    {
+      id: "pro_plan",
+      name: "Scale",
+      monthlyPrice: 299,
+      yearlyPrice: 199,
+      description: "For high-traffic sites",
+      features: ["Unlimited Chatbots", "25,000 Messages/mo", "Unlimited Crawls", "Premium Support", "API Access"],
+      current: user?.subscriptionTier === "pro_plan",
+    },
+    {
+      id: "enterprise_plan",
+      name: "Enterprise",
+      price: "Custom",
+      description: "Tailored solutions",
+      features: ["White Label", "Dedicated Account Manager", "Custom LLM Training", "On-premise Deployment"],
+      current: user?.subscriptionTier === "enterprise_plan",
+    },
+  ];
+
+  const faqs = [
+    { q: "Can I cancel anytime?", a: "Yes, you can cancel your subscription at any time from your dashboard settings. No questions asked." },
+    { q: "What happens if I exceed my message limit?", a: "The bot will continue to work, but we'll notify you to upgrade or purchase an add-on pack for extra messages." },
+    { q: "Do you offer a free trial?", a: "We have a generous free tier to get you started. Pricing plans are for when you need more capacity and features." },
+    { q: "Can I use my own OpenAI API key?", a: "Our Pro and Enterprise plans allow you to use your own API keys for full control over model usage and costs." }
+  ];
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-12">
+      {/* Header */}
+      <div className="text-center mb-16">
+        <h1 className="text-4xl md:text-6xl font-black mb-6 font-display tracking-tight text-zinc-900">
+          The right plan for <br /> <span className="text-primary italic">every</span> stage.
+        </h1>
+        
+        {/* Toggle */}
+        <div className="flex items-center justify-center gap-4">
+          <span className={`text-sm font-bold ${billingCycle === 'monthly' ? 'text-zinc-900' : 'text-zinc-400'}`}>Monthly</span>
+          <button 
+            type="button"
+            onClick={() => setBillingCycle(prev => prev === 'monthly' ? 'yearly' : 'monthly')}
+            className="w-14 h-8 bg-zinc-100 rounded-full p-1 transition-colors relative"
+          >
+            <motion.div 
+              animate={{ x: billingCycle === 'yearly' ? 24 : 0 }}
+              className="w-6 h-6 bg-primary rounded-full shadow-lg shadow-primary/20"
+            />
+          </button>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm font-bold ${billingCycle === 'yearly' ? 'text-zinc-900' : 'text-zinc-400'}`}>Yearly</span>
+            <span className="px-2 py-1 bg-green-100 text-green-600 text-[10px] font-black rounded-lg uppercase tracking-tighter shadow-sm border border-green-200">
+              Save 40%
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Plans Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-24">
+        {plans.map((plan) => (
+          <div 
+            key={plan.id}
+            className={`relative p-8 bg-white border rounded-[40px] flex flex-col transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 group ${
+              plan.popular ? "border-primary ring-4 ring-primary/5 shadow-xl shadow-primary/10 -translate-y-2" : "border-zinc-100"
+            }`}
+          >
+            {plan.popular && (
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-primary text-white text-[11px] font-black rounded-full uppercase tracking-widest shadow-xl">
+                Most Popular
+              </div>
+            )}
+            
+            <div className="mb-8">
+              <h3 className="text-xl font-black mb-1 font-display">{plan.name}</h3>
+              <p className="text-zinc-400 text-xs font-bold mb-6">{plan.description}</p>
+              <div className="flex items-baseline gap-1">
+                {plan.price ? (
+                  <span className="text-4xl font-black font-display">{plan.price}</span>
+                ) : (
+                  <>
+                    <span className="text-4xl font-black font-display">
+                      ${billingCycle === 'monthly' ? plan.monthlyPrice : plan.yearlyPrice}
+                    </span>
+                    <span className="text-zinc-400 text-sm font-bold">/mo</span>
+                  </>
+                )}
+              </div>
+            </div>
+            
+            <ul className="space-y-4 mb-10 flex-1">
+              {plan.features.map((feature) => (
+                <li key={feature} className="flex items-start gap-3 text-sm font-bold text-zinc-600">
+                  <div className="w-5 h-5 bg-zinc-50 rounded-full flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-primary-muted transition-colors">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  {feature}
+                </li>
+              ))}
+            </ul>
+            
+            {plan.current ? (
+              <div className="w-full py-4 bg-zinc-50 text-zinc-400 rounded-3xl font-black text-center text-sm border border-zinc-100">
+                Current Plan
+              </div>
+            ) : (
+              <Form method="post">
+                <input type="hidden" name="plan" value={plan.id} />
+                <button 
+                  type="submit" 
+                  disabled={isSubmitting && submittingPlanId === plan.id}
+                  className={`w-full py-4 rounded-3xl font-black transition-all flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] ${
+                    plan.popular ? "bg-primary text-white shadow-xl shadow-primary/20" : "bg-white border-2 border-zinc-100 text-zinc-900 hover:border-primary"
+                  }`}
+                >
+                  {isSubmitting && submittingPlanId === plan.id ? <Loader2 className="w-5 h-5 animate-spin" /> : (plan.id === 'enterprise_plan' ? 'Contact Sales' : 'Start Trial')}
+                </button>
+              </Form>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Pricing Calculator */}
+      <div className="mb-24 bg-zinc-50 rounded-[60px] p-12 border border-zinc-100">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row gap-16 items-center">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 text-primary font-black text-xs uppercase tracking-widest mb-4">
+              <Zap className="w-4 h-4" /> Usage calculator
+            </div>
+            <h3 className="text-3xl font-black mb-6 font-display text-zinc-900">Configure your volume</h3>
+            <p className="text-zinc-500 font-bold mb-10">Select your monthly message volume to see how it scales across models.</p>
+            
+            <div className="space-y-6">
+              <input 
+                type="range" 
+                min="1000" 
+                max="50000" 
+                step="1000"
+                value={calcMessages}
+                onChange={(e) => setCalcMessages(parseInt(e.target.value))}
+                className="w-full h-2 bg-zinc-200 rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-xs font-black text-zinc-400 uppercase tracking-tighter">
+                <span>1,000 messages</span>
+                <span>50,000 messages</span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="w-full md:w-80 bg-white p-8 rounded-[40px] shadow-sm border border-zinc-100">
+            <div className="space-y-6">
+              <div className="pb-6 border-b border-zinc-50">
+                <span className="text-zinc-400 text-xs font-black uppercase tracking-widest block mb-2">Total Monthly Access</span>
+                <span className="text-4xl font-black font-display text-primary">{calcMessages.toLocaleString()}</span>
+              </div>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="font-bold text-zinc-600">GPT-4o Mini</span>
+                  <span className="font-black text-zinc-900">Included</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="font-bold text-zinc-600">GPT-4o Pro</span>
+                  <span className="font-black text-zinc-900">1 free / 10msg</span>
+                </div>
+              </div>
+              <button className="w-full py-4 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all">
+                Try Capacity
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Add-ons */}
+      <div className="mb-24 px-12">
+        <h3 className="text-3xl font-black mb-12 font-display text-center">Power-ups & Add-ons</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+           <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
+             <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
+               <MessageSquare className="w-8 h-8 text-primary" />
+             </div>
+             <div>
+               <h4 className="text-xl font-black mb-1 font-display">Extra Messages</h4>
+               <p className="text-sm font-bold text-zinc-400 mb-2">Add 10,000 extra messages to your quota.</p>
+               <span className="text-primary font-black">+ $19/mo</span>
+             </div>
+             <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
+           </div>
+
+           <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
+             <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
+               <Globe className="w-8 h-8 text-primary" />
+             </div>
+             <div>
+               <h4 className="text-xl font-black mb-1 font-display">Custom Domains</h4>
+               <p className="text-sm font-bold text-zinc-400 mb-2">Host the widget on your own subdomain.</p>
+               <span className="text-primary font-black">+ $29/mo</span>
+             </div>
+             <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
+           </div>
+        </div>
+      </div>
+
+      {/* FAQs */}
+      <div className="max-w-3xl mx-auto mb-24">
+        <h2 className="text-4xl font-black mb-12 text-center font-display text-zinc-900 border-b-4 border-primary/20 pb-4 inline-block mx-auto w-full">Common Questions</h2>
+        <div className="space-y-4">
+          {faqs.map((faq, i) => (
+            <div key={i} className="border-b border-zinc-100">
+              <button 
+                onClick={() => setActiveFaq(activeFaq === i ? null : i)}
+                className="w-full py-6 flex items-center justify-between group"
+              >
+                <span className="text-lg font-black text-left font-display group-hover:text-primary transition-colors text-zinc-900">{faq.q}</span>
+                <ChevronDown className={`w-5 h-5 text-zinc-300 transition-transform duration-300 ${activeFaq === i ? 'rotate-180 text-primary' : ''}`} />
+              </button>
+              <AnimatePresence>
+                {activeFaq === i && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <p className="pb-6 text-zinc-500 font-bold leading-relaxed">{faq.a}</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Final CTA */}
+      <div className="text-center p-20 bg-primary rounded-[60px] text-white shadow-2xl shadow-primary/20 relative overflow-hidden group">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.1)_0%,transparent_70%)] animate-pulse" />
+        <div className="relative z-10">
+          <h2 className="text-5xl font-black mb-6 font-display">Still have questions?</h2>
+          <p className="text-xl opacity-80 mb-10 font-bold max-w-lg mx-auto">Our team is ready to help you find the perfect setup for your business needs.</p>
+          <button className="px-10 py-5 bg-white text-primary rounded-3xl font-black text-lg hover:scale-105 active:scale-95 transition-all shadow-xl">
+            Chat with an Expert
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

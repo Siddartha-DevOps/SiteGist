@@ -1,0 +1,5 @@
+{
+  "name": "sitegist-party",
+  "main": "party/main.ts",
+  "compatibilityDate": "2023-05-26"
+}
