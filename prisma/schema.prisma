@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 model User {
@@ -33,7 +34,7 @@ model BlogPost {
   seoTitle        String?
   metaDescription String?  @db.Text
   seoDescription  String?  @db.Text
-  tags            String?  // Store as comma-separated string or Json
+  tags            Json?  // Store as in quotes-separated or Json
   published       Boolean  @default(false)
   authorId        String
   author          User     @relation(fields: [authorId], references: [id])
