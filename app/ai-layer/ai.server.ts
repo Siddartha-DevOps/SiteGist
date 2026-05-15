@@ -48,13 +48,16 @@ function getGemini(): GoogleGenerativeAI | null {
       "VITE_GEMINI_API_KEY",
       "GOOGLE_GENERATIVE_AI_API_KEY",
       "GOOGLE_GENAI_API_KEY",
+      "AI_API_KEY",
     ];
     
     let rawKey = null;
+    let foundVar = "";
     for (const key of searchKeys) {
       if (process.env[key]) {
         console.log(`[AI] Using Gemini key from ${key}`);
         rawKey = process.env[key];
+        foundVar = key;
         break;
       }
     }
@@ -66,7 +69,11 @@ function getGemini(): GoogleGenerativeAI | null {
     }
     
     // Diagnostic
-    console.log(`[AI] Initializing Gemini with key from ${rawKey === process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : "another variable"}. Key length: ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
+    if (apiKey.startsWith("sk-")) {
+      console.warn(`[AI] WARNING: Key in ${foundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza".`);
+    }
+
+    console.log(`[AI] Initializing Gemini with key from ${foundVar}. Key length: ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
     _gemini = new GoogleGenerativeAI(apiKey);
   }
   return _gemini;
@@ -361,7 +368,18 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   } 
 
   if (!fullAnswer) {
-    const errorMsg = lastError?.message || "All AI providers failed to respond. Please check your API keys.";
+    let errorMsg = lastError?.message || "All AI providers failed to respond. Please check your API keys.";
+    
+    // Check if it's a common key mismatch
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.AI_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+
+    if (geminiKey?.startsWith("sk-")) {
+      errorMsg += " (Hint: Your Gemini API Key starts with 'sk-', which looks like an OpenAI key. Please swap them in Settings.)";
+    } else if (openaiKey?.startsWith("AIza")) {
+      errorMsg += " (Hint: Your OpenAI API Key starts with 'AIza', which looks like a Gemini key. Please swap them in Settings.)";
+    }
+
     yield `[ERROR] ${errorMsg}`;
     return;
   }
