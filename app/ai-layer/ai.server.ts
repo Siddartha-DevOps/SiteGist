@@ -10,36 +10,109 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
     allKeys: Object.keys(process.env).filter(k => k.includes("KEY") || k.includes("API")).sort()
   });
 
+function cleanKey(val: any): string | null {
+  if (!val || typeof val !== "string") return null;
+  
+  let raw = val.trim();
+  
+  // Handle case where user pastes "GEMINI_API_KEY=AIZa..."
+  const envMatch = raw.match(/^[A-Z0-9_]+=(.*)$/s);
+  if (envMatch) {
+    raw = envMatch[1].trim();
+  }
+
+  // Remove ALL whitespace and non-printable characters. 
+  // API keys (Gemini, OpenAI, Anthropic, etc.) are contiguous strings.
+  let cleaned = raw.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+  
+  // Basic check for dummy values
+  const dummyValues = ["your_gemini_api_key", "your_openai_api_key", "your_portkey_api_key", "null", "undefined", "", "true", "false", "your-key-here", "placeholder"];
+  if (dummyValues.includes(cleaned.toLowerCase())) {
+    return null;
+  }
+  
+  // Remove wrapping single or double quotes which users sometimes copy-paste
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.substring(1, cleaned.length - 1).trim();
+    // Re-clean just in case there were spaces inside the quotes
+    cleaned = cleaned.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+  }
+  return cleaned;
+}
+
+function getDiagnosticInfo(key: string | null | undefined): string {
+  if (!key) return "NOT_FOUND";
+  const length = key.length;
+  const start = key.substring(0, 7);
+  const end = key.slice(-4);
+  
+  // Check for hidden characters
+  const hiddenChars = [];
+  for (let i = 0; i < key.length; i++) {
+    const code = key.charCodeAt(i);
+    if (code < 32 || code > 126) {
+      hiddenChars.push(`pos ${i}: hex ${code.toString(16)}`);
+    }
+  }
+  
+  let info = `Length: ${length}, First 7: "${start}"... Last 4: "${end}"`;
+  if (hiddenChars.length > 0) {
+    info += ` | WARNING: ${hiddenChars.length} hidden chars found (${hiddenChars.slice(0, 3).join(", ")})`;
+  }
+  return info;
+}
+
 let _openai: OpenAI | null = null;
+let _openaiFoundVar = "none";
+
 function getOpenAI() {
   if (!_openai) {
     const portkey = getPortkey();
-    if (portkey) return portkey;
+    // Only use Portkey if it's explicitly configured with a pk- key
+    const pkKey = process.env.PORTKEY_API_KEY?.trim();
+    if (portkey && pkKey && pkKey.startsWith("pk-")) {
+      console.log("[AI] Initializing OpenAI via Portkey");
+      _openai = portkey as any;
+      return _openai;
+    }
 
     const searchKeys = ["OPENAI_API_KEY", "VITE_OPENAI_API_KEY"];
+    
+    // Diagnostic: Log all candidate keys found
+    console.log("[AI] Scanning for OpenAI keys...");
+    for (const key of searchKeys) {
+      const val = process.env[key];
+      if (val) {
+        console.log(`  - ${key}: ${cleanKey(val) ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+      }
+    }
+
     let rawKey = null;
     for (const key of searchKeys) {
-      if (process.env[key]) {
-        console.log(`[AI] Using OpenAI key from ${key}`);
-        rawKey = process.env[key];
+      const val = process.env[key];
+      const cleaned = cleanKey(val);
+      if (cleaned) {
+        rawKey = cleaned;
+        _openaiFoundVar = key;
         break;
       }
     }
       
-    const apiKey = rawKey?.trim();
-    if (!apiKey) {
+    if (!rawKey) {
       console.warn("[AI] OpenAI API Key not found. Checked:", searchKeys.join(", "));
       return null;
     }
 
     // Diagnostic
-    console.log(`[AI] Initializing OpenAI with key of length ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
-    _openai = new OpenAI({ apiKey });
+    console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(rawKey)}`);
+    _openai = new OpenAI({ apiKey: rawKey });
   }
   return _openai;
 }
 
 let _gemini: GoogleGenerativeAI | null = null;
+let _geminiFoundVar = "none";
+
 function getGemini(): GoogleGenerativeAI | null {
   if (!_gemini) {
     const searchKeys = [
@@ -51,30 +124,40 @@ function getGemini(): GoogleGenerativeAI | null {
       "AI_API_KEY",
     ];
     
-    let rawKey = null;
-    let foundVar = "";
+    // Diagnostic: Log all candidate keys found
+    console.log("[AI] Scanning for Gemini keys...");
     for (const key of searchKeys) {
-      if (process.env[key]) {
-        console.log(`[AI] Using Gemini key from ${key}`);
-        rawKey = process.env[key];
-        foundVar = key;
+      const val = process.env[key];
+      if (val) {
+        console.log(`  - ${key}: ${cleanKey(val) ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+      }
+    }
+
+    let rawKey = null;
+    for (const key of searchKeys) {
+      const val = process.env[key];
+      const cleaned = cleanKey(val);
+      if (cleaned) {
+        rawKey = cleaned;
+        _geminiFoundVar = key;
         break;
       }
     }
 
-    const apiKey = rawKey?.trim();
-    if (!apiKey) {
+    if (!rawKey) {
       console.warn("[AI] Gemini API Key not found in any of the environment variables:", searchKeys.join(", "));
       return null;
     }
     
     // Diagnostic
-    if (apiKey.startsWith("sk-")) {
-      console.warn(`[AI] WARNING: Key in ${foundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza".`);
+    if (rawKey.startsWith("sk-")) {
+      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza".`);
+    } else if (!rawKey.startsWith("AIza")) {
+      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} does NOT start with "AIza". Gemini keys usually start with "AIza". Diagnostic: ${getDiagnosticInfo(rawKey)}`);
     }
 
-    console.log(`[AI] Initializing Gemini with key from ${foundVar}. Key length: ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
-    _gemini = new GoogleGenerativeAI(apiKey);
+    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(rawKey)}`);
+    _gemini = new GoogleGenerativeAI(rawKey);
   }
   return _gemini;
 }
@@ -320,52 +403,80 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   let fullAnswer = "";
   let lastError: any = null;
 
-  if (gemini) {
-    try {
-      const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContentStream([{ text: prompt }]);
-      
-      for await (const chunk of result.stream) {
-        try {
-          const chunkText = chunk.text();
-          if (chunkText) {
-            fullAnswer += chunkText;
-            yield chunkText;
+  // Add a safety timeout for the entire generation process
+  const generationTimeout = setTimeout(() => {
+    if (!fullAnswer && !lastError) {
+      lastError = { message: "Generation timed out after 30 seconds." };
+    }
+  }, 30000);
+
+  try {
+    if (gemini) {
+      try {
+        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash stream...`);
+        
+        // Use a 20s timeout for the fetch itself if possible (Gemini SDK uses fetch)
+        const result = await model.generateContentStream([{ text: prompt }]);
+        
+        for await (const chunk of result.stream) {
+          try {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              fullAnswer += chunkText;
+              yield chunkText;
+            }
+          } catch (chunkError: any) {
+            console.warn("[RAG Audit] Stage 7: Error parsing Gemini chunk:", chunkError);
+            if (chunk.promptFeedback?.blockReason) {
+              console.error("[RAG Audit] Gemini Blocked prompt:", chunk.promptFeedback.blockReason);
+            }
           }
-        } catch (chunkError) {
-          console.warn("[RAG Audit] Stage 7: Error parsing Gemini chunk:", chunkError);
         }
+      } catch (e: any) {
+        console.error("[RAG Audit] Stage 6/7 Gemini Error Detail:", e);
+        let errorMsg = e.message || String(e);
+        if (errorMsg.includes("API key not valid")) {
+           errorMsg = `[API_KEY_INVALID] Google AI Studio rejected the key. Variable: ${_geminiFoundVar}. Diagnostic: ${getDiagnosticInfo(process.env[_geminiFoundVar])}. Ensure you use a valid key from aistudio.google.com.`;
+        } else if (errorMsg.includes("quota")) {
+           errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait or use OpenAI.`;
+        }
+        lastError = { message: errorMsg || "Gemini connection failed" };
       }
-    } catch (e: any) {
-      console.error("[RAG Audit] Stage 6/7 Gemini Error:", e);
-      lastError = e;
     }
+
+    if (openai && !fullAnswer) {
+      try {
+        const model = process.env.PORTKEY_MODEL || "gpt-4o-mini";
+        const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "1024", 10);
+        
+        console.log(`[RAG Audit] Stage 8: Calling OpenAI ${model}...`);
+        const stream = await (openai as any).chat.completions.create({
+          model: model,
+          stream: true,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: maxTokens,
+        }, { timeout: 20000 }); // 20s timeout
+
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            fullAnswer += content;
+            yield content;
+          }
+        }
+      } catch (e: any) {
+         console.error("[RAG Audit] OpenAI Error:", e);
+         let errorMsg = e.message || String(e);
+         if (errorMsg.includes("Invalid API Key") || errorMsg.includes("Incorrect API key") || errorMsg.includes("401")) {
+            errorMsg = `[API_KEY_INVALID] OpenAI rejected the key. Variable: ${_openaiFoundVar}. Diagnostic: ${getDiagnosticInfo(process.env[_openaiFoundVar])}. Ensure it starts with "sk-" and has no weird spaces.`;
+         }
+         lastError = { message: errorMsg || "OpenAI connection failed" };
+      }
+    } 
+  } finally {
+    clearTimeout(generationTimeout);
   }
-
-  if (openai && !fullAnswer) {
-    try {
-      const model = process.env.PORTKEY_MODEL || "gpt-4o-mini";
-      const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "1024", 10);
-      
-      const stream = await (openai as any).chat.completions.create({
-        model: model,
-        stream: true,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: maxTokens,
-      });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          fullAnswer += content;
-          yield content;
-        }
-      }
-    } catch (e: any) {
-       console.error("[RAG Audit] OpenAI Error:", e);
-       lastError = e;
-    }
-  } 
 
   if (!fullAnswer) {
     let errorMsg = lastError?.message || "All AI providers failed to respond. Please check your API keys.";

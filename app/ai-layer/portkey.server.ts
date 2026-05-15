@@ -8,21 +8,52 @@ let _portkey: Portkey | null = null;
 
 export function getPortkey() {
   if (!_portkey) {
-    const apiKey = process.env.PORTKEY_API_KEY?.trim();
-    const virtualKey = process.env.PORTKEY_VIRTUAL_KEY?.trim();
+    let rawApiKey = process.env.PORTKEY_API_KEY;
+    let rawVirtualKey = process.env.PORTKEY_VIRTUAL_KEY;
     
-    if (!apiKey) {
-      console.warn("PORTKEY_API_KEY is not defined. Falling back to standard OpenAI calls if available.");
+    if (!rawApiKey) {
+      console.warn("PORTKEY_API_KEY is not defined. Falling back to standard AI calls.");
       return null;
     }
 
-    if (!apiKey.startsWith("pk-")) {
-      console.warn(`[Portkey] PORTKEY_API_KEY does not start with "pk-". It might be a virtual key by mistake.apiKey Masked: ${apiKey.substring(0, 4)}...${apiKey.slice(-4)}`);
+    // Clean API Key
+    let apiKey = rawApiKey.trim();
+    if (apiKey.includes("=")) {
+      const match = apiKey.match(/^[A-Z0-9_]+=(.*)$/s);
+      if (match) apiKey = match[1].trim();
+    }
+    apiKey = apiKey.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+    if ((apiKey.startsWith('"') && apiKey.endsWith('"')) || (apiKey.startsWith("'") && apiKey.endsWith("'"))) {
+      apiKey = apiKey.substring(1, apiKey.length - 1).trim();
+      apiKey = apiKey.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+    }
+
+    // Clean Virtual Key
+    let virtualKey = rawVirtualKey?.trim();
+    if (virtualKey) {
+      if (virtualKey.includes("=")) {
+        const match = virtualKey.match(/^[A-Z0-9_]+=(.*)$/s);
+        if (match) virtualKey = match[1].trim();
+      }
+      virtualKey = virtualKey.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+      if ((virtualKey.startsWith('"') && virtualKey.endsWith('"')) || (virtualKey.startsWith("'") && virtualKey.endsWith("'"))) {
+        virtualKey = virtualKey.substring(1, virtualKey.length - 1).trim();
+        virtualKey = virtualKey.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+      }
+    }
+    
+    if (!apiKey || apiKey === "your_portkey_api_key" || !apiKey.startsWith("pk-")) {
+      if (apiKey && !apiKey.startsWith("pk-") && apiKey.length > 0) {
+        console.warn(`[Portkey] PORTKEY_API_KEY does not start with "pk-". It might be an OpenAI key by mistake. Ignoring Portkey.`);
+      } else {
+        console.warn("PORTKEY_API_KEY is not defined or is placeholder. Falling back to standard AI calls.");
+      }
+      return null;
     }
 
     _portkey = new Portkey({
       apiKey,
-      virtualKey, // This maps to your OpenAI/Gemini/etc. credentials in Portkey
+      virtualKey,
     });
   }
   return _portkey;

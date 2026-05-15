@@ -28,8 +28,6 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
     setIsTyping(true);
 
     try {
-      // For demo purposes on the landing page, we use a placeholder project ID if none exists
-      // In a real app, this would be the actual ID of the site's help bot
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -40,12 +38,15 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         }),
       });
 
-      if (!response.ok) throw new Error("Failed to send message");
-      if (!response.body) return;
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+      if (!response.body) throw new Error("Response body is empty");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = "";
+      let buffer = "";
 
       // Add empty assistant message to start streaming into
       const assistantStartTime = new Date();
@@ -55,44 +56,55 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const raw = decoder.decode(value);
-        const chunks = raw.split("\n\n");
-        for (const chunk of chunks) {
-          if (chunk.startsWith("data: ")) {
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        // Keep the last partial line in the buffer
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          
+          if (trimmedLine.startsWith("data: ")) {
             try {
-              const data = JSON.parse(chunk.slice(6));
+              const data = JSON.parse(trimmedLine.slice(6));
               if (data.content) {
-                if (data.content.startsWith("[ERROR]")) {
-                  const errorMsg = data.content.replace("[ERROR]", "").trim();
+                const content = data.content;
+                if (content.toLowerCase().includes("[error]")) {
+                  const errorMsg = content.replace(/\[ERROR\]/i, "").trim();
                   assistantMessage = `❌ Error: ${errorMsg}`;
                 } else {
-                  assistantMessage += data.content;
+                  assistantMessage += content;
                 }
                 
                 setMessages((prev) => {
                   const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = {
-                    role: "assistant",
-                    content: assistantMessage,
-                  };
+                  const lastIndex = newMessages.length - 1;
+                  if (newMessages[lastIndex].role === "assistant") {
+                    newMessages[lastIndex] = {
+                      ...newMessages[lastIndex],
+                      content: assistantMessage,
+                    };
+                  }
                   return newMessages;
                 });
               }
-            } catch (e) {}
-          } else if (chunk.startsWith("event: session")) {
-            try {
-              const dataPart = chunk.split("\ndata: ")[1] || chunk.split("data: ")[1];
-              const data = JSON.parse(dataPart);
-              if (data.sessionId) setSessionId(data.sessionId);
-            } catch (e) {}
+            } catch (e) {
+              console.warn("Failed to parse SSE data line:", trimmedLine);
+            }
+          } else if (trimmedLine.startsWith("event: session")) {
+            // Wait for next 'data' line which follows session event
+          } else if (trimmedLine.startsWith("event: metadata")) {
+             // Metadata context...
           }
         }
       }
     } catch (error) {
       console.error("Chat Error:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Sorry, I had trouble connecting. Please try again later." },
+        { role: "assistant", content: `⚠️ Connection Error: ${errorMsg}. Please check your internet or API keys.` },
       ]);
     } finally {
       setIsTyping(false);

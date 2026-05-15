@@ -197,7 +197,7 @@ export async function action({ request }: ActionFunctionArgs) {
         } catch (streamError) {
           console.error("[Chat] error in ReadableStream execution:", streamError);
           const msg = streamError instanceof Error ? streamError.message : "Internal streaming error";
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: `[Error] ${msg}` })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: `[ERROR] ${msg}` })}\n\n`));
         } finally {
           console.log(`[Chat] Closing stream for project: ${projectId}`);
           controller.close();
