@@ -1,6 +1,7 @@
 import { Form, Link } from "@remix-run/react";
 import { Loader2 } from "lucide-react";
 import { Logo } from "~/frontend/components/Logo";
+import { Turnstile } from "@marsidev/react-turnstile";
 
 interface SignupPageProps {
   error?: string;
@@ -8,6 +9,8 @@ interface SignupPageProps {
 }
 
 export function SignupPage({ error, isSubmitting }: SignupPageProps) {
+  const siteKey = typeof window !== "undefined" ? (window as any).ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY : undefined;
+
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
       {/* Left Column: Branding */}
@@ -74,6 +77,12 @@ export function SignupPage({ error, isSubmitting }: SignupPageProps) {
                   I agree to the <Link to="/terms" className="text-primary font-bold">Terms of Service</Link> and <Link to="/privacy" className="text-primary font-bold">Privacy Policy</Link>.
                 </p>
               </div>
+              
+              {siteKey && (
+                <div className="flex justify-center">
+                  <Turnstile siteKey={siteKey} />
+                </div>
+              )}
               
               {error && (
                 <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-medium border border-red-100 italic">

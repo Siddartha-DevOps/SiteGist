@@ -4,6 +4,7 @@ import { useActionData, useNavigation } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
 import { getUserId } from "~/backend/auth.server";
 import { generateMagicLink } from "~/backend/magic-link.server";
+import { verifyTurnstile } from "~/backend/security.server";
 import { LoginPage } from "~/frontend/pages/Login";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -15,9 +16,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const email = formData.get("email");
+  const turnstileToken = formData.get("cf-turnstile-response");
 
   if (typeof email !== "string" || !email.includes("@")) {
     return json({ error: "Please enter a valid email address" }, { status: 400 });
+  }
+
+  // Verify Turnstile if key is provided
+  if (process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY) {
+    if (typeof turnstileToken !== "string" || !(await verifyTurnstile(turnstileToken))) {
+      return json({ error: "Security check failed. Please try again." }, { status: 400 });
+    }
   }
 
   try {

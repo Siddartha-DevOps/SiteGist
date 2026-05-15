@@ -26,6 +26,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       VITE_POSTHOG_KEY: process.env.VITE_POSTHOG_KEY,
       VITE_POSTHOG_HOST: process.env.VITE_POSTHOG_HOST,
       PARTYKIT_HOST: process.env.PARTYKIT_HOST,
+      VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: process.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY,
     },
   });
 }

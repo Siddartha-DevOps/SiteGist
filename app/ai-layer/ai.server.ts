@@ -32,8 +32,8 @@ function getOpenAI() {
       return null;
     }
 
-    // Diagnostic (masked)
-    console.log(`[AI] Initializing OpenAI with Key Masked: ${apiKey.substring(0, 4)}...${apiKey.slice(-4)}`);
+    // Diagnostic
+    console.log(`[AI] Initializing OpenAI with key of length ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
     _openai = new OpenAI({ apiKey });
   }
   return _openai;
@@ -61,15 +61,12 @@ function getGemini(): GoogleGenerativeAI | null {
 
     const apiKey = rawKey?.trim();
     if (!apiKey) {
-      console.warn("[AI] Gemini API Key not found. Checked:", searchKeys.join(", "));
+      console.warn("[AI] Gemini API Key not found in any of the environment variables:", searchKeys.join(", "));
       return null;
     }
     
-    // Diagnostic (masked)
-    console.log(`[AI] Initializing Gemini with Key Masked: ${apiKey.substring(0, 4)}...${apiKey.slice(-4)} (Length: ${apiKey.length})`);
-    if (apiKey.length < 20) {
-      console.warn("[AI] Gemini API Key seems suspiciously short. Check your settings.");
-    }
+    // Diagnostic
+    console.log(`[AI] Initializing Gemini with key from ${rawKey === process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : "another variable"}. Key length: ${apiKey.length}. Starts with: ${apiKey.substring(0, 7)}`);
     _gemini = new GoogleGenerativeAI(apiKey);
   }
   return _gemini;
@@ -312,7 +309,9 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   console.log(`[RAG Audit] Stage 6: Sending prompt to LLM (Length: ${prompt.length} chars)...`);
 
   const gemini = getGemini();
+  const openai = getOpenAI();
   let fullAnswer = "";
+  let lastError: any = null;
 
   if (gemini) {
     try {
@@ -332,10 +331,10 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       }
     } catch (e: any) {
       console.error("[RAG Audit] Stage 6/7 Gemini Error:", e);
+      lastError = e;
     }
   }
 
-  const openai = getOpenAI();
   if (openai && !fullAnswer) {
     try {
       const model = process.env.PORTKEY_MODEL || "gpt-4o-mini";
@@ -357,8 +356,15 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       }
     } catch (e: any) {
        console.error("[RAG Audit] OpenAI Error:", e);
+       lastError = e;
     }
   } 
+
+  if (!fullAnswer) {
+    const errorMsg = lastError?.message || "All AI providers failed to respond. Please check your API keys.";
+    yield `[ERROR] ${errorMsg}`;
+    return;
+  }
 
   // --- Answer Verification Layer ---
   console.log(`[Verification] Checking answer against context...`);

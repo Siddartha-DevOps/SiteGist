@@ -62,7 +62,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             try {
               const data = JSON.parse(chunk.slice(6));
               if (data.content) {
-                assistantMessage += data.content;
+                if (data.content.startsWith("[ERROR]")) {
+                  const errorMsg = data.content.replace("[ERROR]", "").trim();
+                  assistantMessage = `❌ Error: ${errorMsg}`;
+                } else {
+                  assistantMessage += data.content;
+                }
+                
                 setMessages((prev) => {
                   const newMessages = [...prev];
                   newMessages[newMessages.length - 1] = {

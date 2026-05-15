@@ -3,6 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useActionData, useNavigation } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
 import { createUserSession, getUserId, hashPassword } from "~/backend/auth.server";
+import { verifyTurnstile } from "~/backend/security.server";
 import { SignupPage } from "~/frontend/pages/Signup";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -15,9 +16,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const email = formData.get("email");
   const password = formData.get("password");
+  const turnstileToken = formData.get("cf-turnstile-response");
 
   if (typeof email !== "string" || typeof password !== "string") {
     return json({ error: "Invalid Form Data" }, { status: 400 });
+  }
+
+  // Verify Turnstile if key is provided
+  if (process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY) {
+    if (typeof turnstileToken !== "string" || !(await verifyTurnstile(turnstileToken))) {
+      return json({ error: "Security check failed. Please try again." }, { status: 400 });
+    }
   }
 
   const existingUser = await prisma.user.findUnique({ where: { email } });

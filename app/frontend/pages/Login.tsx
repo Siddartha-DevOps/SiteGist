@@ -1,6 +1,7 @@
 import { Form, Link } from "@remix-run/react";
 import { Loader2 } from "lucide-react";
 import { Logo } from "~/frontend/components/Logo";
+import { Turnstile } from "@marsidev/react-turnstile";
 
 interface LoginPageProps {
   error?: string;
@@ -10,6 +11,8 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ error, success, sentEmail, isSubmitting }: LoginPageProps) {
+  const siteKey = typeof window !== "undefined" ? (window as any).ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY : undefined;
+
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-bg p-8">
@@ -83,6 +86,12 @@ export function LoginPage({ error, success, sentEmail, isSubmitting }: LoginPage
                   placeholder="name@company.com"
                 />
               </div>
+              
+              {siteKey && (
+                <div className="flex justify-center">
+                  <Turnstile siteKey={siteKey} />
+                </div>
+              )}
               
               {error && (
                 <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-medium border border-red-100 italic">
