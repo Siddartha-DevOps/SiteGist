@@ -5,22 +5,29 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 model User {
-  id               String    @id @default(cuid())
-  email            String    @unique
-  passwordHash     String
-  role             String    @default("USER") // OWNER, ADMIN, USER
-  subscriptionTier String    @default("free")
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id               String                @id @default(cuid())
+  email            String                @unique
+  passwordHash     String?               // Make optional as we'll use magic links
+  role             String                @default("USER") // OWNER, ADMIN, USER
+  subscriptionTier String                @default("free")
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   projects         Project[]
   subscriptions    BillingSubscription[]
   sessions         ChatSession[]
   usageRecords     UsageRecord[]
   blogPosts        BlogPost[]
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }
 
 model BlogPost {
@@ -34,7 +41,7 @@ model BlogPost {
   seoTitle        String?
   metaDescription String?  @db.Text
   seoDescription  String?  @db.Text
-  tags            Json?  // Store as in quotes-separated or Json
+  tags            String?  // Store as comma-separated string or Json
   published       Boolean  @default(false)
   authorId        String
   author          User     @relation(fields: [authorId], references: [id])
@@ -123,10 +130,11 @@ model BillingSubscription {
   id                   String   @id @default(cuid())
   userId               String
   user                 User     @relation(fields: [userId], references: [id])
-  stripeSubscriptionId String   @unique
-  stripeCustomerId     String
+  externalSubscriptionId String   @unique // Renamed from stripeSubscriptionId
+  externalCustomerId     String           // Renamed from stripeCustomerId
   status               String
   planId               String
+  provider             String   @default("stripe") // "stripe" or "paddle"
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }

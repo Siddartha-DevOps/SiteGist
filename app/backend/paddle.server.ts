@@ -26,18 +26,20 @@ export function getPaddle() {
  */
 export async function verifyPaddleWebhook(request: Request) {
   const paddle = getPaddle();
-  if (!paddle) return null;
+  const secret = process.env.PADDLE_WEBHOOK_SECRET;
+  if (!paddle || !secret) {
+    console.error("Paddle or Webhook Secret not configured.");
+    return null;
+  }
 
   const signature = request.headers.get("paddle-signature") || "";
   const body = await request.text();
 
   try {
-    // Note: In modern Paddle billing (v3), we use the Notification Parser
-    // For legacy, it might be different. This is a generic implementation.
-    const eventData = JSON.parse(body);
+    const eventData = paddle.webhooks.unmarshal(body, secret, signature);
     return eventData;
   } catch (error) {
-    console.error("Paddle Webhook Parse Error:", error);
+    console.error("Paddle Webhook Verification Error:", error);
     return null;
   }
 }

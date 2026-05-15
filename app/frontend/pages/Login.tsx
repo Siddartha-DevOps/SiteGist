@@ -4,10 +4,32 @@ import { Logo } from "~/frontend/components/Logo";
 
 interface LoginPageProps {
   error?: string;
+  success?: boolean;
+  sentEmail?: string;
   isSubmitting: boolean;
 }
 
-export function LoginPage({ error, isSubmitting }: LoginPageProps) {
+export function LoginPage({ error, success, sentEmail, isSubmitting }: LoginPageProps) {
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-brand-bg p-8">
+        <div className="w-full max-w-md bg-white p-10 rounded-[32px] border border-brand-border shadow-xl text-center">
+          <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-8">
+            <svg className="w-10 h-10 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-extrabold font-display mb-4 text-brand-dark">Check your email</h1>
+          <p className="text-brand-gray mb-8 font-medium leading-relaxed">
+            We've sent a magic login link to <span className="text-brand-dark font-bold">{sentEmail}</span>. 
+            Click the link in the email to log in automatically.
+          </p>
+          <Link to="/login" className="text-primary font-bold hover:underline">Try another email</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
       {/* Left Column: Branding */}
@@ -46,8 +68,8 @@ export function LoginPage({ error, isSubmitting }: LoginPageProps) {
           </div>
           
           <div className="bg-white p-10 rounded-[32px] border border-brand-border shadow-xl shadow-brand-dark/5">
-            <h1 className="text-3xl font-extrabold font-display mb-2 text-brand-dark text-center">Welcome back</h1>
-            <p className="text-brand-gray text-center mb-10 font-medium">Log in to manage your AI assistants.</p>
+            <h1 className="text-3xl font-extrabold font-display mb-2 text-brand-dark text-center">Sign In</h1>
+            <p className="text-brand-gray text-center mb-10 font-medium">Enter your email for a passwordless magic link.</p>
             
             <Form method="post" className="space-y-6">
               <div>
@@ -56,21 +78,9 @@ export function LoginPage({ error, isSubmitting }: LoginPageProps) {
                   type="email" 
                   name="email" 
                   required 
-                  className="w-full px-5 py-4 bg-brand-bg border border-brand-border rounded-2xl focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none transition-all text-brand-dark placeholder:text-brand-gray/30"
+                  autoFocus
+                  className="w-full px-5 py-4 bg-brand-bg border border-brand-border rounded-2xl focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none transition-all text-brand-dark placeholder:text-brand-gray/30 font-sans"
                   placeholder="name@company.com"
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2.5 ml-1">
-                  <label className="block text-[11px] font-bold uppercase tracking-widest text-brand-gray">Password</label>
-                  <Link to="#" className="text-[11px] font-bold text-primary hover:underline">Forgot password?</Link>
-                </div>
-                <input 
-                  type="password" 
-                  name="password" 
-                  required 
-                  className="w-full px-5 py-4 bg-brand-bg border border-brand-border rounded-2xl focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none transition-all text-brand-dark placeholder:text-brand-gray/30"
-                  placeholder="••••••••"
                 />
               </div>
               
@@ -85,12 +95,13 @@ export function LoginPage({ error, isSubmitting }: LoginPageProps) {
                 disabled={isSubmitting}
                 className="w-full py-5 bg-primary text-white rounded-2xl font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center shadow-2xl shadow-primary/30"
               >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sign in"}
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Send Login Link"}
               </button>
             </Form>
             
-            <p className="mt-10 text-center text-[13px] text-brand-gray font-medium">
-              Don't have an account? <Link to="/signup" className="text-primary font-bold hover:underline">Start free trial</Link>
+            <p className="mt-10 text-center text-[13px] text-brand-gray font-medium leading-relaxed">
+              New to SiteGist? <Link to="/signup" className="text-primary font-bold hover:underline">Start free trial</Link>. <br/>
+              No password needed — just click the link we send you.
             </p>
           </div>
         </div>

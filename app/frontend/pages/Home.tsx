@@ -69,8 +69,8 @@ function HeroSection() {
             <CTAButton to="/signup" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto">
               Start Free Trial <ArrowRight className="w-5 h-5" />
             </CTAButton>
-            <CTAButton to="/#demo" variant="secondary" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto">
-              <Play className="w-5 h-5 fill-current" /> Watch Demo
+            <CTAButton to="/login" variant="secondary" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto">
+              Sign In
             </CTAButton>
           </div>
           
@@ -349,10 +349,10 @@ function BottomCTA() {
             <p className="text-xl opacity-80 mb-12 max-w-xl mx-auto font-bold">Start your 14-day free trial today. No credit card required. Cancel anytime.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link to="/signup" className="w-full sm:w-auto px-12 py-6 bg-white text-primary rounded-3xl font-black text-xl hover:scale-105 active:scale-95 transition-all shadow-xl">
-                 Create Your Bot Now
+                 Start Free Trial
               </Link>
               <Link to="/login" className="w-full sm:w-auto px-10 py-6 bg-primary-muted/20 text-white border border-white/20 rounded-3xl font-black text-xl hover:bg-white/10 transition-all">
-                 Contact Sales
+                 Sign In
               </Link>
             </div>
          </div>

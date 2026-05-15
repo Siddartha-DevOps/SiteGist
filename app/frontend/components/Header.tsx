@@ -49,8 +49,8 @@ export function Header() {
 
         {/* Actions */}
         <div className="hidden lg:flex items-center gap-4">
-          <CTAButton to="/login" variant="text">Login</CTAButton>
-          <CTAButton to="/signup" variant="primary">Get Started</CTAButton>
+          <CTAButton to="/login" variant="text">Sign In</CTAButton>
+          <CTAButton to="/signup" variant="primary">Start Free Trial</CTAButton>
         </div>
 
         {/* Mobile Toggle */}
@@ -78,8 +78,8 @@ export function Header() {
             ))}
             <hr className="border-brand-border" />
             <div className="flex flex-col gap-4">
-              <CTAButton to="/login" variant="secondary" className="w-full">Login</CTAButton>
-              <CTAButton to="/signup" variant="primary" className="w-full">Get Started</CTAButton>
+              <CTAButton to="/login" variant="secondary" className="w-full">Sign In</CTAButton>
+              <CTAButton to="/signup" variant="primary" className="w-full">Start Free Trial</CTAButton>
             </div>
           </div>
         </div>
