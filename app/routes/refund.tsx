@@ -1,8 +1,9 @@
 import React from 'react';
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
-import { CreditCard, RefreshCcw, ShieldCheck, Mail, Clock } from "lucide-react";
+import { RefreshCcw, ShieldCheck, Mail, Clock, CreditCard } from "lucide-react";
 import { motion } from "framer-motion";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 
 export default function Refund() {
   const lastUpdated = "May 6, 2026";
@@ -66,6 +67,7 @@ export default function Refund() {
       </main>
 
       <Footer />
+      <ChatWidget />
     </div>
   );
 }

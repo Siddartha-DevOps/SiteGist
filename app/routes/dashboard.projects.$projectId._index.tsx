@@ -113,10 +113,16 @@ export default function ProjectDetails() {
             
             <div className="relative">
               <pre className="p-6 bg-zinc-900 text-zinc-300 rounded-2xl font-mono text-sm overflow-x-auto">
-                {`<script src="https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app/widget.js" data-project-id="${project.id}"></script>`}
+                {typeof window !== "undefined" 
+                  ? `<script src="${window.location.origin}/widget.js" data-project-id="${project.id}"></script>`
+                  : `<script src="https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app/widget.js" data-project-id="${project.id}"></script>`
+                }
               </pre>
               <button 
-                onClick={() => navigator.clipboard.writeText(`<script src="https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app/widget.js" data-project-id="${project.id}"></script>`)}
+                onClick={() => {
+                  const url = typeof window !== "undefined" ? window.location.origin : "https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app";
+                  navigator.clipboard.writeText(`<script src="${url}/widget.js" data-project-id="${project.id}"></script>`);
+                }}
                 className="absolute top-4 right-4 bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
               >
                 Copy Code

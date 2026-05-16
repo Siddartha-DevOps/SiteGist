@@ -17,6 +17,7 @@ import {
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { Logo } from "~/frontend/components/Logo";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { Footer } from "~/frontend/components/Footer";
 import { Header } from "~/frontend/components/Header";
 import { CTAButton } from "~/frontend/components/CTAButton";
@@ -24,6 +25,7 @@ import { CTAButton } from "~/frontend/components/CTAButton";
 export function HomePage() {
   return (
     <div className="min-h-screen bg-brand-bg selection:bg-primary selection:text-white overflow-x-hidden">
+      <Header />
       <main className="pt-24 lg:pt-0"> {/* Offset for sticky header if needed, but Header is fixed */}
         <HeroSection />
         <TrustSection />
@@ -36,6 +38,7 @@ export function HomePage() {
       </main>
 
       <Footer />
+      <ChatWidget />
     </div>
   );
 }

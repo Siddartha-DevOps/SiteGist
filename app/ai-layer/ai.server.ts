@@ -21,22 +21,44 @@ function cleanKey(val: any): string | null {
     raw = envMatch[1].trim();
   }
 
-  // Remove ALL whitespace and non-printable characters. 
-  // API keys (Gemini, OpenAI, Anthropic, etc.) are contiguous strings.
+  // Common copy-paste artifacts
+  const commonLabels = [
+    "openai_api_key:", "openai_key:", "openai:", "key:", "api_key:",
+    "gemini_api_key:", "gemini_key:", "gemini:", "google_api_key:",
+    "bearer ", "token:", "sk-proj-", "sk-" 
+  ];
+  
+  let tempRaw = raw.toLowerCase();
+  for (const label of commonLabels) {
+    if (tempRaw.startsWith(label)) {
+      // For sk- labels, we don't want to slice them off if they are part of the key
+      // but users sometimes paste "OpenAI Key: sk-proj-..."
+      // Let's just remove the first part if it's a label
+      if (label.includes(":")) {
+         raw = raw.slice(label.length).trim();
+         tempRaw = raw.toLowerCase();
+      }
+    }
+  }
+
+  // Remove wrapping quotes
+  raw = raw.replace(/^['"]|['"]$/g, "").trim();
+
+  // Remove ALL whitespace and non-printable characters.
   let cleaned = raw.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
   
+  // CRITICAL: Block masked keys. 
+  // Dashboards often show "sk-proj-****" or "AIZa...••••"
+  if (cleaned.includes("*") || cleaned.includes("•") || cleaned.includes("...") || cleaned.includes("****")) {
+     return null; 
+  }
+
   // Basic check for dummy values
-  const dummyValues = ["your_gemini_api_key", "your_openai_api_key", "your_portkey_api_key", "null", "undefined", "", "true", "false", "your-key-here", "placeholder"];
-  if (dummyValues.includes(cleaned.toLowerCase())) {
+  const dummyValues = ["your_gemini_api_key", "your_openai_api_key", "your_portkey_api_key", "null", "undefined", "", "true", "false", "your-key-here", "placeholder", "key_here"];
+  if (dummyValues.includes(cleaned.toLowerCase()) || (cleaned.length < 10 && !cleaned.includes("_"))) {
     return null;
   }
   
-  // Remove wrapping single or double quotes which users sometimes copy-paste
-  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
-    cleaned = cleaned.substring(1, cleaned.length - 1).trim();
-    // Re-clean just in case there were spaces inside the quotes
-    cleaned = cleaned.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
-  }
   return cleaned;
 }
 
@@ -45,6 +67,11 @@ function getDiagnosticInfo(key: string | null | undefined): string {
   const length = key.length;
   const start = key.substring(0, 7);
   const end = key.slice(-4);
+  
+  // Check for common masking patterns
+  const isMasked = key.includes("*") || key.includes("•") || key.includes("...");
+  const isDummy = key.toLowerCase().includes("key_here") || key.toLowerCase().includes("placeholder");
+  const isProbablyOpenAIButMissingS = key.startsWith("k-proj-");
   
   // Check for hidden characters
   const hiddenChars = [];
@@ -56,8 +83,17 @@ function getDiagnosticInfo(key: string | null | undefined): string {
   }
   
   let info = `Length: ${length}, First 7: "${start}"... Last 4: "${end}"`;
+  if (isMasked) {
+    info += ` | ❌ CRITICAL: KEY IS MASKED (contains * or •). You copied a UI placeholder! Click 'Copy' or eye icon in your dashboard.`;
+  }
+  if (isDummy) {
+    info += ` | ❌ CRITICAL: DUMMY KEY DETECTED. The key contains placeholder text.`;
+  }
+  if (isProbablyOpenAIButMissingS) {
+    info += ` | ❌ CRITICAL: OpenAI key starts with "k-proj-" but MUST start with "sk-proj-". You are missing the 's' at the beginning.`;
+  }
   if (hiddenChars.length > 0) {
-    info += ` | WARNING: ${hiddenChars.length} hidden chars found (${hiddenChars.slice(0, 3).join(", ")})`;
+    info += ` | ⚠️ WARNING: ${hiddenChars.length} hidden chars found (${hiddenChars.slice(0, 3).join(", ")})`;
   }
   return info;
 }
@@ -113,6 +149,10 @@ function getOpenAI() {
     }
 
     // Diagnostic
+    if (rawKey.startsWith("AIza")) {
+      console.warn(`[AI] WARNING: Key in ${_openaiFoundVar} starts with "AIza", which looks like a Gemini/Google key. OpenAI keys usually start with "sk-".`);
+    }
+
     console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
     _openai = new OpenAI({ apiKey: rawKey });
   }
@@ -173,6 +213,23 @@ function getGemini(): GoogleGenerativeAI | null {
 
     console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
     _gemini = new GoogleGenerativeAI(rawKey);
+
+    // List models for diagnostic purposes asynchronously
+    (async () => {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${rawKey}`);
+        if (response.ok) {
+          const data = await response.json();
+          const modelList = data.models?.map((m: any) => m.name.replace("models/", "")).join(", ");
+          console.log(`[AI] Gemini Auth Check: SUCCESS. Available Models: ${modelList}`);
+        } else {
+          const errData = await response.json().catch(() => ({}));
+          console.error(`[AI] Gemini Auth Check: FAILED. Status: ${response.status}. Reason: ${JSON.stringify(errData)}`);
+        }
+      } catch (e) {
+        console.warn("[AI] Gemini Auth Check: NETWORK_ERROR", e);
+      }
+    })();
   }
   return _gemini;
 }
@@ -223,21 +280,26 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
 export async function embedText(text: string) {
   const openai = getOpenAI();
-  if (!openai) {
-    // Fallback to Gemini embedding if possible
-    const gemini = getGemini();
-    if (gemini) {
-      const model = gemini.getGenerativeModel({ model: "text-embedding-004" });
-      const response = await model.embedContent(text);
-      return response.embedding.values;
+  if (openai) {
+    try {
+      const response = await (openai as any).embeddings.create({
+        model: "text-embedding-3-small",
+        input: text,
+      });
+      return response.data[0].embedding as number[];
+    } catch (e) {
+      console.warn("[AI] OpenAI Embedding failed, attempting Gemini fallback...", e);
     }
-    throw new Error("No embedding provider available (OpenAI or Gemini)");
   }
-  const response = await (openai as any).embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  });
-  return response.data[0].embedding as number[];
+
+  // Fallback to Gemini embedding if possible
+  const gemini = getGemini();
+  if (gemini) {
+    const model = gemini.getGenerativeModel({ model: "text-embedding-004" });
+    const response = await model.embedContent(text);
+    return response.embedding.values;
+  }
+  throw new Error("No embedding provider available (OpenAI key failed and Gemini not configured)");
 }
 
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
@@ -378,8 +440,33 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       context = "No specific context available due to a retrieval error.";
     }
   } else {
-    console.log(`[RAG Audit] Stage 1: Operating in Demo Mode.`);
-    context = "Demo mode usage.";
+    console.log(`[RAG Audit] Stage 1: Operating in Demo Mode. Providing SiteGist System Knowledge.`);
+    context = `
+About SiteGist:
+SiteGist is a powerful AI Chatbot builder and lead generation platform designed specifically for service businesses. It allows users to crawl their websites, train an AI agent in minutes, and embed a floating chatbot that handles 24/7 sales, lead capture, and appointment booking.
+
+Key Features:
+- Website Crawling: Automatically extracts knowledge from your URLs, sitemaps, and even YouTube transcripts.
+- Lead Generation: Intelligently captures visitor contact info (name, email, phone) during conversations.
+- Custom Branding: You can customize colors, logos, and the "welcome" message to match your brand.
+- Multi-Channel: Embed on your website via a simple <script> tag or use it as a standalone landing page.
+- Integrations: Supports Notion, Google Drive, Slack, and Zapier for syncing data and notifications.
+- Human Handoff: Notifies your team via Slack or Webhooks when a lead requests a real person.
+
+Pricing & Subscription Plans:
+- Free Starter: 1 chatbot project, 50 message credits/month, basic crawling.
+- Pro Plan ($19/month): 5 chatbot projects, 1,000 message credits/month, priority support, and advanced integrations.
+- Enterprise: Custom pricing for unlimited projects, white-label options, and dedicated account management.
+
+Refund Policy:
+SiteGist offers a 14-day no-questions-asked refund policy for all subscription plans if you are not satisfied with the service.
+
+How it works:
+1. Signup and create a new project.
+2. Enter your website URL or upload documents.
+3. SiteGist "trains" the AI on this content.
+4. Customize the widget and copy the snippet to your site.
+    `;
   }
 
   // Yield citations first so UI can prepare
@@ -389,7 +476,10 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
 
   const promptHistory = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
 
-  const prompt = `You are an Advanced RAG System with strict grounding rules.
+  const prompt = `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform.
+  
+  YOUR MISSION:
+  Answer user questions accurately and professionally about SiteGist features, pricing, refund policy, and general platform usage.
   
   SYSTEM INSTRUCTIONS:
   ${systemPrompt || "Provide helpful, accurate answers based on the knowledge provided."}
@@ -402,10 +492,11 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
 
   STRICT GROUNDING RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "I'm sorry, but I don't have enough information in my knowledge base to answer that specifically. However, based on my general capabilities..." 
-  3. DO NOT hallucinate features or facts not present in the context.
-  4. Use Markdown for structured responses.
-  5. Your response will go through a verification layer, so be as factual as possible.
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER (e.g. general knowledge, unrelated topics), say: "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
+  3. DO NOT HALLUCINATE. If a feature isn't in the context, it doesn't exist for you.
+  4. Use professional, concise Markdown.
+  5. If asked about "refunds", mention the "14-day no-questions-asked" policy.
+  6. If asked about "pricing", list the Free, Pro ($19/mo), and Enterprise options.
   
   USER QUERY: ${query}
   
@@ -428,8 +519,8 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   try {
     if (gemini) {
       try {
-        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
-        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash stream...`);
+        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash-latest stream...`);
         
         // Use a 20s timeout for the fetch itself if possible (Gemini SDK uses fetch)
         const result = await model.generateContentStream([{ text: prompt }]);
@@ -451,10 +542,20 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       } catch (e: any) {
         console.error("[RAG Audit] Stage 6/7 Gemini Error Detail:", e);
         let errorMsg = e.message || String(e);
-        if (errorMsg.includes("API key not valid")) {
-           errorMsg = `[API_KEY_INVALID] Google AI Studio rejected the key. Variable: ${_geminiFoundVar}. Diagnostic: ${getDiagnosticInfo(process.env[_geminiFoundVar])}. Ensure you use a valid key from aistudio.google.com.`;
+        const diag = getDiagnosticInfo(process.env[_geminiFoundVar]);
+        
+        if (errorMsg.includes("API key not valid") || errorMsg.includes("API key expired") || errorMsg.includes("400") || errorMsg.includes("INVALID_ARGUMENT") || errorMsg.includes("key expired")) {
+           errorMsg = `[API_KEY_ERROR] Google AI Studio rejected the key (Expired or Invalid).
+           Diagnostic: ${diag}. 
+           Action: Go to https://aistudio.google.com/app/apikey. 
+           1. Create a NEW key (don't reuse old ones). 
+           2. Look for the 'eyeball' icon or 'Copy' button. 
+           3. Ensure you copy the WHOLE text, not text containing '****'.`;
+           if (diag.includes("MASKED") || diag.includes("...")) {
+              errorMsg += "\n\nCRITICAL: Your key contains stars (*) or dots (...). You copied a 'Hidden' version of the key. Click the 'Copy' button in AI Studio specifically.";
+           }
         } else if (errorMsg.includes("quota")) {
-           errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait or use OpenAI.`;
+           errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait a few minutes or use OpenAI.`;
         }
         lastError = { message: errorMsg || "Gemini connection failed" };
       }
@@ -483,8 +584,19 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       } catch (e: any) {
          console.error("[RAG Audit] OpenAI Error:", e);
          let errorMsg = e.message || String(e);
-         if (errorMsg.includes("Invalid API Key") || errorMsg.includes("Incorrect API key") || errorMsg.includes("401")) {
-            errorMsg = `[API_KEY_INVALID] OpenAI rejected the key. Variable: ${_openaiFoundVar}. Diagnostic: ${getDiagnosticInfo(process.env[_openaiFoundVar])}. Ensure it starts with "sk-" and has no weird spaces.`;
+         const diag = getDiagnosticInfo(process.env[_openaiFoundVar]);
+         
+         if (errorMsg.includes("Invalid API Key") || errorMsg.includes("Incorrect API key") || errorMsg.includes("401") || errorMsg.includes("invalid_api_key")) {
+            errorMsg = `[API_KEY_INVALID] OpenAI rejected the key. 
+            Diagnostic: ${diag}. 
+            Action: 
+            1. Go to platform.openai.com/api-keys. 
+            2. Create a NEW secret key. 
+            3. Copy the secret IMMEDIATELY after creation (it vanishes after). 
+            4. DO NOT copy the key from the list view (sk-proj-****).`;
+            if (diag.includes("MASKED") || diag.includes("*")) {
+              errorMsg += "\n\nCRITICAL: Your key has asterisks (*). You copied the MASKED version. You must click 'Create new secret key' and copy the text shown in the popup!";
+            }
          }
          lastError = { message: errorMsg || "OpenAI connection failed" };
       }
@@ -496,6 +608,24 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   if (!fullAnswer) {
     let errorMsg = lastError?.message || "All AI providers failed to respond. Please check your API keys.";
     
+    // Proactive check for masked keys if no providers were initialized
+    if (!lastError) {
+      const allEnvKeys = Object.keys(process.env);
+      const aiKeys = allEnvKeys.filter(k => k.includes("OPENAI") || k.includes("GEMINI") || k.includes("GOOGLE_API"));
+      for (const k of aiKeys) {
+        const val = process.env[k];
+        if (val && (val.includes("*") || val.includes("•") || (val.includes("...") && val.length < 50))) {
+          errorMsg = `[MASKED_KEY_DETECTED] Your ${k} contains masking characters (* or • or ...). 
+          Diagnostic: ${getDiagnosticInfo(val)}.
+          Action: You copied a dashboard placeholder! 
+          1. Go to the dashboard. 
+          2. Click the 'Copy' button or the 'Eye' icon to reveal the secret. 
+          3. Paste the FULL secret key into Settings.`;
+          break;
+        }
+      }
+    }
+
     // Check if it's a common key mismatch
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.AI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -531,7 +661,7 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
     let verificationResult: any = { status: "VERIFIED", explanation: "Verified during generation." };
     
     if (gemini) {
-      const vModel = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const vModel = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
       const vResp = await vModel.generateContent(verificationPrompt);
       const vText = vResp.response.text();
       // Simple JSON extraction
@@ -563,7 +693,7 @@ export async function* generateSimpleAIStream(prompt: string) {
   try {
     if (gemini) {
       try {
-        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const result = await model.generateContentStream([{ text: prompt }]);
         for await (const chunk of result.stream) {
           const text = chunk.text();

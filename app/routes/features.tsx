@@ -1,5 +1,6 @@
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { CTAButton } from "~/frontend/components/CTAButton";
 import { 
   Zap, 
@@ -162,6 +163,7 @@ export default function Features() {
         </div>
       </div>
       <Footer />
+      <ChatWidget />
     </div>
   );
 }

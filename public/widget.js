@@ -1,5 +1,7 @@
 (function() {
   const script = document.currentScript;
+  const scriptUrl = new URL(script.src);
+  const baseUrl = scriptUrl.origin;
   const projectId = script.getAttribute('data-project-id');
   if (!projectId) return console.error('SiteGist: data-project-id is missing');
 
@@ -54,7 +56,7 @@
 
   const iframe = document.createElement('iframe');
   iframe.id = 'sitegist-widget-iframe';
-  iframe.src = `https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app/embed/${projectId}`;
+  iframe.src = `${baseUrl}/embed/${projectId}`;
   container.appendChild(iframe);
 
   bubble.onclick = () => {
@@ -64,6 +66,8 @@
   window.addEventListener('message', (event) => {
     if (event.data === 'sitegist-close') {
       iframe.classList.remove('open');
+    } else if (event.data && event.data.type === 'sitegist-theme') {
+      bubble.style.background = event.data.color;
     }
   });
 })();

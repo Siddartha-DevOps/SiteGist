@@ -23,6 +23,7 @@ export default function EmbedChat() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
   const chatFetcher = useFetcher();
   const leadFetcher = useFetcher();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -38,6 +39,14 @@ export default function EmbedChat() {
   const bubbleShape = branding.bubbleShape || "rounded-2xl";
   const font = branding.font || "sans";
   const leadPolicy = branding.leadPolicy || "keywords";
+
+  const storageKey = `sitegist_session_${project.id}`;
+
+  useEffect(() => {
+    if (primaryColor) {
+      window.parent.postMessage({ type: 'sitegist-theme', color: primaryColor }, '*');
+    }
+  }, [primaryColor]);
 
   const handleFeedback = async (messageId: string, val: number) => {
     setFeedbackLoading(messageId);
@@ -63,13 +72,26 @@ export default function EmbedChat() {
     if (leadPolicy === "pre-chat" && !sessionId) {
       setShowLeadForm(true);
     }
-  }, [leadPolicy, sessionId]);
+
+    // Persist session ID
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) setSessionId(saved);
+    }
+  }, [leadPolicy, sessionId, storageKey]);
+
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem(storageKey, sessionId);
+    }
+  }, [sessionId, storageKey]);
 
   const handleSend = async (text?: string) => {
     const messageToSend = text || input;
-    if (!messageToSend.trim()) return;
+    if (!messageToSend.trim() || isStreaming) return;
     
     setInput("");
+    setIsStreaming(true);
     const now = new Date();
     setMessages(prev => [...prev, { role: 'user', content: messageToSend, timestamp: now }]);
     setMessages(prev => [...prev, { role: 'assistant', content: "", timestamp: new Date() }]);
@@ -81,22 +103,34 @@ export default function EmbedChat() {
         body: JSON.stringify({ projectId: project.id, message: messageToSend, sessionId }),
       });
 
-      if (!response.body) return;
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
 
-      const reader = response.body.getReader();
+      const reader = response.body?.getReader();
+      if (!reader) return;
+
       const decoder = new TextDecoder();
       let accumulated = "";
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const raw = decoder.decode(value);
-        const chunks = raw.split("\n\n");
-        for (const chunk of chunks) {
-          if (chunk.startsWith("data: ")) {
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        
+        // Keep potential partial line in buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith("data: ")) {
             try {
-              const data = JSON.parse(chunk.slice(6));
+              const data = JSON.parse(trimmed.slice(6));
               if (data.content) {
                 accumulated += data.content;
                 setMessages(prev => {
@@ -106,47 +140,44 @@ export default function EmbedChat() {
                 });
               }
             } catch (e) { }
-          } else if (chunk.startsWith("event: metadata")) {
+          } else if (trimmed.startsWith("event: metadata")) {
+             // Expecting next 'data: ' line for JSON
+          } else if (trimmed.startsWith("event: messageId")) {
+             // Expecting next 'data: ' line
+          } else if (trimmed.startsWith("event: session")) {
+             // Expecting next 'data: ' line
+          } else if (trimmed.startsWith("event: handoff")) {
+            if (leadPolicy === "handoff" || leadPolicy === "keywords") {
+              setTimeout(() => setShowLeadForm(true), 1000);
+            }
+          } else if (line.startsWith("data: ")) {
+            // This handles cases where event followed by data in the same line buffer
             try {
-              const data = JSON.parse(chunk.split("\ndata: ")[1]);
+              const data = JSON.parse(line.trim().slice(6));
               if (data.citations) {
                 setMessages(prev => {
                   const newMsgs = [...prev];
                   newMsgs[newMsgs.length - 1] = { ...(newMsgs[newMsgs.length - 1] as any), citations: data.citations };
                   return newMsgs;
                 });
-              }
-            } catch (e) { }
-          } else if (chunk.startsWith("event: messageId")) {
-            try {
-              const data = JSON.parse(chunk.split("\ndata: ")[1]);
-              if (data.messageId) {
+              } else if (data.messageId) {
                 setMessages(prev => {
                   const newMsgs = [...prev];
                   newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], id: data.messageId };
                   return newMsgs;
                 });
+              } else if (data.sessionId) {
+                setSessionId(data.sessionId);
               }
-            } catch (e) { }
-          } else if (chunk.startsWith("event: session")) {
-            try {
-              const data = JSON.parse(chunk.split("\ndata: ")[1]);
-              if (data.sessionId) setSessionId(data.sessionId);
-            } catch (e) { }
-          } else if (chunk.startsWith("event: handoff")) {
-            if (leadPolicy === "handoff" || leadPolicy === "keywords") {
-              setTimeout(() => setShowLeadForm(true), 1000);
-            }
+            } catch (e) {}
           }
         }
       }
 
-      const assistantMsg = accumulated;
-      
       // Intelligent keyword-based lead collection
       if (leadPolicy === "keywords") {
         const triggers = ["contact details", "email", "phone", "sales", "demo", "pricing", "get in touch"];
-        const shouldShow = triggers.some(t => assistantMsg.toLowerCase().includes(t));
+        const shouldShow = triggers.some(t => accumulated.toLowerCase().includes(t));
         if (shouldShow) {
           setTimeout(() => setShowLeadForm(true), 1500);
         }
@@ -154,6 +185,16 @@ export default function EmbedChat() {
 
     } catch (error) {
       console.error("Chat error:", error);
+      setMessages(prev => {
+        const newMsgs = [...prev];
+        const last = newMsgs[newMsgs.length - 1];
+        if (last && last.role === 'assistant' && !last.content) {
+          newMsgs[newMsgs.length - 1] = { ...last, content: "⚠️ Sorry, I'm having trouble connecting right now. Please try again or contact support." };
+        }
+        return newMsgs;
+      });
+    } finally {
+      setIsStreaming(false);
     }
   };
 
@@ -169,8 +210,11 @@ export default function EmbedChat() {
 
   useEffect(() => {
     if (leadFetcher.data && leadFetcher.state === "idle") {
-      setShowLeadForm(false);
-      setMessages(prev => [...prev, { role: 'assistant', content: "Thanks! We've received your contact info. How else can I help?" }]);
+      const resp = leadFetcher.data as any;
+      if (resp.success) {
+        setShowLeadForm(false);
+        setMessages(prev => [...prev, { role: 'assistant', content: "Thanks! We've received your contact info. How else can I help?" }]);
+      }
     }
   }, [leadFetcher.data, leadFetcher.state]);
 
@@ -351,14 +395,15 @@ export default function EmbedChat() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Type your message..."
-            className="flex-1 bg-transparent py-2 text-sm outline-none"
+            disabled={isStreaming}
+            className="flex-1 bg-transparent py-2 text-sm outline-none disabled:opacity-50"
           />
           <button 
             onClick={() => handleSend()}
-            disabled={!input.trim()}
+            disabled={!input.trim() || isStreaming}
             className="p-2 bg-primary text-white rounded-xl disabled:opacity-30 transition-all active:scale-95 shadow-lg shadow-primary/20"
           >
-            <Send className="w-4 h-4" />
+            {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
         {!removeBranding && (

@@ -42,9 +42,18 @@ export async function loader() {
     const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (key) {
       const genAI = new GoogleGenerativeAI(key);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      await model.generateContent("test");
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+      await model.generateContent("hello");
       diagnostic.services.gemini = "OK";
+      
+      // List models for diagnostic
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+        if (response.ok) {
+          const data = await response.json();
+          diagnostic.geminiModels = data.models?.map((m: any) => m.name.replace("models/", ""));
+        }
+      } catch (e) {}
     } else {
       diagnostic.services.gemini = "NOT_CONFIGURED";
     }

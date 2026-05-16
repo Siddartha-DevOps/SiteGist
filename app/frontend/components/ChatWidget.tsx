@@ -127,10 +127,9 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <Logo size="sm" hideText variant="dark" />
           </div>
           <div>
-            <p className="font-bold text-sm tracking-tight">SiteGist Assistant</p>
             <p className="text-[10px] opacity-80 uppercase tracking-widest font-black flex items-center gap-1">
               <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-              AI Support
+              Ask SiteGist
             </p>
           </div>
         </div>
@@ -149,7 +148,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <Logo size="sm" hideText className="scale-75" />
           </div>
           <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-brand-dark shadow-sm leading-relaxed max-w-[85%]">
-            Hi! I'm SiteGist's knowledge assistant. How can I help you today?
+            Hi! How can I help you today?
           </div>
         </div>
 
@@ -232,12 +231,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
  */
 function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className={`relative flex items-center justify-center transition-all duration-500 hover:scale-110 active:scale-90 group focus:outline-none ${
-        isOpen ? "opacity-100" : "opacity-90 hover:opacity-100"
-      }`}
-    >
+    <div className="flex flex-col items-end gap-2 group">
+      <button
+        onClick={onClick}
+        className={`relative flex items-center justify-center transition-all duration-500 hover:scale-110 active:scale-90 focus:outline-none ${
+          isOpen ? "opacity-100" : "opacity-90 hover:opacity-100"
+        }`}
+      >
       <div className="relative p-2">
         <Logo 
           size="lg" 
@@ -250,7 +250,8 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
           <div className="absolute top-2 right-2 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white shadow-sm pointer-events-none animate-pulse" />
         )}
       </div>
-    </button>
+      </button>
+    </div>
   );
 }
 

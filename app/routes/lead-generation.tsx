@@ -1,5 +1,6 @@
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { CTAButton } from "~/frontend/components/CTAButton";
 import { 
   Target, 
@@ -153,6 +154,7 @@ export default function LeadGeneration() {
         </div>
       </div>
       <Footer />
+      <ChatWidget />
     </div>
   );
 }

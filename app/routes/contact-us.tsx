@@ -3,6 +3,7 @@ import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { Mail, MessageSquare, Send, Globe } from "lucide-react";
 import { motion } from "framer-motion";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 
 export default function ContactUs() {
   return (
@@ -95,6 +96,7 @@ export default function ContactUs() {
       </main>
 
       <Footer />
+      <ChatWidget />
     </div>
   );
 }

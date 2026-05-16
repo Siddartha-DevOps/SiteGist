@@ -2,5 +2,5 @@
   "name": "SiteGist",
   "description": "A powerful AI Chatbot builder and lead generation platform for service businesses. Crawl your website, train an AI in minutes, and let it handle 24/7 sales, lead capture, and appointment booking.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -3,6 +3,7 @@ import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { Check, Sparkles, Minus, Plus, ArrowRight, Zap, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 
 type BillingCycle = "monthly" | "yearly";
 
@@ -418,6 +419,7 @@ export default function Pricing() {
       </section>
 
       <Footer />
+      <ChatWidget />
     </div>
   );
 }
