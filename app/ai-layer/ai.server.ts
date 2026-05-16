@@ -80,21 +80,30 @@ function getOpenAI() {
     
     // Diagnostic: Log all candidate keys found
     console.log("[AI] Scanning for OpenAI keys...");
+    const foundKeys: string[] = [];
     for (const key of searchKeys) {
       const val = process.env[key];
       if (val) {
-        console.log(`  - ${key}: ${cleanKey(val) ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+        const cleaned = cleanKey(val);
+        console.log(`  - ${key}: ${cleaned ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+        if (cleaned) foundKeys.push(`${key}(${val.substring(0, 5)}...)`);
       }
     }
 
     let rawKey = null;
+    let foundButSkippedCount = 0;
     for (const key of searchKeys) {
       const val = process.env[key];
       const cleaned = cleanKey(val);
       if (cleaned) {
-        rawKey = cleaned;
-        _openaiFoundVar = key;
-        break;
+        if (!rawKey) {
+          rawKey = cleaned;
+          _openaiFoundVar = key;
+        } else if (cleaned !== rawKey) {
+          console.warn(`[AI] COLLISION: Multiple OpenAI keys found. Using ${_openaiFoundVar}, but ${key} also has a DIFFERENT key.`);
+        }
+      } else if (val) {
+        foundButSkippedCount++;
       }
     }
       
@@ -104,7 +113,7 @@ function getOpenAI() {
     }
 
     // Diagnostic
-    console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(rawKey)}`);
+    console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
     _openai = new OpenAI({ apiKey: rawKey });
   }
   return _openai;
@@ -126,10 +135,13 @@ function getGemini(): GoogleGenerativeAI | null {
     
     // Diagnostic: Log all candidate keys found
     console.log("[AI] Scanning for Gemini keys...");
+    const foundKeys: string[] = [];
     for (const key of searchKeys) {
       const val = process.env[key];
       if (val) {
-        console.log(`  - ${key}: ${cleanKey(val) ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+        const cleaned = cleanKey(val);
+        console.log(`  - ${key}: ${cleaned ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
+        if (cleaned) foundKeys.push(`${key}(${val.substring(0, 5)}...)`);
       }
     }
 
@@ -138,9 +150,12 @@ function getGemini(): GoogleGenerativeAI | null {
       const val = process.env[key];
       const cleaned = cleanKey(val);
       if (cleaned) {
-        rawKey = cleaned;
-        _geminiFoundVar = key;
-        break;
+        if (!rawKey) {
+          rawKey = cleaned;
+          _geminiFoundVar = key;
+        } else if (cleaned !== rawKey) {
+          console.warn(`[AI] COLLISION: Multiple Gemini keys found. Using ${_geminiFoundVar}, but ${key} also has a DIFFERENT key.`);
+        }
       }
     }
 
@@ -151,20 +166,20 @@ function getGemini(): GoogleGenerativeAI | null {
     
     // Diagnostic
     if (rawKey.startsWith("sk-")) {
-      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza".`);
+      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza". | ALL_KEYS: ${foundKeys.join(", ")}`);
     } else if (!rawKey.startsWith("AIza")) {
-      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} does NOT start with "AIza". Gemini keys usually start with "AIza". Diagnostic: ${getDiagnosticInfo(rawKey)}`);
+      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} does NOT start with "AIza". Gemini keys usually start with "AIza". Diagnostic: ${getDiagnosticInfo(rawKey)} | ALL_KEYS: ${foundKeys.join(", ")}`);
     }
 
-    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(rawKey)}`);
+    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
     _gemini = new GoogleGenerativeAI(rawKey);
   }
   return _gemini;
 }
 
 export async function rerankDocuments(query: string, documents: { text: string; [key: string]: any }[]) {
-  const portkeyApiKey = process.env.PORTKEY_API_KEY?.trim();
-  const cohereVirtualKey = process.env.PORTKEY_COHERE_VIRTUAL_KEY?.trim();
+  const portkeyApiKey = cleanKey(process.env.PORTKEY_API_KEY);
+  const cohereVirtualKey = cleanKey(process.env.PORTKEY_COHERE_VIRTUAL_KEY);
 
   if (!portkeyApiKey || !cohereVirtualKey) {
     console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
@@ -534,5 +549,65 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
     console.error("[Verification] Error during verification step:", vError);
   }
   // ---------------------------------
+}
+
+/**
+ * Simple AI generator for tools (no RAG)
+ */
+export async function* generateSimpleAIStream(prompt: string) {
+  const gemini = getGemini();
+  const openai = getOpenAI();
+  let fullAnswer = "";
+  let lastError: any = null;
+
+  try {
+    if (gemini) {
+      try {
+        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContentStream([{ text: prompt }]);
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          if (text) {
+            fullAnswer += text;
+            yield text;
+          }
+        }
+      } catch (e: any) {
+        console.error("[Simple AI] Gemini Error:", e);
+        lastError = e;
+      }
+    }
+
+    if (openai && !fullAnswer) {
+      try {
+        const stream = await (openai as any).chat.completions.create({
+          model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
+          stream: true,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 1024,
+        });
+
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            fullAnswer += content;
+            yield content;
+          }
+        }
+      } catch (e: any) {
+        console.error("[Simple AI] OpenAI Error:", e);
+        lastError = e;
+      }
+    }
+  } catch (err) {
+    console.error("[Simple AI] Fatal Error:", err);
+    lastError = err;
+  }
+
+  if (!fullAnswer && lastError) {
+    yield `[ERROR] AI Provider failed: ${lastError.message || String(lastError)}`;
+  } else if (!fullAnswer) {
+    yield `[ERROR] No AI providers responded. Check your API keys.`;
+  }
 }
 
