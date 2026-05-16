@@ -61,15 +61,21 @@ declare global {
   var __db__: ExtendedPrismaClient | undefined;
 }
 
-let prisma: ExtendedPrismaClient;
-
-if (process.env.NODE_ENV === "production") {
-  prisma = getClient();
-} else {
-  if (!global.__db__) {
-    global.__db__ = getClient();
+function getPrisma() {
+  if (global.__db__) return global.__db__;
+  
+  const client = getClient();
+  if (process.env.NODE_ENV !== "production") {
+    global.__db__ = client;
   }
-  prisma = global.__db__;
+  return client;
 }
+
+const prisma = new Proxy({} as ExtendedPrismaClient, {
+  get(target, prop, receiver) {
+    const client = getPrisma();
+    return Reflect.get(client, prop, receiver);
+  },
+});
 
 export { prisma };
