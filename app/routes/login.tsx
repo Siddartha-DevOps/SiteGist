@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation, useSearchParams } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
 import { getUserId } from "~/backend/auth.server";
 import { generateMagicLink } from "~/backend/magic-link.server";
@@ -42,9 +42,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function Login() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
+  const [searchParams] = useSearchParams();
   const isSubmitting = navigation.state === "submitting";
 
-  const error = actionData && "error" in actionData ? actionData.error : undefined;
+  const urlError = searchParams.get("error");
+  const actionError = actionData && "error" in actionData ? actionData.error : undefined;
+  const error = urlError || actionError;
+
   const success = actionData && "success" in actionData ? actionData.success : undefined;
   const sentEmail = actionData && "email" in actionData ? actionData.email : undefined;
 

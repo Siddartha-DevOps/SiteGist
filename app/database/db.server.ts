@@ -10,6 +10,16 @@ import { withAccelerate } from "@prisma/extension-accelerate";
 function getClient() {
   let url = process.env.DATABASE_URL || "";
   
+  if (!url || url.trim() === "") {
+    console.error("--------------------------------------------------------------------------------");
+    console.error("CRITICAL ERROR: DATABASE_URL is missing or empty.");
+    console.error("The application cannot connect to the database.");
+    console.error("Please add DATABASE_URL to your environment variables (e.g., in Vercel settings).");
+    console.error("--------------------------------------------------------------------------------");
+    // We throw to prevent the Proxy from silently failing or causing obscure errors later
+    throw new Error("DATABASE_URL is required but was not provided. Check your environment variables.");
+  }
+
   // Clean up quotes if present
   if (url.startsWith('"') && url.endsWith('"')) {
     url = url.slice(1, -1);
