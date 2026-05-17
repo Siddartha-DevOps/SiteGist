@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Logo } from "./Logo";
-import { X, Send, Bot, MessageSquare, Sparkles } from "lucide-react";
+import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /**
@@ -12,6 +12,62 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<number | string | null>(null);
+  const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
+
+  const handleCopy = (text: string, id: number | string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleReaction = (id: string | number, type: 'like' | 'dislike') => {
+    setReactions(prev => ({
+      ...prev,
+      [id]: prev[id] === type ? null : type
+    }));
+  };
+
+  const ActionButtons = ({ text, id, isWelcome = false }: { text: string; id: number | string; isWelcome?: boolean }) => {
+    const reaction = reactions[id];
+    
+    return (
+      <div className={`absolute bottom-1 right-1 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-all duration-200 pr-1 pb-1`}>
+        <div className="relative">
+          <button 
+            onClick={() => handleCopy(text, id)}
+            className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all text-zinc-400 hover:text-[#155DEE] group/btn"
+          >
+            {copiedId === id ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          <AnimatePresence>
+            {copiedId === id && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 5 }}
+                exit={{ opacity: 0, y: -5 }}
+                className="absolute left-1/2 -translate-x-1/2 top-full mt-1 px-1.5 py-0.5 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
+              >
+                Copied!
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <button 
+          onClick={() => handleReaction(id, 'like')}
+          className={`p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all ${reaction === 'like' ? 'text-[#155DEE] bg-white shadow-sm' : 'text-zinc-400 hover:text-[#155DEE]'}`}
+        >
+          <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : ''}`} />
+        </button>
+        <button 
+          onClick={() => handleReaction(id, 'dislike')}
+          className={`p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all ${reaction === 'dislike' ? 'text-zinc-800/80 bg-white shadow-sm' : 'text-zinc-400 hover:text-zinc-800'}`}
+        >
+          <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : ''}`} />
+        </button>
+      </div>
+    );
+  };
 
   useEffect(() => {
     const el = document.getElementById("chat-messages");
@@ -146,13 +202,19 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
           <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1">
             <Logo size="sm" hideText className="scale-75" />
           </div>
-          <div className="bg-zinc-50/50 p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed max-w-[85%] whitespace-pre-line">
+          <div className="bg-zinc-50/50 p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed max-w-[85%] whitespace-pre-line relative group/msg overflow-hidden">
             👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
             Ask me about:{"\n"}
             • Plans & pricing{"\n"}
             • Setup & integrations{"\n"}
             • Security & privacy{"\n"}
             • Enterprise & other options.
+
+            <ActionButtons 
+              text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• Plans & pricing\n• Setup & integrations\n• Security & privacy\n• Enterprise & other options.`} 
+              id="welcome" 
+              isWelcome 
+            />
           </div>
         </div>
 
@@ -163,13 +225,17 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                 <Logo size="sm" hideText className="scale-75" />
               </div>
             )}
-            <div className="flex flex-col max-w-[85%]">
-              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed ${
+            <div className={`flex flex-col max-w-[85%] relative group/msg`}>
+              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden ${
                 msg.role === "user" 
                   ? "bg-white text-zinc-800 border border-zinc-100 rounded-tr-none" 
                   : "bg-zinc-50/50 text-zinc-800 border border-zinc-100 rounded-tl-none"
               }`}>
                 {msg.content || <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>}
+                
+                {msg.role === "assistant" && msg.content && (
+                  <ActionButtons text={msg.content} id={i} />
+                )}
               </div>
               {msg.timestamp && (
                 <span className={`text-[9px] mt-1 opacity-40 font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
