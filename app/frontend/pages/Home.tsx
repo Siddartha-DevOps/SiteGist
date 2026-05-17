@@ -98,7 +98,7 @@ function HeroSection() {
           {/* Main Product Preview Container */}
           <div className="relative rounded-[40px] border border-brand-border bg-white p-4 shadow-[0_32px_64px_-16px_rgba(21,93,238,0.15)] ring-1 ring-black/5 overflow-hidden">
             <img 
-              src="/src/assets/images/sitegist_platform_hero_1779043334788.png" 
+              src="/images/hero.png" 
               alt="SiteGist AI Dashboard" 
               className="w-full rounded-[30px] shadow-sm border border-[#edf4fd]"
             />

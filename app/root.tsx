@@ -59,14 +59,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta property="og:site_name" content="SiteGist" />
         <meta property="og:title" content="SiteGist — AI-Powered Customer Support" />
         <meta property="og:description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7." />
-        <meta property="og:image" content="/og-image.png" />
+        <meta property="og:image" content="/images/hero.png" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:url" content="https://sitegist.co" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="SiteGist — AI-Powered Customer Support" />
         <meta name="twitter:description" content="SiteGist understands your site and delivers instant, accurate answers — 24/7." />
-        <meta name="twitter:image" content="/og-image.png" />
+        <meta name="twitter:image" content="/images/hero.png" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <Meta />
         <Links />
       </head>
