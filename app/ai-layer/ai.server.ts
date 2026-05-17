@@ -20,6 +20,13 @@ function cleanKey(val: any): string | null {
     console.warn(`[AI] TYPO_DETECTED: Key starts with 'k-proj-'. It almost certainly should be 'sk-proj-'. Please check the first letter.`);
   }
 
+  // CRITICAL: Block masked keys early. 
+  // Dashboards often show "sk-proj-****" or "AIZa...••••"
+  if (raw.includes("*") || raw.includes("•") || raw.includes("...") || raw.includes("****")) {
+     console.error(`[AI] MASKED_KEY_DETECTED: Your key contains stars or dots. You copied a hidden placeholder! Length: ${raw.length}`);
+     return null; 
+  }
+
   // Handle case where user pastes "GEMINI_API_KEY=AIZa..."
   const envMatch = raw.match(/^[A-Z0-9_]+=(.*)$/s);
   if (envMatch) {

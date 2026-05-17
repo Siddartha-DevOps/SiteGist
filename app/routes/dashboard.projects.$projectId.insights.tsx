@@ -152,8 +152,8 @@ export default function ProjectInsights() {
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorMsgs" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6C5CE7" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#6C5CE7" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#155DEE" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#155DEE" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
@@ -162,7 +162,7 @@ export default function ProjectInsights() {
                 <Tooltip 
                   contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px 16px'}}
                 />
-                <Area type="monotone" dataKey="messages" name="Chats" stroke="#6C5CE7" strokeWidth={4} fillOpacity={1} fill="url(#colorMsgs)" />
+                <Area type="monotone" dataKey="messages" name="Chats" stroke="#155DEE" strokeWidth={4} fillOpacity={1} fill="url(#colorMsgs)" />
                 <Area type="monotone" dataKey="leads" name="Leads" stroke="#a855f7" strokeWidth={4} fillOpacity={0} />
               </AreaChart>
             </ResponsiveContainer>
@@ -224,7 +224,7 @@ export default function ProjectInsights() {
                  <XAxis type="number" hide />
                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 700, fill: '#18181b'}} width={80} />
                  <Tooltip />
-                 <Bar dataKey="value" fill="#6C5CE7" radius={[0, 10, 10, 0]} barSize={20} />
+                 <Bar dataKey="value" fill="#155DEE" radius={[0, 10, 10, 0]} barSize={20} />
                </BarChart>
              </ResponsiveContainer>
            </div>

@@ -17,7 +17,7 @@
       right: 20px;
       width: 60px;
       height: 60px;
-      background: #6C5CE7;
+      background: #155DEE;
       border-radius: 50%;
       display: flex;
       align-items: center;

@@ -5,15 +5,15 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Inter", sans-serif;
   
-  --color-primary: #6C5CE7;
+  --color-primary: #155DEE;
   --color-primary-foreground: #ffffff;
-  --color-primary-muted: rgba(108, 92, 231, 0.1);
+  --color-primary-muted: rgba(21, 93, 238, 0.1);
   
-  --color-brand-dark: #0F172A;
-  --color-brand-accent: #8B7CFF;
-  --color-brand-gray: #64748B;
-  --color-brand-bg: #F8F7FF;
-  --color-brand-border: #E2DEFF;
+  --color-brand-dark: #101828;
+  --color-brand-accent: #155DEE;
+  --color-brand-gray: #667085;
+  --color-brand-bg: #FFFFFF;
+  --color-brand-border: #EFF4FF;
   --color-brand-online: #22C55E;
 
   /* Aliases for common utility names */
@@ -31,10 +31,7 @@
 }
 
 .wordmark-gist {
-  background: linear-gradient(135deg, #6C5CE7 0%, #8B7CFF 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #155DEE;
 }
 
 /* Custom Scrollbar for a premium feel */

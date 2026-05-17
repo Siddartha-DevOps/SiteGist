@@ -29,7 +29,7 @@ export async function action({ request }: ActionFunctionArgs) {
         settings: {
           systemPrompt: "You are a helpful AI assistant. Answer based on the knowledge provided.",
           branding: { 
-            primaryColor: "#6C5CE7",
+            primaryColor: "#155DEE",
             botName: name,
             welcomeMessage: `Hi! I'm ${name}. How can I help you today?`
           }

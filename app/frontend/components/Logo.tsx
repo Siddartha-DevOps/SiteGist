@@ -18,13 +18,18 @@ export function Logo({ className = "", size = "md", hideText = false, variant = 
 
   const currentSize = sizes[size];
   
-  // Color logic for variants
-  const bgGradStart = variant === "dark" ? "#9B8FF8" : "#7C6EF0";
-  const bgGradEnd = variant === "dark" ? "#7C6EF0" : "#5A4CD6";
+  // Brand colors
+  const primaryBlue = "#155DEE";
+  const darkNavy = "#101828";
+  
+  // For the "bright purple gradient" request, I'll use a very vibrant blue-indigo gradient
+  // as it fits the "SiteGist" blue brand while providing that "bright" feeling.
+  const gradientStart = "#155DEE";
+  const gradientEnd = "#7C6EF0"; // Adding a touch of purple as requested for the "bright" feel
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      {/* Refined SVG Logo Icon */}
+      {/* Robot Logo Icon */}
       <svg 
         width={currentSize.icon} 
         height={currentSize.icon} 
@@ -34,46 +39,35 @@ export function Logo({ className = "", size = "md", hideText = false, variant = 
         className="shrink-0"
       >
         <defs>
-          <linearGradient id={`bgGrad-${id}`} x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor={bgGradStart}/>
-            <stop offset="100%" stopColor={bgGradEnd}/>
+          <linearGradient id={`logoGrad-${id}`} x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={gradientStart}/>
+            <stop offset="100%" stopColor={gradientEnd}/>
           </linearGradient>
-          <linearGradient id={`shineGrad-${id}`} x1="0" y1="0" x2="0" y2="40" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="white" stopOpacity="0.18"/>
-            <stop offset="100%" stopColor="white" stopOpacity="0"/>
-          </linearGradient>
-          <filter id={`shadow-${id}`} x="-20%" y="-10%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#6C5CE7" floodOpacity="0.35"/>
-          </filter>
         </defs>
         
-        {/* Main rounded square */}
-        <rect x="2" y="2" width="64" height="64" rx="18" fill={`url(#bgGrad-${id})`} filter={`url(#shadow-${id})`}/>
+        {/* Antenna */}
+        <circle cx="36" cy="12" r="4" fill={primaryBlue}/>
+        <rect x="34.5" y="16" width="3" height="8" rx="1.5" fill={primaryBlue}/>
         
-        {/* Shine overlay */}
-        <rect x="2" y="2" width="64" height="34" rx="18" fill={`url(#shineGrad-${id})`}/>
+        {/* Robot Head Outer Shape */}
+        <rect x="8" y="24" width="56" height="40" rx="14" fill={`url(#logoGrad-${id})`}/>
         
-        {/* Chat tail */}
-        <path d="M20 54 L14 64 L32 58" fill={variant === "dark" ? "#7C6EF0" : "#5A4CD6"}/>
+        {/* Face Inner Area */}
+        <rect x="14" y="30" width="44" height="28" rx="8" fill={darkNavy}/>
         
-        {/* Robot Face */}
-        <circle cx="28" cy="30" r="5" fill="white"/>
-        <circle cx="44" cy="30" r="5" fill="white"/>
-        <circle cx="29.5" cy="31.5" r="2.2" fill="#7C6EF0"/>
-        <circle cx="45.5" cy="31.5" r="2.2" fill="#7C6EF0"/>
+        {/* Curved Smiling Eyes */}
+        <path d="M22 41 C22 39 28 39 28 41" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+        <path d="M44 41 C44 39 50 39 50 41" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
         
-        {/* Smile arc */}
-        <path d="M28 42 Q36 48 44 42" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-        
-        {/* Knowledge lines (subtle gist indicators) */}
-        <rect x="22" y="20" width="10" height="2" rx="1" fill="white" opacity="0.3"/>
-        <rect x="40" y="20" width="10" height="2" rx="1" fill="white" opacity="0.3"/>
+        {/* Small ears/accents */}
+        <rect x="4" y="38" width="4" height="12" rx="2" fill={primaryBlue}/>
+        <rect x="64" y="38" width="4" height="12" rx="2" fill={primaryBlue}/>
       </svg>
 
       {!hideText && (
-        <span className={`${currentSize.text} font-black tracking-tighter font-display leading-none flex items-center`}>
-          <span className={variant === "dark" ? "text-white" : "text-brand-dark"}>site</span>
-          <span className="wordmark-gist">gist</span>
+        <span className={`${currentSize.text} font-bold tracking-tight font-display leading-none flex items-center`}>
+          <span className={variant === "dark" ? "text-white" : "text-[#101828]"}>Site</span>
+          <span className="text-[#155DEE]">Gist</span>
         </span>
       )}
     </div>

@@ -52,6 +52,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>SiteGist — AI-Powered Customer Support</title>
+        <meta name="description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7. No humans required." />
+        <meta name="theme-color" content="#155DEE" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="SiteGist" />
+        <meta property="og:title" content="SiteGist — AI-Powered Customer Support" />
+        <meta property="og:description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7." />
+        <meta property="og:image" content="/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:url" content="https://sitegist.co" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="SiteGist — AI-Powered Customer Support" />
+        <meta name="twitter:description" content="SiteGist understands your site and delivers instant, accurate answers — 24/7." />
+        <meta name="twitter:image" content="/og-image.png" />
         <Meta />
         <Links />
       </head>

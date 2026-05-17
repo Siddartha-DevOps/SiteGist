@@ -162,12 +162,12 @@ export default function ProjectSettings() {
                       type="color" 
                       name="primaryColor" 
                       id="primaryColor"
-                      defaultValue={branding.primaryColor || "#6C5CE7"}
+                      defaultValue={branding.primaryColor || "#155DEE"}
                       className="h-14 w-20 bg-zinc-50 border border-zinc-100 rounded-2xl p-1 cursor-pointer"
                     />
                     <input 
                       type="text" 
-                      value={branding.primaryColor || "#6C5CE7"}
+                      value={branding.primaryColor || "#155DEE"}
                       readOnly
                       className="flex-1 px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl text-zinc-400 font-mono text-sm"
                     />
@@ -370,7 +370,7 @@ export default function ProjectSettings() {
               
               {/* Mock Widget UI */}
               <div className="relative z-10 w-full max-w-xs bg-white rounded-[32px] shadow-2xl border border-zinc-100 overflow-hidden flex flex-col h-full translate-y-4">
-                <div className="p-4 flex items-center justify-between border-b border-zinc-50" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+                <div className="p-4 flex items-center justify-between border-b border-zinc-50" style={{ backgroundColor: branding.primaryColor || '#155DEE' }}>
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
                       <Bot className="w-6 h-6 text-white" />
@@ -396,7 +396,7 @@ export default function ProjectSettings() {
                 <div className="p-4 bg-white border-t border-zinc-50">
                   <div className="p-3 bg-zinc-50 rounded-xl text-xs text-text-muted flex items-center justify-between">
                     Type a message...
-                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: branding.primaryColor || '#155DEE' }}>
                       <Bot className="w-3.5 h-3.5 text-white" />
                     </div>
                   </div>
@@ -404,7 +404,7 @@ export default function ProjectSettings() {
               </div>
 
               {/* Floating Trigger Button */}
-              <div className="absolute bottom-12 right-12 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center transform hover:scale-110 transition-transform cursor-pointer" style={{ backgroundColor: branding.primaryColor || '#6C5CE7' }}>
+              <div className="absolute bottom-12 right-12 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center transform hover:scale-110 transition-transform cursor-pointer" style={{ backgroundColor: branding.primaryColor || '#155DEE' }}>
                 <MessageSquare className="text-white w-8 h-8" />
               </div>
             </div>

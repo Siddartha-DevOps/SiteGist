@@ -117,38 +117,42 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
       transition={{ type: "spring", damping: 25, stiffness: 300 }}
-      className="w-[360px] h-[520px] max-h-[70vh] bg-white rounded-[32px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.25)] border border-zinc-100 overflow-hidden flex flex-col mb-4 ring-1 ring-black/5"
+      className="w-[380px] h-[650px] max-h-[85vh] bg-white rounded-[32px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.25)] border border-zinc-100 overflow-hidden flex flex-col mb-2 ring-1 ring-black/5"
     >
       {/* Header */}
-      <div className="bg-primary p-5 text-white flex items-center justify-between shadow-lg shadow-primary/20 relative overflow-hidden group">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.2)_0%,transparent_70%)]" />
+      <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
         <div className="flex items-center gap-3 relative z-10">
-          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center backdrop-blur-md shadow-inner ring-1 ring-white/20">
-            <Logo size="sm" hideText variant="dark" />
+          <div className="w-10 h-10 flex items-center justify-center">
+            <Logo size="sm" hideText />
           </div>
           <div>
-            <p className="text-[10px] opacity-80 uppercase tracking-widest font-black flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-              Ask SiteGist
+            <p className="text-[11px] uppercase tracking-[0.2em] font-black flex items-center gap-1.5 bg-clip-text text-transparent bg-gradient-to-r from-[#155DEE] to-[#7C6EF0]">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
+              ASK SiteGIST
             </p>
           </div>
         </div>
         <button 
           onClick={onClose}
-          className="p-2 hover:bg-white/10 rounded-lg transition-colors relative z-10"
+          className="p-2 hover:bg-zinc-100 rounded-lg transition-colors relative z-10 text-zinc-400 hover:text-zinc-600"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
       {/* Messages Area */}
-      <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-4 bg-zinc-50/30">
+      <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-4 bg-white">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1">
             <Logo size="sm" hideText className="scale-75" />
           </div>
-          <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-brand-dark shadow-sm leading-relaxed max-w-[85%]">
-            Hi! How can I help you today?
+          <div className="bg-zinc-50/50 p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed max-w-[85%] whitespace-pre-line">
+            👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
+            Ask me about:{"\n"}
+            • Plans & pricing{"\n"}
+            • Setup & integrations{"\n"}
+            • Security & privacy{"\n"}
+            • Enterprise & other options.
           </div>
         </div>
 
@@ -162,8 +166,8 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col max-w-[85%]">
               <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed ${
                 msg.role === "user" 
-                  ? "bg-primary text-white rounded-tr-none" 
-                  : "bg-white text-brand-dark border border-zinc-100 rounded-tl-none"
+                  ? "bg-white text-zinc-800 border border-zinc-100 rounded-tr-none" 
+                  : "bg-zinc-50/50 text-zinc-800 border border-zinc-100 rounded-tl-none"
               }`}>
                 {msg.content || <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>}
               </div>
@@ -197,7 +201,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             e.preventDefault();
             handleSend();
           }}
-          className="flex gap-2 p-2 bg-zinc-50 border border-zinc-100 rounded-2xl focus-within:ring-2 focus-within:ring-primary/10 focus-within:border-primary transition-all"
+          className="flex gap-2 p-2 bg-zinc-50 border border-zinc-100 rounded-2xl focus-within:ring-2 focus-within:ring-[#155DEE]/10 focus-within:border-[#155DEE] transition-all"
         >
           <input 
             type="text" 
@@ -205,20 +209,20 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type your message..."
             disabled={isTyping}
-            className="flex-1 bg-transparent px-3 text-sm font-medium outline-none placeholder:text-zinc-400"
+            className="flex-1 bg-transparent px-3 text-sm font-medium outline-none placeholder:text-zinc-400 text-zinc-800"
           />
           <button 
             type="submit"
             disabled={!input.trim() || isTyping}
-            className="p-2.5 bg-primary text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
+            className="p-2.5 bg-white border border-zinc-100 text-zinc-400 rounded-xl shadow-sm hover:bg-zinc-50 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
           >
             <Send className="w-4 h-4" />
           </button>
         </form>
-        <div className="flex items-center justify-center gap-1.5 mt-4 opacity-30 group">
+        <div className="flex items-center justify-center gap-1.5 mt-4 opacity-40 group">
            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Powered by</span>
-           <Logo size="sm" hideText variant="light" className="scale-50 grayscale group-hover:grayscale-0 transition-all" />
-           <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 -ml-2">SiteGist</span>
+           <Logo size="sm" hideText className="scale-50 grayscale group-hover:grayscale-0 transition-all opacity-50" />
+           <span className="text-[9px] font-black uppercase tracking-widest text-[#155DEE] -ml-1">SiteGist</span>
         </div>
       </div>
     </motion.div>
@@ -270,7 +274,7 @@ export function ChatWidget() {
   if (!mounted) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end">
+    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end">
       <AnimatePresence>
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} />}
       </AnimatePresence>

@@ -94,8 +94,8 @@ export function DashboardIndexPage({ projects, isCreating }: DashboardIndexPageP
                   <AreaChartAny data={analyticsData}>
                     <defs>
                       <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6C5CE7" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#6C5CE7" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#155DEE" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#155DEE" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
                     <CartesianGridAny strokeDasharray="3 3" vertical={false} stroke="#F1F1F4" />
@@ -123,7 +123,7 @@ export function DashboardIndexPage({ projects, isCreating }: DashboardIndexPageP
                     <AreaAny 
                       type="monotone" 
                       dataKey="leads" 
-                      stroke="#6C5CE7" 
+                      stroke="#155DEE" 
                       fillOpacity={1} 
                       fill="url(#colorLeads)" 
                       strokeWidth={4}
@@ -164,7 +164,7 @@ export function DashboardIndexPage({ projects, isCreating }: DashboardIndexPageP
                     ]}>
                       <BarAny dataKey="val" radius={[4, 4, 0, 0]}>
                         { [0, 1, 2, 3].map((entry, index) => (
-                          <CellAny key={`cell-${index}`} fill={index === 0 ? '#6C5CE7' : '#E4E4E7'} />
+                          <CellAny key={`cell-${index}`} fill={index === 0 ? '#155DEE' : '#E4E4E7'} />
                         ))}
                       </BarAny>
                       <XAxisAny dataKey="name" hide />
