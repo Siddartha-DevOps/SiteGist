@@ -15,6 +15,11 @@ function cleanKey(val: any): string | null {
   
   let raw = val.trim();
   
+  // Detect and warn about 'k-proj-' vs 'sk-proj-'
+  if (raw.startsWith("k-proj-")) {
+    console.warn(`[AI] TYPO_DETECTED: Key starts with 'k-proj-'. It almost certainly should be 'sk-proj-'. Please check the first letter.`);
+  }
+
   // Handle case where user pastes "GEMINI_API_KEY=AIZa..."
   const envMatch = raw.match(/^[A-Z0-9_]+=(.*)$/s);
   if (envMatch) {
@@ -31,9 +36,6 @@ function cleanKey(val: any): string | null {
   let tempRaw = raw.toLowerCase();
   for (const label of commonLabels) {
     if (tempRaw.startsWith(label)) {
-      // For sk- labels, we don't want to slice them off if they are part of the key
-      // but users sometimes paste "OpenAI Key: sk-proj-..."
-      // Let's just remove the first part if it's a label
       if (label.includes(":")) {
          raw = raw.slice(label.length).trim();
          tempRaw = raw.toLowerCase();
@@ -45,11 +47,13 @@ function cleanKey(val: any): string | null {
   raw = raw.replace(/^['"]|['"]$/g, "").trim();
 
   // Remove ALL whitespace and non-printable characters.
-  let cleaned = raw.replace(/[\s\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
+  // We explicitly target invisible characters like zero-width spaces (\u200B) often found in copy-pastes.
+  let cleaned = raw.replace(/[\s\u00A0\u1680\u180e\u2000-\u200b\u202f\u205f\u3000\ufeff\x00-\x1f\x7f-\x9f]/g, "");
   
   // CRITICAL: Block masked keys. 
   // Dashboards often show "sk-proj-****" or "AIZa...••••"
   if (cleaned.includes("*") || cleaned.includes("•") || cleaned.includes("...") || cleaned.includes("****")) {
+     console.error(`[AI] MASKED_KEY_REJECTED: Found asterisks or dots in key. Length: ${cleaned.length}`);
      return null; 
   }
 
@@ -65,7 +69,8 @@ function cleanKey(val: any): string | null {
 function getDiagnosticInfo(key: string | null | undefined): string {
   if (!key) return "NOT_FOUND";
   const length = key.length;
-  const start = key.substring(0, 7);
+  // Show more characters to verify prefixes like sk-proj-
+  const start = key.substring(0, 12);
   const end = key.slice(-4);
   
   // Check for common masking patterns
@@ -78,19 +83,19 @@ function getDiagnosticInfo(key: string | null | undefined): string {
   for (let i = 0; i < key.length; i++) {
     const code = key.charCodeAt(i);
     if (code < 32 || code > 126) {
-      hiddenChars.push(`pos ${i}: hex ${code.toString(16)}`);
+      hiddenChars.push(`pos ${i}: hex ${code.toString(16).toUpperCase()}`);
     }
   }
   
-  let info = `Length: ${length}, First 7: "${start}"... Last 4: "${end}"`;
+  let info = `Length: ${length}, Start: "${start}"... End: "${end}"`;
   if (isMasked) {
-    info += ` | ❌ CRITICAL: KEY IS MASKED (contains * or •). You copied a UI placeholder! Click 'Copy' or eye icon in your dashboard.`;
+    info += ` | ❌ CRITICAL: KEY IS MASKED. You cannot copy the masked version (sk-proj-****) from the list. You MUST click 'Create new secret key' and immediately copy the code from the popup before it disappears.`;
   }
   if (isDummy) {
     info += ` | ❌ CRITICAL: DUMMY KEY DETECTED. The key contains placeholder text.`;
   }
   if (isProbablyOpenAIButMissingS) {
-    info += ` | ❌ CRITICAL: OpenAI key starts with "k-proj-" but MUST start with "sk-proj-". You are missing the 's' at the beginning.`;
+    info += ` | ❌ CRITICAL: OpenAI key starts with "k-proj-" but MUST start with "sk-proj-". You are likely missing the 's' at the beginning.`;
   }
   if (hiddenChars.length > 0) {
     info += ` | ⚠️ WARNING: ${hiddenChars.length} hidden chars found (${hiddenChars.slice(0, 3).join(", ")})`;
@@ -100,124 +105,86 @@ function getDiagnosticInfo(key: string | null | undefined): string {
 
 let _openai: OpenAI | null = null;
 let _openaiFoundVar = "none";
+let _lastOpenAIKey = "";
 
 function getOpenAI() {
-  if (!_openai) {
+  const searchKeys = ["OPENAI_API_KEY", "VITE_OPENAI_API_KEY"];
+  let currentKey = "";
+  let currentVar = "none";
+
+  for (const key of searchKeys) {
+    const val = process.env[key];
+    const cleaned = cleanKey(val);
+    if (cleaned) {
+      currentKey = cleaned;
+      currentVar = key;
+      break; 
+    }
+  }
+
+  // If the key in environment has changed, reset the client
+  if (currentKey !== _lastOpenAIKey) {
+    _openai = null;
+    _lastOpenAIKey = currentKey;
+    _openaiFoundVar = currentVar;
+  }
+
+  if (!_openai && currentKey) {
     const portkey = getPortkey();
-    // Only use Portkey if it's explicitly configured with a pk- key
     const pkKey = process.env.PORTKEY_API_KEY?.trim();
     if (portkey && pkKey && pkKey.startsWith("pk-")) {
       console.log("[AI] Initializing OpenAI via Portkey");
       _openai = portkey as any;
-      return _openai;
+    } else {
+      console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+      _openai = new OpenAI({ apiKey: currentKey });
     }
-
-    const searchKeys = ["OPENAI_API_KEY", "VITE_OPENAI_API_KEY"];
-    
-    // Diagnostic: Log all candidate keys found
-    console.log("[AI] Scanning for OpenAI keys...");
-    const foundKeys: string[] = [];
-    for (const key of searchKeys) {
-      const val = process.env[key];
-      if (val) {
-        const cleaned = cleanKey(val);
-        console.log(`  - ${key}: ${cleaned ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
-        if (cleaned) foundKeys.push(`${key}(${val.substring(0, 5)}...)`);
-      }
-    }
-
-    let rawKey = null;
-    let foundButSkippedCount = 0;
-    for (const key of searchKeys) {
-      const val = process.env[key];
-      const cleaned = cleanKey(val);
-      if (cleaned) {
-        if (!rawKey) {
-          rawKey = cleaned;
-          _openaiFoundVar = key;
-        } else if (cleaned !== rawKey) {
-          console.warn(`[AI] COLLISION: Multiple OpenAI keys found. Using ${_openaiFoundVar}, but ${key} also has a DIFFERENT key.`);
-        }
-      } else if (val) {
-        foundButSkippedCount++;
-      }
-    }
-      
-    if (!rawKey) {
-      console.warn("[AI] OpenAI API Key not found. Checked:", searchKeys.join(", "));
-      return null;
-    }
-
-    // Diagnostic
-    if (rawKey.startsWith("AIza")) {
-      console.warn(`[AI] WARNING: Key in ${_openaiFoundVar} starts with "AIza", which looks like a Gemini/Google key. OpenAI keys usually start with "sk-".`);
-    }
-
-    console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
-    _openai = new OpenAI({ apiKey: rawKey });
   }
   return _openai;
 }
 
 let _gemini: GoogleGenerativeAI | null = null;
 let _geminiFoundVar = "none";
+let _lastGeminiKey = "";
 
 function getGemini(): GoogleGenerativeAI | null {
-  if (!_gemini) {
-    const searchKeys = [
-      "GEMINI_API_KEY",
-      "GOOGLE_API_KEY",
-      "VITE_GEMINI_API_KEY",
-      "GOOGLE_GENERATIVE_AI_API_KEY",
-      "GOOGLE_GENAI_API_KEY",
-      "AI_API_KEY",
-    ];
-    
-    // Diagnostic: Log all candidate keys found
-    console.log("[AI] Scanning for Gemini keys...");
-    const foundKeys: string[] = [];
-    for (const key of searchKeys) {
-      const val = process.env[key];
-      if (val) {
-        const cleaned = cleanKey(val);
-        console.log(`  - ${key}: ${cleaned ? "VALID_FORMAT" : "EMPTY/INVALID"}. ${getDiagnosticInfo(val)}`);
-        if (cleaned) foundKeys.push(`${key}(${val.substring(0, 5)}...)`);
-      }
-    }
+  const searchKeys = [
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "VITE_GEMINI_API_KEY",
+    "GOOGLE_GENERATIVE_AI_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "AI_API_KEY",
+  ];
 
-    let rawKey = null;
-    for (const key of searchKeys) {
-      const val = process.env[key];
-      const cleaned = cleanKey(val);
-      if (cleaned) {
-        if (!rawKey) {
-          rawKey = cleaned;
-          _geminiFoundVar = key;
-        } else if (cleaned !== rawKey) {
-          console.warn(`[AI] COLLISION: Multiple Gemini keys found. Using ${_geminiFoundVar}, but ${key} also has a DIFFERENT key.`);
-        }
-      }
-    }
+  let currentKey = "";
+  let currentVar = "none";
 
-    if (!rawKey) {
-      console.warn("[AI] Gemini API Key not found in any of the environment variables:", searchKeys.join(", "));
-      return null;
+  for (const key of searchKeys) {
+    const val = process.env[key];
+    const cleaned = cleanKey(val);
+    if (cleaned) {
+      currentKey = cleaned;
+      currentVar = key;
+      break;
     }
-    
-    // Diagnostic
-    if (rawKey.startsWith("sk-")) {
-      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} starts with "sk-", which looks like an OpenAI key. Gemini keys usually start with "AIza". | ALL_KEYS: ${foundKeys.join(", ")}`);
-    } else if (!rawKey.startsWith("AIza")) {
-      console.warn(`[AI] WARNING: Key in ${_geminiFoundVar} does NOT start with "AIza". Gemini keys usually start with "AIza". Diagnostic: ${getDiagnosticInfo(rawKey)} | ALL_KEYS: ${foundKeys.join(", ")}`);
-    }
+  }
 
-    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(rawKey)} | All candidates: ${foundKeys.join(", ")}`);
-    _gemini = new GoogleGenerativeAI(rawKey);
+  // If the key in environment has changed, reset the client
+  if (currentKey !== _lastGeminiKey) {
+    _gemini = null;
+    _lastGeminiKey = currentKey;
+    _geminiFoundVar = currentVar;
+  }
+
+  if (!_gemini && currentKey) {
+    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+    _gemini = new GoogleGenerativeAI(currentKey);
 
     // List models for diagnostic purposes asynchronously
     (async () => {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${rawKey}`);
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${currentKey}`);
         if (response.ok) {
           const data = await response.json();
           const modelList = data.models?.map((m: any) => m.name.replace("models/", "")).join(", ");
@@ -337,6 +304,18 @@ export async function deleteSourceChunks(projectId: string, sourceValue: string)
 }
 
 export async function* streamRAG(projectId: string, query: string, systemPrompt?: string, history: { role: string, content: string }[] = []) {
+  // IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
+  const normalizedQuery = query.toLowerCase().trim().replace(/[?!.]+$/, "");
+  const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?", "pricing plans", "pricing"];
+  if (greetings.includes(normalizedQuery) || /^(hi|hello|hey)\b/i.test(normalizedQuery) && normalizedQuery.length < 12) {
+    if (normalizedQuery.includes("pricing")) {
+      yield "SiteGist offers three plans: \n- **Free**: 1 project, 50 queries.\n- **Pro ($19/mo)**: 5 projects, 1,000 queries.\n- **Enterprise**: Custom volume.\n\nHow can I help you with these today?";
+    } else {
+      yield "Hi! How can I help you today?";
+    }
+    return;
+  }
+
   let context = "";
   let citationMetadata: { url?: string; title?: string }[] = [];
   
@@ -497,6 +476,7 @@ How it works:
   4. Use professional, concise Markdown.
   5. If asked about "refunds", mention the "14-day no-questions-asked" policy.
   6. If asked about "pricing", list the Free, Pro ($19/mo), and Enterprise options.
+  7. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   
   USER QUERY: ${query}
   
@@ -548,11 +528,11 @@ How it works:
            errorMsg = `[API_KEY_ERROR] Google AI Studio rejected the key (Expired or Invalid).
            Diagnostic: ${diag}. 
            Action: Go to https://aistudio.google.com/app/apikey. 
-           1. Create a NEW key (don't reuse old ones). 
-           2. Look for the 'eyeball' icon or 'Copy' button. 
-           3. Ensure you copy the WHOLE text, not text containing '****'.`;
+           1. Create a NEW key (expired keys cannot be renewed). 
+           2. Look for the 'Copy' icon or click on the key string to reveal it. 
+           3. Ensure you copy the WHOLE secret, excluding any '****'.`;
            if (diag.includes("MASKED") || diag.includes("...")) {
-              errorMsg += "\n\nCRITICAL: Your key contains stars (*) or dots (...). You copied a 'Hidden' version of the key. Click the 'Copy' button in AI Studio specifically.";
+              errorMsg += "\n\nCRITICAL: You copied a 'Hidden' version of the key. You must click the 'Copy' icon in AI Studio to get the real secret.";
            }
         } else if (errorMsg.includes("quota")) {
            errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait a few minutes or use OpenAI.`;
@@ -591,9 +571,9 @@ How it works:
             Diagnostic: ${diag}. 
             Action: 
             1. Go to platform.openai.com/api-keys. 
-            2. Create a NEW secret key. 
-            3. Copy the secret IMMEDIATELY after creation (it vanishes after). 
-            4. DO NOT copy the key from the list view (sk-proj-****).`;
+            2. Click "+ Create new secret key".
+            3. Copy the secret IMMEDIATELY. You only get ONE chance to see it!
+            4. If you see "sk-proj-****" in a list, it's MASKED. Create a new one.`;
             if (diag.includes("MASKED") || diag.includes("*")) {
               errorMsg += "\n\nCRITICAL: Your key has asterisks (*). You copied the MASKED version. You must click 'Create new secret key' and copy the text shown in the popup!";
             }
