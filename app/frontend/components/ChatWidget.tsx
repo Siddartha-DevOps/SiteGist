@@ -285,10 +285,12 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <Send className="w-4 h-4" />
           </button>
         </form>
-        <div className="flex items-center justify-center gap-1.5 mt-4 opacity-40 group">
-           <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Powered by</span>
-           <Logo size="sm" hideText className="scale-50 grayscale group-hover:grayscale-0 transition-all opacity-50" />
-           <span className="text-[9px] font-black uppercase tracking-widest text-[#155DEE] -ml-1">SiteGist</span>
+        <div className="flex items-center justify-center gap-1.5 mt-4 group cursor-default">
+           <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400">Powered by</span>
+           <Logo size="sm" hideText className="scale-75 transition-all opacity-30 grayscale group-hover:opacity-100 group-hover:grayscale-0" />
+           <span className="text-[10px] font-black uppercase tracking-tight -ml-1">
+             <span className="text-zinc-800">Site</span><span className="text-[#155DEE]">Gist</span>
+           </span>
         </div>
       </div>
     </motion.div>
