@@ -22,13 +22,13 @@ function cleanKey(val: any): string | null {
 
   // CRITICAL: Block masked keys early. 
   // Dashboards often show "sk-proj-****" or "AIZa...••••"
-  if (raw.includes("*") || raw.includes("•") || raw.includes("...") || raw.includes("****")) {
-     console.error(`[AI] MASKED_KEY_DETECTED: Your key contains stars or dots. You copied a hidden placeholder! Length: ${raw.length}`);
+  if (raw.includes("*") || raw.includes("•") || (raw.includes("...") && raw.length < 50) || raw.includes("****")) {
+     console.error(`[AI] MASKED_KEY_DETECTED: Your key looks like a placeholder (contains stars, dots, or hidden chars). Length: ${raw.length}. Value: ${raw}`);
      return null; 
   }
 
   // Handle case where user pastes "GEMINI_API_KEY=AIZa..."
-  const envMatch = raw.match(/^[A-Z0-9_]+=(.*)$/s);
+  const envMatch = raw.match(/^[a-z0-9_]+=(.*)$/i);
   if (envMatch) {
     raw = envMatch[1].trim();
   }
@@ -438,19 +438,19 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
     console.log(`[RAG Audit] Stage 1: Operating in Demo Mode. Providing SiteGist System Knowledge.`);
     context = `
 About SiteGist:
-SiteGist is a powerful AI Chatbot builder and lead generation platform designed specifically for service businesses. It allows users to crawl their websites, train an AI agent in minutes, and embed a floating chatbot that handles 24/7 sales, lead capture, and appointment booking.
+SiteGist is a powerful AI Chatbot builder and lead generation platform. It allows users to crawl their websites, train an AI agent in minutes, and embed a floating chatbot that handles 24/7 sales, lead capture, and appointment booking.
 
 Key Features:
-- Website Crawling: Automatically extracts knowledge from your URLs, sitemaps, and even YouTube transcripts.
-- Lead Generation: Intelligently captures visitor contact info (name, email, phone) during conversations.
-- Custom Branding: You can customize colors, logos, and the "welcome" message to match your brand.
-- Multi-Channel: Embed on your website via a simple <script> tag or use it as a standalone landing page.
-- Integrations: Supports Notion, Google Drive, Slack, and Zapier for syncing data and notifications.
-- Human Handoff: Notifies your team via Slack or Webhooks when a lead requests a real person.
+- AI-powered answers: Instant, accurate responses derived from your website content.
+- Multi-channel deployment: Embed on your website via a script tag or use it as a standalone landing page.
+- Lead Generation: Intelligently captures visitor contact info (name, email, phone) with customizable forms.
+- Human Handoff: Seamlessly notifies your team via Slack or Zendesk when a human agent is needed.
+- Automatic content syncing: SiteGist keeps your chatbot updated as you change your website content.
+- Integrations: Supports Notion, Google Drive, Slack, Zendesk, and Zapier for syncing data and notifications.
 
 Pricing & Subscription Plans:
 - Free Starter: 1 chatbot project, 50 message credits/month, basic crawling.
-- Pro Plan ($19/month): 5 chatbot projects, 1,000 message credits/month, priority support, and advanced integrations.
+- Pro Plan ($19/month): 5 chatbot projects, 1,000 message credits/month, priority support, and advanced integrations (Notion, Google Drive, Slack, Zapier).
 - Enterprise: Custom pricing for unlimited projects, white-label options, and dedicated account management.
 
 Refund Policy:
@@ -539,15 +539,10 @@ How it works:
         const diag = getDiagnosticInfo(process.env[_geminiFoundVar]);
         
         if (errorMsg.includes("API key not valid") || errorMsg.includes("API key expired") || errorMsg.includes("400") || errorMsg.includes("INVALID_ARGUMENT") || errorMsg.includes("key expired")) {
-           errorMsg = `[API_KEY_ERROR] Google AI Studio rejected the key (Expired or Invalid).
+           errorMsg = `[API_KEY_ERROR] Key rejected (EXPIRED or INVALID).
            Diagnostic: ${diag}. 
-           Action: Go to https://aistudio.google.com/app/apikey. 
-           1. Create a NEW key (expired keys cannot be renewed). 
-           2. Look for the 'Copy' icon or click on the key string to reveal it. 
-           3. Ensure you copy the WHOLE secret, excluding any '****'.`;
-           if (diag.includes("MASKED") || diag.includes("...")) {
-              errorMsg += "\n\nCRITICAL: You copied a 'Hidden' version of the key. You must click the 'Copy' icon in AI Studio to get the real secret.";
-           }
+           
+           Action: Create a NEW key at aistudio.google.com/app/apikey and paste it into Settings. Ensure you copy the FULL secret (no stars).`;
         } else if (errorMsg.includes("quota")) {
            errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait a few minutes or use OpenAI.`;
         }

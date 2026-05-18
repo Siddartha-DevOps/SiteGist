@@ -52,13 +52,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
     const reaction = reactions[id];
     
     return (
-      <div className="flex items-center gap-3 mt-2">
+      <div className="flex items-center gap-3 mt-3 pt-2 border-t border-zinc-100/50">
         <div className="relative">
           <button 
             onClick={() => handleCopy(text, id)}
-            className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 hover:text-[#155DEE] transition-colors group/btn"
+            className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-[#155DEE] transition-colors group/btn"
           >
-            {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5 opacity-60" />}
             <span>{copiedId === id ? 'Copied' : 'Copy'}</span>
           </button>
           <AnimatePresence>
@@ -76,16 +76,16 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         </div>
         <button 
           onClick={() => handleReaction(id, 'like')}
-          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-500 hover:text-[#155DEE]'}`}
+          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-400 hover:text-[#155DEE]'}`}
         >
-          <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : ''}`} />
+          <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : 'opacity-60'}`} />
           <span>Like</span>
         </button>
         <button 
           onClick={() => handleReaction(id, 'dislike')}
-          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-500 hover:text-zinc-800'}`}
+          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-400 hover:text-zinc-800'}`}
         >
-          <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : ''}`} />
+          <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : 'opacity-60'}`} />
           <span>Dislike</span>
         </button>
       </div>
@@ -232,13 +232,14 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed whitespace-pre-line relative group/msg overflow-hidden">
               👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
               Ask me about:{"\n"}
-              • Plans & pricing{"\n"}
-              • Setup & integrations{"\n"}
-              • Security & privacy{"\n"}
-              • Enterprise & other options.
+              • AI-powered answers from your content{"\n"}
+              • Multi-channel deployment{"\n"}
+              • Lead capture with customizable forms{"\n"}
+              • Human agent handoff (Slack/Zendesk){"\n"}
+              • Integrations (Zapier, Notion, etc)
 
               <ActionButtons 
-                text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• Plans & pricing\n• Setup & integrations\n• Security & privacy\n• Enterprise & other options.`} 
+                text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• AI-powered answers from your content\n• Multi-channel deployment\n• Lead capture with customizable forms\n• Human agent handoff (Slack/Zendesk)\n• Integrations (Zapier, Notion, etc)`} 
                 id="welcome" 
                 isWelcome 
               />
@@ -270,7 +271,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                 )}
               </div>
 
-              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-right' : 'text-right'}`}>
+              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider text-right`}>
                 {getRelativeTime(msg.timestamp)}
               </span>
             </div>
