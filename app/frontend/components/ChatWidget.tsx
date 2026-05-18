@@ -238,13 +238,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
 
       {/* Messages Area */}
       <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
-        <div className="flex items-end gap-3">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1">
+        <div className="flex items-end gap-2">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1.5 mb-1">
             <Logo size="sm" hideText className="scale-75" />
           </div>
           <div className="flex flex-col max-w-[85%]">
-            <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed relative group/msg">
-              <div className="text-zinc-800 space-y-2">
+            <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-900 shadow-sm leading-relaxed relative group/msg">
+              <div className="text-zinc-900 space-y-2">
                 <p>👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.</p>
                 <p>Ask me about:</p>
                 <p>
@@ -266,16 +266,16 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
               />
             </div>
 
-            <span className="text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider">
+            <span className="text-[9px] mt-1.5 ml-1 opacity-40 font-bold uppercase tracking-wider">
               just now
             </span>
           </div>
         </div>
 
         {messages.map((msg, i) => (
-          <div key={i} className={`flex items-end gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+          <div key={i} className={`flex items-end gap-2 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
             {msg.role === "assistant" && (
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
+              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
                 <Logo size="sm" hideText className="scale-75" />
               </div>
             )}
@@ -283,7 +283,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
               <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden whitespace-pre-wrap ${
                 msg.role === "user" 
                   ? "bg-[#0A2D60] text-white rounded-tr-none" 
-                  : "bg-white text-zinc-800 border border-zinc-200/50 rounded-tl-none rounded-bl-none"
+                  : "bg-white text-zinc-900 border border-zinc-200/50 rounded-tl-none rounded-bl-none"
               }`}>
                 {msg.content ? (
                   <div>
@@ -298,7 +298,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                 )}
               </div>
 
-              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider ${msg.role === "user" ? "text-right" : ""}`}>
+              <span className={`text-[9px] mt-1.5 opacity-40 font-bold uppercase tracking-wider ${msg.role === "user" ? "text-right mr-1" : "ml-1"}`}>
                 {getRelativeTime(msg.timestamp)}
               </span>
             </div>
@@ -320,8 +320,8 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         )}
 
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
-          <div className="flex items-end gap-3 text-left">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
+          <div className="flex items-end gap-2 text-left">
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
               <Logo size="sm" hideText className="scale-75" />
             </div>
             <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 shadow-sm flex gap-1">
