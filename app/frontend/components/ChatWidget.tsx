@@ -20,41 +20,29 @@ const ActionButtons = ({ text, id, reactions, handleCopy, handleReaction, copied
   const reaction = reactions[id];
   
   return (
-    <div className="flex items-center gap-3 mt-3 pt-2 border-t border-zinc-100/50">
+    <div className="absolute -bottom-4 right-4 flex items-center gap-0.5 p-1 bg-white border border-zinc-100 rounded-2xl shadow-lg transition-all duration-300 opacity-0 -translate-y-1 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:translate-y-0 group-hover/msg:pointer-events-auto z-20 hover:shadow-xl">
       <div className="relative">
         <button 
           onClick={() => handleCopy(text, id)}
-          className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-[#155DEE] transition-colors group/btn"
+          className={`p-2 rounded-xl transition-all ${copiedId === id ? 'text-green-500 bg-green-50' : 'text-zinc-400 hover:text-[#155DEE] hover:bg-[#155DEE]/5'} active:scale-90`}
+          title="Copy"
         >
-          {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5 opacity-60" />}
-          <span>{copiedId === id ? 'Copied' : 'Copy'}</span>
+          {copiedId === id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
-        <AnimatePresence>
-          {copiedId === id && (
-            <motion.div 
-              initial={{ opacity: 0, y: -5 }}
-              animate={{ opacity: 1, y: 5 }}
-              exit={{ opacity: 0, y: -5 }}
-              className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
-            >
-              Copied!
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
       <button 
         onClick={() => handleReaction(id, 'like')}
-        className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-400 hover:text-[#155DEE]'}`}
+        className={`p-2 rounded-xl transition-all ${reaction === 'like' ? 'text-[#155DEE] bg-[#155DEE]/10' : 'text-zinc-400 hover:text-[#155DEE] hover:bg-[#155DEE]/5'} active:scale-90`}
+        title="Like"
       >
-        <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : 'opacity-60'}`} />
-        <span>Like</span>
+        <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : ''}`} />
       </button>
       <button 
         onClick={() => handleReaction(id, 'dislike')}
-        className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-400 hover:text-zinc-800'}`}
+        className={`p-2 rounded-xl transition-all ${reaction === 'dislike' ? 'text-zinc-800 bg-zinc-100' : 'text-zinc-400 hover:text-zinc-800 hover:bg-zinc-50'} active:scale-90`}
+        title="Dislike"
       >
-        <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : 'opacity-60'}`} />
-        <span>Dislike</span>
+        <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : ''}`} />
       </button>
     </div>
   );
@@ -280,7 +268,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <div className={`flex flex-col max-w-[85%] relative group/msg`}>
-              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden whitespace-pre-wrap ${
+              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed whitespace-pre-wrap relative ${
                 msg.role === "user" 
                   ? "bg-[#0A2D60] text-white rounded-tr-none" 
                   : "bg-white text-zinc-900 border border-zinc-200/50 rounded-tl-none rounded-bl-none"
