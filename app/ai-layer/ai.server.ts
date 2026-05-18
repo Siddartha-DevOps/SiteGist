@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { pineconeIndex } from "~/lib/pinecone.server";
 import { getPortkey } from "./portkey.server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
@@ -150,11 +150,11 @@ function getOpenAI() {
   return _openai;
 }
 
-let _gemini: GoogleGenerativeAI | null = null;
+let _gemini: GoogleGenAI | null = null;
 let _geminiFoundVar = "none";
 let _lastGeminiKey = "";
 
-function getGemini(): GoogleGenerativeAI | null {
+function getGemini(): GoogleGenAI | null {
   const searchKeys = [
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -186,7 +186,14 @@ function getGemini(): GoogleGenerativeAI | null {
 
   if (!_gemini && currentKey) {
     console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
-    _gemini = new GoogleGenerativeAI(currentKey);
+    _gemini = new GoogleGenAI({
+      apiKey: currentKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
 
     // List models for diagnostic purposes asynchronously
     (async () => {
@@ -269,9 +276,11 @@ export async function embedText(text: string) {
   // Fallback to Gemini embedding if possible
   const gemini = getGemini();
   if (gemini) {
-    const model = gemini.getGenerativeModel({ model: "text-embedding-004" });
-    const response = await model.embedContent(text);
-    return response.embedding.values;
+    const response = await gemini.models.embedContent({ 
+      model: "gemini-embedding-2-preview", 
+      contents: [text] 
+    });
+    return response.embeddings?.[0]?.values || [];
   }
   throw new Error("No embedding provider available (OpenAI key failed and Gemini not configured)");
 }
@@ -506,24 +515,22 @@ How it works:
   try {
     if (gemini) {
       try {
-        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash-latest stream...`);
+        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-3-flash-preview stream...`);
         
-        // Use a 20s timeout for the fetch itself if possible (Gemini SDK uses fetch)
-        const result = await model.generateContentStream([{ text: prompt }]);
+        const result = await gemini.models.generateContentStream({
+          model: "gemini-3-flash-preview",
+          contents: prompt
+        });
         
-        for await (const chunk of result.stream) {
+        for await (const chunk of result) {
           try {
-            const chunkText = chunk.text();
+            const chunkText = chunk.text;
             if (chunkText) {
               fullAnswer += chunkText;
               yield chunkText;
             }
           } catch (chunkError: any) {
             console.warn("[RAG Audit] Stage 7: Error parsing Gemini chunk:", chunkError);
-            if (chunk.promptFeedback?.blockReason) {
-              console.error("[RAG Audit] Gemini Blocked prompt:", chunk.promptFeedback.blockReason);
-            }
           }
         }
       } catch (e: any) {
@@ -648,9 +655,11 @@ How it works:
     let verificationResult: any = { status: "VERIFIED", explanation: "Verified during generation." };
     
     if (gemini) {
-      const vModel = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-      const vResp = await vModel.generateContent(verificationPrompt);
-      const vText = vResp.response.text();
+      const vResp = await gemini.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: verificationPrompt
+      });
+      const vText = vResp.text || "";
       // Simple JSON extraction
       const jsonMatch = vText.match(/\{.*\}/s);
       if (jsonMatch) verificationResult = JSON.parse(jsonMatch[0]);
@@ -680,10 +689,12 @@ export async function* generateSimpleAIStream(prompt: string) {
   try {
     if (gemini) {
       try {
-        const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        const result = await model.generateContentStream([{ text: prompt }]);
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
+        const result = await gemini.models.generateContentStream({
+          model: "gemini-3-flash-preview",
+          contents: prompt
+        });
+        for await (const chunk of result) {
+          const text = chunk.text;
           if (text) {
             fullAnswer += text;
             yield text;

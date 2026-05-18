@@ -1,7 +1,7 @@
 import { json } from "@remix-run/node";
 import { pineconeIndex } from "~/lib/pinecone.server";
 import { prisma } from "~/database/db.server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 
 export async function loader() {
@@ -41,9 +41,11 @@ export async function loader() {
   try {
     const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (key) {
-      const genAI = new GoogleGenerativeAI(key);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-      await model.generateContent("hello");
+      const ai = new GoogleGenAI({ apiKey: key });
+      await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "hello"
+      });
       diagnostic.services.gemini = "OK";
       
       // List models for diagnostic
