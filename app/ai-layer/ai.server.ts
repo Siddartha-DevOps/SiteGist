@@ -325,7 +325,7 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
   const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?", "pricing plans", "pricing"];
   if (greetings.includes(normalizedQuery) || /^(hi|hello|hey)\b/i.test(normalizedQuery) && normalizedQuery.length < 12) {
     if (normalizedQuery.includes("pricing")) {
-      yield "SiteGist offers three plans: \n- **Free**: 1 project, 50 queries.\n- **Pro ($19/mo)**: 5 projects, 1,000 queries.\n- **Enterprise**: Custom volume.\n\nHow can I help you with these today?";
+      yield "SiteGist offers three plans: \n- Free: 1 project, 50 queries.\n- Pro ($19/mo): 5 projects, 1,000 queries.\n- Enterprise: Custom volume.\n\nHow can I help you with these today?";
     } else {
       yield "Hi! How can I help you today?";
     }
@@ -485,13 +485,13 @@ How it works:
   CONVERSATION HISTORY:
   ${promptHistory}
 
-  STRICT GROUNDING RULES:
+  STRICT FORMATTING RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER (e.g. general knowledge, unrelated topics), say: "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
-  3. DO NOT HALLUCINATE. If a feature isn't in the context, it doesn't exist for you.
-  4. Use professional, concise Markdown.
-  5. If asked about "refunds", mention the "14-day no-questions-asked" policy.
-  6. If asked about "pricing", list the Free, Pro ($19/mo), and Enterprise options.
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
+  3. DO NOT HALLUCINATE.
+  4. Use professional, concise PLAIN TEXT. 
+  5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
+  6. Use clean paragraphs or simple dashes (-) for lists.
   7. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   
   USER QUERY: ${query}
@@ -662,9 +662,7 @@ How it works:
 
     if (verificationResult.status === "UNVERIFIED") {
        console.warn(`[Verification Alert] Answer was marked as UNVERIFIED: ${verificationResult.explanation}`);
-       yield `\n\n*⚠️ Verification Note: ${verificationResult.explanation}*`;
-    } else {
-       yield `\n\n*✅ Answer verified against knowledge base.*`;
+       // We keep it in logs but don't clutter the UI with stars and emojis
     }
   } catch (vError) {
     console.error("[Verification] Error during verification step:", vError);

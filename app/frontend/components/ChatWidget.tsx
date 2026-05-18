@@ -1,7 +1,64 @@
+import * as React from "react";
 import { useState, useEffect } from "react";
 import { Logo } from "./Logo";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+
+/**
+ * ActionButtons
+ * Reusable component for message actions (copy, like, dislike).
+ */
+const ActionButtons = ({ text, id, reactions, handleCopy, handleReaction, copiedId }: { 
+  text: string; 
+  id: number | string; 
+  reactions: Record<string | number, 'like' | 'dislike' | null>;
+  handleCopy: (text: string, id: number | string) => void;
+  handleReaction: (id: string | number, type: 'like' | 'dislike') => void;
+  copiedId: number | string | null;
+}) => {
+  const reaction = reactions[id];
+  
+  return (
+    <div className="flex items-center gap-3 mt-3 pt-2 border-t border-zinc-100/50">
+      <div className="relative">
+        <button 
+          onClick={() => handleCopy(text, id)}
+          className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-[#155DEE] transition-colors group/btn"
+        >
+          {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5 opacity-60" />}
+          <span>{copiedId === id ? 'Copied' : 'Copy'}</span>
+        </button>
+        <AnimatePresence>
+          {copiedId === id && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 5 }}
+              exit={{ opacity: 0, y: -5 }}
+              className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
+            >
+              Copied!
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      <button 
+        onClick={() => handleReaction(id, 'like')}
+        className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-400 hover:text-[#155DEE]'}`}
+      >
+        <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : 'opacity-60'}`} />
+        <span>Like</span>
+      </button>
+      <button 
+        onClick={() => handleReaction(id, 'dislike')}
+        className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-400 hover:text-zinc-800'}`}
+      >
+        <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : 'opacity-60'}`} />
+        <span>Dislike</span>
+      </button>
+    </div>
+  );
+};
 
 /**
  * ChatWidgetPanel
@@ -46,50 +103,6 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
     const diff = now.getTime() - new Date(date).getTime();
     if (diff < 60000) return "just now";
     return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const ActionButtons = ({ text, id, isWelcome = false }: { text: string; id: number | string; isWelcome?: boolean }) => {
-    const reaction = reactions[id];
-    
-    return (
-      <div className="flex items-center gap-3 mt-3 pt-2 border-t border-zinc-100/50">
-        <div className="relative">
-          <button 
-            onClick={() => handleCopy(text, id)}
-            className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 hover:text-[#155DEE] transition-colors group/btn"
-          >
-            {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5 opacity-60" />}
-            <span>{copiedId === id ? 'Copied' : 'Copy'}</span>
-          </button>
-          <AnimatePresence>
-            {copiedId === id && (
-              <motion.div 
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 5 }}
-                exit={{ opacity: 0, y: -5 }}
-                className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
-              >
-                Copied!
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-        <button 
-          onClick={() => handleReaction(id, 'like')}
-          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-400 hover:text-[#155DEE]'}`}
-        >
-          <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : 'opacity-60'}`} />
-          <span>Like</span>
-        </button>
-        <button 
-          onClick={() => handleReaction(id, 'dislike')}
-          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-400 hover:text-zinc-800'}`}
-        >
-          <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : 'opacity-60'}`} />
-          <span>Dislike</span>
-        </button>
-      </div>
-    );
   };
 
   useEffect(() => {
@@ -176,7 +189,8 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
           } else if (trimmedLine.startsWith("event: session")) {
             // Wait for next 'data' line which follows session event
           } else if (trimmedLine.startsWith("event: metadata")) {
-             // Metadata context...
+            const data = JSON.parse(trimmedLine.slice(15));
+            if (data.sessionId) setSessionId(data.sessionId);
           }
         }
       }
@@ -199,7 +213,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
       transition={{ type: "spring", damping: 25, stiffness: 300 }}
-      className="w-[380px] h-[650px] max-h-[85vh] bg-white rounded-[32px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.25)] border border-zinc-100 overflow-hidden flex flex-col mb-2 ring-1 ring-black/5"
+      className="w-[420px] h-[720px] max-h-[90vh] bg-white rounded-[32px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.25)] border border-zinc-100 overflow-hidden flex flex-col mb-2 ring-1 ring-black/5"
     >
       {/* Header */}
       <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
@@ -229,23 +243,30 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <Logo size="sm" hideText className="scale-75" />
           </div>
           <div className="flex flex-col max-w-[85%]">
-            <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed whitespace-pre-line relative group/msg overflow-hidden">
-              👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
-              Ask me about:{"\n"}
-              • AI-powered answers from your content{"\n"}
-              • Multi-channel deployment{"\n"}
-              • Lead capture with customizable forms{"\n"}
-              • Human agent handoff (Slack/Zendesk){"\n"}
-              • Integrations (Zapier, Notion, etc)
+            <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed relative group/msg">
+              <div className="text-zinc-800 space-y-2">
+                <p>👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.</p>
+                <p>Ask me about:</p>
+                <p>
+                  • AI-powered answers from your content<br/>
+                  • Multi-channel deployment<br/>
+                  • Lead capture with customizable forms<br/>
+                  • Human agent handoff (Slack/Zendesk)<br/>
+                  • Integrations (Zapier, Notion, etc)
+                </p>
+              </div>
 
               <ActionButtons 
                 text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• AI-powered answers from your content\n• Multi-channel deployment\n• Lead capture with customizable forms\n• Human agent handoff (Slack/Zendesk)\n• Integrations (Zapier, Notion, etc)`} 
                 id="welcome" 
-                isWelcome 
+                reactions={reactions}
+                handleCopy={handleCopy}
+                handleReaction={handleReaction}
+                copiedId={copiedId}
               />
             </div>
 
-            <span className="text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider text-right">
+            <span className="text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider">
               just now
             </span>
           </div>
@@ -259,19 +280,25 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <div className={`flex flex-col max-w-[85%] relative group/msg`}>
-              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden ${
+              <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden whitespace-pre-wrap ${
                 msg.role === "user" 
-                  ? "bg-[#155DEE] text-white rounded-tr-none" 
-                  : "bg-white text-zinc-800 border border-zinc-100 rounded-tl-none rounded-bl-none"
+                  ? "bg-[#0A2D60] text-white rounded-tr-none" 
+                  : "bg-white text-zinc-800 border border-zinc-200/50 rounded-tl-none rounded-bl-none"
               }`}>
-                {msg.content || <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>}
+                {msg.content ? (
+                  <div>
+                    {msg.content}
+                  </div>
+                ) : (
+                  <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>
+                )}
                 
                 {msg.role === "assistant" && msg.content && (
-                  <ActionButtons text={msg.content} id={i} />
+                  <ActionButtons text={msg.content} id={i} reactions={reactions} handleCopy={handleCopy} handleReaction={handleReaction} copiedId={copiedId} />
                 )}
               </div>
 
-              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider text-right`}>
+              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider ${msg.role === "user" ? "text-right" : ""}`}>
                 {getRelativeTime(msg.timestamp)}
               </span>
             </div>
@@ -293,7 +320,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         )}
 
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
-          <div className="flex items-end gap-3">
+          <div className="flex items-end gap-3 text-left">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
               <Logo size="sm" hideText className="scale-75" />
             </div>
@@ -385,11 +412,15 @@ export function ChatWidget() {
     setMounted(true);
   }, []);
 
-  if (!mounted) return null;
+  if (!mounted) return (
+    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
+       {/* Placeholder to avoid hydration mismatch */}
+    </div>
+  );
 
   return (
-    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end">
-      <AnimatePresence>
+    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
+      <AnimatePresence mode="wait">
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} />}
       </AnimatePresence>
       <ChatWidgetLauncher isOpen={isOpen} onClick={() => setIsOpen(!isOpen)} />
