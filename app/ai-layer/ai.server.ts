@@ -277,7 +277,7 @@ export async function embedText(text: string) {
   const gemini = getGemini();
   if (gemini) {
     const response = await gemini.models.embedContent({ 
-      model: "gemini-embedding-2-preview", 
+      model: "text-embedding-004", 
       contents: [text] 
     });
     return response.embeddings?.[0]?.values || [];
@@ -515,10 +515,10 @@ How it works:
   try {
     if (gemini) {
       try {
-        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-3-flash-preview stream...`);
+        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash stream...`);
         
         const result = await gemini.models.generateContentStream({
-          model: "gemini-3-flash-preview",
+          model: "gemini-1.5-flash",
           contents: prompt
         });
         
@@ -656,7 +656,7 @@ How it works:
     
     if (gemini) {
       const vResp = await gemini.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: verificationPrompt
       });
       const vText = vResp.text || "";
@@ -690,7 +690,7 @@ export async function* generateSimpleAIStream(prompt: string) {
     if (gemini) {
       try {
         const result = await gemini.models.generateContentStream({
-          model: "gemini-3-flash-preview",
+          model: "gemini-1.5-flash",
           contents: prompt
         });
         for await (const chunk of result) {

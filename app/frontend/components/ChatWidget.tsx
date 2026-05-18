@@ -14,6 +14,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
+  const [showSuggestions, setShowSuggestions] = useState(true);
+
+  const suggestedQuestions = [
+    "Can you tell me more about the AI-powered answers feature?",
+    "What kind of tools can I integrate with SiteGist?",
+    "How does the multi-channel deployment work?"
+  ];
 
   const handleCopy = (text: string, id: number | string) => {
     navigator.clipboard.writeText(text);
@@ -28,17 +35,31 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
     }));
   };
 
+  const handleSuggestionClick = (question: string) => {
+    setInput(question);
+    handleSend(question);
+  };
+
+  const getRelativeTime = (date?: Date) => {
+    if (!date) return "just now";
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    if (diff < 60000) return "just now";
+    return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   const ActionButtons = ({ text, id, isWelcome = false }: { text: string; id: number | string; isWelcome?: boolean }) => {
     const reaction = reactions[id];
     
     return (
-      <div className={`absolute bottom-1 right-1 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-all duration-200 pr-1 pb-1`}>
+      <div className="flex items-center gap-3 mt-2">
         <div className="relative">
           <button 
             onClick={() => handleCopy(text, id)}
-            className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all text-zinc-400 hover:text-[#155DEE] group/btn"
+            className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 hover:text-[#155DEE] transition-colors group/btn"
           >
-            {copiedId === id ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedId === id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedId === id ? 'Copied' : 'Copy'}</span>
           </button>
           <AnimatePresence>
             {copiedId === id && (
@@ -46,7 +67,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 5 }}
                 exit={{ opacity: 0, y: -5 }}
-                className="absolute left-1/2 -translate-x-1/2 top-full mt-1 px-1.5 py-0.5 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
+                className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap z-50 pointer-events-none"
               >
                 Copied!
               </motion.div>
@@ -55,15 +76,17 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
         </div>
         <button 
           onClick={() => handleReaction(id, 'like')}
-          className={`p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all ${reaction === 'like' ? 'text-[#155DEE] bg-white shadow-sm' : 'text-zinc-400 hover:text-[#155DEE]'}`}
+          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'like' ? 'text-[#155DEE]' : 'text-zinc-500 hover:text-[#155DEE]'}`}
         >
           <ThumbsUp className={`w-3.5 h-3.5 ${reaction === 'like' ? 'fill-current' : ''}`} />
+          <span>Like</span>
         </button>
         <button 
           onClick={() => handleReaction(id, 'dislike')}
-          className={`p-1.5 rounded-lg hover:bg-white hover:shadow-sm transition-all ${reaction === 'dislike' ? 'text-zinc-800/80 bg-white shadow-sm' : 'text-zinc-400 hover:text-zinc-800'}`}
+          className={`flex items-center gap-1.5 text-[11px] font-bold transition-colors ${reaction === 'dislike' ? 'text-zinc-800' : 'text-zinc-500 hover:text-zinc-800'}`}
         >
           <ThumbsDown className={`w-3.5 h-3.5 ${reaction === 'dislike' ? 'fill-current' : ''}`} />
+          <span>Dislike</span>
         </button>
       </div>
     );
@@ -74,14 +97,16 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isTyping]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isTyping) return;
+  const handleSend = async (overrideInput?: string) => {
+    const textToSend = overrideInput || input;
+    if (!textToSend.trim() || isTyping) return;
 
-    const userMessage = input.trim();
+    const userMessage = textToSend.trim();
     const now = new Date();
-    setInput("");
+    if (!overrideInput) setInput("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage, timestamp: now }]);
     setIsTyping(true);
+    setShowSuggestions(false);
 
     try {
       const response = await fetch("/api/chat", {
@@ -164,6 +189,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
       ]);
     } finally {
       setIsTyping(false);
+      setShowSuggestions(true);
     }
   };
 
@@ -197,29 +223,35 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Messages Area */}
-      <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-4 bg-white">
-        <div className="flex items-start gap-3">
+      <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
+        <div className="flex items-end gap-3">
           <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1">
             <Logo size="sm" hideText className="scale-75" />
           </div>
-          <div className="bg-zinc-50/50 p-4 rounded-2xl rounded-tl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed max-w-[85%] whitespace-pre-line relative group/msg overflow-hidden">
-            👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
-            Ask me about:{"\n"}
-            • Plans & pricing{"\n"}
-            • Setup & integrations{"\n"}
-            • Security & privacy{"\n"}
-            • Enterprise & other options.
+          <div className="flex flex-col max-w-[85%]">
+            <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-800 shadow-sm leading-relaxed whitespace-pre-line relative group/msg overflow-hidden">
+              👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.{"\n"}
+              Ask me about:{"\n"}
+              • Plans & pricing{"\n"}
+              • Setup & integrations{"\n"}
+              • Security & privacy{"\n"}
+              • Enterprise & other options.
 
-            <ActionButtons 
-              text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• Plans & pricing\n• Setup & integrations\n• Security & privacy\n• Enterprise & other options.`} 
-              id="welcome" 
-              isWelcome 
-            />
+              <ActionButtons 
+                text={`👋 Hi, I’m the SiteGIST Assistant — built by SiteGIST itself.\nAsk me about:\n• Plans & pricing\n• Setup & integrations\n• Security & privacy\n• Enterprise & other options.`} 
+                id="welcome" 
+                isWelcome 
+              />
+            </div>
+
+            <span className="text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider text-right">
+              just now
+            </span>
           </div>
         </div>
 
         {messages.map((msg, i) => (
-          <div key={i} className={`flex items-start gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+          <div key={i} className={`flex items-end gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
             {msg.role === "assistant" && (
               <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
                 <Logo size="sm" hideText className="scale-75" />
@@ -228,8 +260,8 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
             <div className={`flex flex-col max-w-[85%] relative group/msg`}>
               <div className={`p-4 rounded-2xl text-[13px] font-medium shadow-sm leading-relaxed overflow-hidden ${
                 msg.role === "user" 
-                  ? "bg-white text-zinc-800 border border-zinc-100 rounded-tr-none" 
-                  : "bg-zinc-50/50 text-zinc-800 border border-zinc-100 rounded-tl-none"
+                  ? "bg-[#155DEE] text-white rounded-tr-none" 
+                  : "bg-white text-zinc-800 border border-zinc-100 rounded-tl-none rounded-bl-none"
               }`}>
                 {msg.content || <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>}
                 
@@ -237,21 +269,34 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                   <ActionButtons text={msg.content} id={i} />
                 )}
               </div>
-              {msg.timestamp && (
-                <span className={`text-[9px] mt-1 opacity-40 font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
+
+              <span className={`text-[9px] mt-2 opacity-40 font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-right' : 'text-right'}`}>
+                {getRelativeTime(msg.timestamp)}
+              </span>
             </div>
           </div>
         ))}
 
+        {showSuggestions && !isTyping && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+          <div className="flex flex-col gap-2 pl-11 pt-2">
+            {suggestedQuestions.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSuggestionClick(q)}
+                className="text-[12px] text-zinc-600 font-medium bg-zinc-50 hover:bg-[#155DEE]/5 hover:text-[#155DEE] border border-zinc-100 hover:border-[#155DEE]/20 px-3 py-2 rounded-xl transition-all text-left w-fit shadow-sm"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
-          <div className="flex items-start gap-3">
+          <div className="flex items-end gap-3">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1">
               <Logo size="sm" hideText className="scale-75" />
             </div>
-            <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none border border-zinc-100 shadow-sm flex gap-1">
+            <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 shadow-sm flex gap-1">
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce"></div>
