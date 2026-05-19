@@ -130,8 +130,8 @@ model BillingSubscription {
   id                   String   @id @default(cuid())
   userId               String
   user                 User     @relation(fields: [userId], references: [id])
-  externalSubscriptionId String   @unique // Renamed from stripeSubscriptionId
-  externalCustomerId     String           // Renamed from stripeCustomerId
+  externalSubscriptionId String   @unique @map("stripeSubscriptionId") // Maps to existing DB column
+  externalCustomerId     String           @map("stripeCustomerId")     // Maps to existing DB column
   status               String
   planId               String
   provider             String   @default("stripe") // "stripe" or "paddle"
