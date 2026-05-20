@@ -16,7 +16,11 @@ export default defineConfig(({ mode }) => {
       tsconfigPaths(),
       tailwindcss(),
     ],
+    optimizeDeps: {
+      exclude: ["pdf-parse", "pdf-parse/lib/pdf-parse.js"],
+    },
     ssr: {
+      external: ["pdf-parse", "pdf-parse/lib/pdf-parse.js"],
       noExternal: [
         "react-markdown",
         "remark-gfm",

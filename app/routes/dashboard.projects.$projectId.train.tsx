@@ -190,10 +190,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (method === "trigger_sync_now") {
-    // In a real app with Upstash Workflow, we'd trigger a workflow run here
-    // For now, we'll simulate it or explain it's triggered.
-    // fetch("https://workflow.upstash.io/...", { ... })
-    return json({ success: true, message: "On-demand sync initiated. Content will refresh in 2-3 minutes." });
+    const { syncProjectSources } = await import("~/backend/sync-job.server");
+    try {
+      await syncProjectSources(params.projectId!);
+      return json({ success: true, message: "On-demand sync successfully completed! All web pages and active integrations have been recrawled and updated." });
+    } catch (err: any) {
+      return json({ error: `On-demand sync failed: ${err.message}` }, { status: 500 });
+    }
   }
 
   if (method === "sync_notion") {

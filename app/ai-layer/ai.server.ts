@@ -396,7 +396,7 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       });
 
       // Add vector results
-      vectorResults.matches?.forEach(match => {
+      vectorResults.matches?.forEach((match: any) => {
         const text = (match.metadata as any)?.text;
         if (!text) return;
         const key = text.substring(0, 100);

@@ -12,12 +12,14 @@ function getClient() {
   
   if (!url || url.trim() === "") {
     console.error("--------------------------------------------------------------------------------");
-    console.error("CRITICAL ERROR: DATABASE_URL is missing or empty.");
-    console.error("The application cannot connect to the database.");
-    console.error("Please add DATABASE_URL to your environment variables (e.g., in Vercel settings).");
+    console.error("CRITICAL WARNING: DATABASE_URL is missing or empty.");
+    console.error("The application will not be able to connect to the database.");
+    console.error("Please add DATABASE_URL to your environment variables in AI Studio settings.");
+    console.error("Using a temporary placeholder connection string to prevent process crash-looping during boot.");
     console.error("--------------------------------------------------------------------------------");
-    // We throw to prevent the Proxy from silently failing or causing obscure errors later
-    throw new Error("DATABASE_URL is required but was not provided. Check your environment variables.");
+    
+    // Set a placeholder so Prisma can initialize without throwing a module-load exception
+    url = "postgresql://placeholder_user:placeholder_pass@127.0.0.1:5432/placeholder_db";
   }
 
   // Clean up quotes if present

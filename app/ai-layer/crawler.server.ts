@@ -61,15 +61,131 @@ export async function crawlUrl(url: string, recursive = false) {
   try {
     const response = await axios.get(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SiteGistBot/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; SiteGistBot/1.0; +https://sitegist.ai)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
       },
-      timeout: 10000,
+      timeout: 15000,
     });
     const $ = cheerio.load(response.data);
-    $("script, style, nav, footer, iframe, noscript").remove();
-    const title = $("title").text().trim();
-    const content = $("body").text().replace(/\s+/g, " ").trim();
-    return { title, content, url };
+    
+    // Clean up unnecessary, non-content tags
+    $("script, style, nav, footer, header, iframe, noscript, svg, .cookie-banner, #cookie-consent, .pop-up, .menu, .sidebar, [aria-hidden='true']").remove();
+    
+    const title = $("title").text().trim() || $("h1").first().text().trim() || url;
+    
+    // Advanced HTML-to-Markdown parser built directly on cheerio
+    let markdown = "";
+    
+    // Help helper function to traverse and extract markdown
+    function extractNode(element: any) {
+      $(element).children().each((_, el) => {
+        const tagName = el.tagName ? el.tagName.toLowerCase() : "";
+        
+        switch (tagName) {
+          case "h1":
+            markdown += `\n\n# ${$(el).text().trim().replace(/\s+/g, " ")}\n\n`;
+            break;
+          case "h2":
+            markdown += `\n\n## ${$(el).text().trim().replace(/\s+/g, " ")}\n\n`;
+            break;
+          case "h3":
+            markdown += `\n\n### ${$(el).text().trim().replace(/\s+/g, " ")}\n\n`;
+            break;
+          case "h4":
+          case "h5":
+          case "h6":
+            markdown += `\n\n#### ${$(el).text().trim().replace(/\s+/g, " ")}\n\n`;
+            break;
+          case "p": {
+            const text = $(el).text().trim().replace(/\s+/g, " ");
+            if (text) markdown += `\n\n${text}\n\n`;
+            break;
+          }
+          case "li": {
+            const text = $(el).text().trim().replace(/\s+/g, " ");
+            if (text) markdown += `\n- ${text}`;
+            break;
+          }
+          case "ul":
+          case "ol":
+            markdown += "\n";
+            extractNode(el);
+            markdown += "\n";
+            break;
+          case "pre":
+          case "code": {
+            const codeText = $(el).text().trim();
+            if (codeText) markdown += `\n\`\`\`\n${codeText}\n\`\`\`\n`;
+            break;
+          }
+          case "table": {
+            markdown += "\n\n";
+            const rows: string[][] = [];
+            $(el).find("tr").each((_, tr) => {
+              const row: string[] = [];
+              $(tr).find("th, td").each((_, td) => {
+                row.push($(td).text().trim().replace(/\s+/g, " ").replace(/\|/g, "\\|"));
+              });
+              if (row.length > 0) rows.push(row);
+            });
+            
+            if (rows.length > 0) {
+              // Add header
+              markdown += `| ${rows[0].join(" | ")} |\n`;
+              markdown += `| ${rows[0].map(() => "---").join(" | ")} |\n`;
+              // Add body
+              for (let i = 1; i < rows.length; i++) {
+                markdown += `| ${rows[i].join(" | ")} |\n`;
+              }
+            }
+            markdown += "\n";
+            break;
+          }
+          case "blockquote": {
+            const quote = $(el).text().trim().replace(/\s+/g, " ");
+            if (quote) markdown += `\n\n> ${quote}\n\n`;
+            break;
+          }
+          case "div":
+          case "section":
+          case "article":
+          case "main": {
+            // Traverse child elements
+            extractNode(el);
+            break;
+          }
+          default: {
+            // For simple inline text or text nodes
+            const text = $(el).text().trim().replace(/\s+/g, " ");
+            if (text && $(el).children().length === 0) {
+              markdown += ` ${text} `;
+            } else {
+              extractNode(el);
+            }
+          }
+        }
+      });
+    }
+
+    const bodyElement = $("body");
+    if (bodyElement.length > 0) {
+      extractNode(bodyElement);
+    } else {
+      markdown = $.text();
+    }
+
+    // Clean up excessive formatting artifacts
+    const cleanedContent = markdown
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/ +/g, " ")
+      .trim();
+
+    return { 
+      title, 
+      content: cleanedContent || $.text().replace(/\s+/g, " ").trim(), 
+      url 
+    };
   } catch (error) {
     console.error(`Error crawling ${url}:`, error);
     return null;
