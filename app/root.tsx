@@ -87,30 +87,42 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  console.error(error);
+  console.error("ErrorBoundary caught an unhandled exception:", error);
+
+  const is404 = isRouteErrorResponse(error) && error.status === 404;
 
   return (
-    <div className="bg-brand-bg min-h-screen flex items-center justify-center p-6 text-brand-dark">
-      <div className="max-w-md w-full bg-white p-8 rounded-[32px] border border-brand-border shadow-2xl text-center">
-        <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center text-red-500 mx-auto mb-6">
-          <Bot className="w-8 h-8" />
+    <div className="bg-[#FAF9F6] min-h-screen flex items-center justify-center p-6 text-[#1E293B]">
+      <div className="max-w-md w-full bg-white p-8 rounded-[32px] border border-[#E2E8F0] shadow-xl text-center">
+        <div className="w-16 h-16 bg-[#EFF6FF] rounded-2xl flex items-center justify-center text-[#2563EB] mx-auto mb-6">
+          <Bot className="w-8 h-8 text-[#155DEE]" />
         </div>
-        <h1 className="text-2xl font-bold mb-4">
-          {isRouteErrorResponse(error)
-            ? `${error.status} ${error.statusText}`
-            : error instanceof Error
-            ? error.message
-            : "Something went wrong"}
+        <h1 className="text-2xl font-extrabold mb-3 tracking-tight">
+          {is404 ? "This Page has Wandered Off" : "Let's Re-establish Contact"}
         </h1>
-        <p className="text-brand-gray font-medium mb-8">
-          The application encountered an unexpected error. Please check your environment variables or contact support.
+        <p className="text-[#64748B] text-sm font-medium mb-8 leading-relaxed">
+          {is404
+            ? "The page you're seeking couldn't be located. Let me guide you back to secure ground."
+            : "We are currently streamlining our secure assistant connections to handle your request. Let's refresh the assistant or head back to the main portal."}
         </p>
-        <a
-          href="/"
-          className="inline-flex items-center gap-2 bg-brand-dark text-white px-6 py-3 rounded-xl font-bold hover:bg-brand-accent transition-all"
-        >
-          Back to Home
-        </a>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.location.reload();
+              }
+            }}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-[#155DEE] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#004AD6] transition-all cursor-pointer"
+          >
+            Retry Connection
+          </button>
+          <a
+            href="/"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-100 text-slate-800 px-[#20px] py-3 rounded-xl font-bold hover:bg-slate-200 transition-all"
+          >
+            Back to Home
+          </a>
+        </div>
       </div>
     </div>
   );

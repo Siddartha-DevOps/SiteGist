@@ -1,6 +1,7 @@
 import { createCookieSessionStorage, redirect } from "@remix-run/node";
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { prisma } from "~/database/db.server";
+import { env } from "~/env.server";
 
 export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -15,12 +16,12 @@ export async function comparePassword(password: string, hash: string) {
   return timingSafeEqual(keyBuffer, derivedKey);
 }
 
-const sessionSecret = process.env.SESSION_SECRET || "DEFAULT_SECRET_CHANGE_ME";
+const sessionSecret = env.SESSION_SECRET || "DEFAULT_SECRET_CHANGE_ME";
 
 const storage = createCookieSessionStorage({
   cookie: {
     name: "sitegist_session",
-    secure: process.env.NODE_ENV === "production",
+    secure: env.NODE_ENV === "production",
     secrets: [sessionSecret],
     sameSite: "lax",
     path: "/",

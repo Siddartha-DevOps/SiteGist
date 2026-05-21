@@ -5,6 +5,12 @@ import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { validateEnvAtStartup } from "./env.server";
+
+// Run crucial production configuration checks on boot
+validateEnvAtStartup().catch(err => {
+  console.error("Critical error during config check:", err);
+});
 
 const ABORT_DELAY = 5_000;
 

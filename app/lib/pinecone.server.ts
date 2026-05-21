@@ -1,4 +1,5 @@
 import { Pinecone } from "@pinecone-database/pinecone";
+import { env } from "~/env.server";
 
 /**
  * Shared Pinecone client instance, lazily initialized.
@@ -7,7 +8,7 @@ let _pinecone: Pinecone | null = null;
 
 const getPineconeClient = () => {
   if (!_pinecone) {
-    const apiKey = (process.env.PINECONE_API_KEY || process.env.Pinecone_API_KEY || "").trim();
+    const apiKey = (env.PINECONE_API_KEY || "").trim();
     
     if (!apiKey) {
       console.warn("[Pinecone Audit] WARNING: PINECONE_API_KEY is not defined in environment variables.");
@@ -23,7 +24,7 @@ const getPineconeClient = () => {
 };
 
 const getIndex = () => {
-  const indexName = process.env.PINECONE_INDEX || "quickstart";
+  const indexName = env.PINECONE_INDEX || "quickstart";
   return getPineconeClient().index(indexName);
 };
 
@@ -43,17 +44,17 @@ export const pinecone = new Proxy({} as any, {
 });
 
 // Run connection diagnostic check asynchronously ONLY if keys are provided, to prevent boot crashes or slow starts
-const initApiKey = (process.env.PINECONE_API_KEY || process.env.Pinecone_API_KEY || "").trim();
-const indexName = process.env.PINECONE_INDEX || "quickstart";
+setTimeout(async () => {
+  const initApiKey = (env.PINECONE_API_KEY || "").trim();
+  const indexName = env.PINECONE_INDEX || "quickstart";
 
-if (initApiKey) {
-  setTimeout(async () => {
+  if (initApiKey) {
     try {
       const stats = await pineconeIndex.describeIndexStats();
       console.log(`[Pinecone Audit] SUCCESS: Connected to index "${indexName}". Stats:`, JSON.stringify(stats));
     } catch (err) {
       console.error(`[Pinecone Audit] ERROR: Failed to connect to index "${indexName}".`, err);
     }
-  }, 1000);
-}
+  }
+}, 1000);
 
