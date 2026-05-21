@@ -13,7 +13,7 @@ import {
 } from "@remix-run/react";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import React from "react";
-import { Bot } from "lucide-react";
+import { Bot, Database, Key, AlertTriangle } from "lucide-react";
 
 import "./frontend/styles/tailwind.css";
 import { Header } from "./frontend/components/Header";
@@ -89,7 +89,124 @@ export function ErrorBoundary() {
   const error = useRouteError();
   console.error("ErrorBoundary caught an unhandled exception:", error);
 
+  const errorString = error instanceof Error 
+    ? error.message 
+    : typeof error === "object" && error !== null 
+      ? JSON.stringify(error) 
+      : String(error);
+
+  const isPrismaAuthError = errorString.includes("P6002") || errorString.includes("API key is invalid") || (errorString.includes("Unauthorized") && errorString.toLowerCase().includes("accelerate"));
+  const isGenericDbError = !isPrismaAuthError && (
+    errorString.includes("Can't reach database") || 
+    errorString.toLowerCase().includes("prisma") || 
+    errorString.toLowerCase().includes("database")
+  );
+
   const is404 = isRouteErrorResponse(error) && error.status === 404;
+
+  if (isPrismaAuthError) {
+    return (
+      <div className="bg-[#F8FAFC] min-h-screen flex items-center justify-center p-6 text-[#1E293B]">
+        <div className="max-w-xl w-full bg-white p-8 md:p-10 rounded-[32px] border border-amber-200 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 inset-x-0 h-2 bg-gradient-to-r from-amber-400 via-orange-500 to-amber-400" />
+          
+          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mb-6">
+            <Key className="w-8 h-8" />
+          </div>
+          
+          <h1 className="text-2xl font-black mb-3 text-zinc-900 tracking-tight flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6 text-amber-500 shrink-0" /> Database Key Mismatch (Prisma P6002)
+          </h1>
+          
+          <p className="text-zinc-600 text-sm font-bold mb-6 leading-relaxed">
+            Your application's database connection is configured to use <span className="text-indigo-600 font-extrabold">Prisma Accelerate</span>, but the security API key embedded in your <span className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[11px]">DATABASE_URL</span> is invalid or has expired.
+          </p>
+
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mb-8 text-left space-y-4">
+            <div className="text-xs font-black text-slate-400 uppercase tracking-wider">How to Fix This Step-by-Step:</div>
+            <ol className="list-decimal list-inside space-y-3 text-xs font-bold text-slate-700">
+              <li>
+                <span className="text-zinc-950 font-black">Open AI Studio Settings:</span> Go to the top-right corner of the AI Studio workspace and click on <span className="text-indigo-600 font-extrabold">Settings &gt; Environment Variables</span>.
+              </li>
+              <li>
+                <span className="text-zinc-950 font-black">Verify Your URL:</span> Locate the <span className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[10px] text-slate-800">DATABASE_URL</span>. It should begin with <span className="font-mono text-zinc-500 text-[10px]">prisma+postgres://</span> or <span className="font-mono text-zinc-500 text-[10px]">postgresql://</span>.
+              </li>
+              <li>
+                <span className="text-zinc-950 font-black">Regenerate Key:</span> Visit your <a href="https://console.prisma.io" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-black hover:text-indigo-800">Prisma Data Platform Console</a>, regenerate your connection string, paste it inside AI Studio settings, and save.
+              </li>
+            </ol>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.reload();
+                }
+              }}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-zinc-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-black transition-all cursor-pointer"
+            >
+              Retry Connection
+            </button>
+            <a
+              href="/"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-100 text-slate-800 px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all text-center"
+            >
+              Back to Home
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isGenericDbError) {
+    return (
+      <div className="bg-[#F8FAFC] min-h-screen flex items-center justify-center p-6 text-[#1E293B]">
+        <div className="max-w-xl w-full bg-white p-8 md:p-10 rounded-[32px] border border-blue-200 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 inset-x-0 h-2 bg-blue-500" />
+          
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mb-6">
+            <Database className="w-8 h-8" />
+          </div>
+          
+          <h1 className="text-2xl font-black mb-3 text-zinc-900 tracking-tight">
+            Database Connection Offline
+          </h1>
+          
+          <p className="text-zinc-600 text-sm font-bold mb-6 leading-relaxed">
+            The application failed to connect to the database. This typically happens during sudden traffic spikes or when your PostgreSQL instances are completing a routine maintenance cycle.
+          </p>
+
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mb-8 text-left">
+            <div className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">Technical Summary:</div>
+            <div className="bg-zinc-950 text-emerald-400 p-4 rounded-xl font-mono text-[11px] leading-relaxed break-all max-h-32 overflow-y-auto w-full">
+              {errorString}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-3">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.reload();
+                }
+              }}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all cursor-pointer"
+            >
+              Retry Connection
+            </button>
+            <a
+              href="/"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-100 text-slate-800 px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all text-center"
+            >
+              Back to Home
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-[#FAF9F6] min-h-screen flex items-center justify-center p-6 text-[#1E293B]">
