@@ -68,6 +68,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="twitter:description" content="SiteGist understands your site and delivers instant, accurate answers — 24/7." />
         <meta name="twitter:image" content="/images/hero.png" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <script
+          defer
+          data-website-id="dfid_jdhKNHuiQeBJuwVkakfYd"
+          data-domain="stegist.co"
+          src="https://datafa.st/js/script.js"
+        />
         <Meta />
         <Links />
       </head>
