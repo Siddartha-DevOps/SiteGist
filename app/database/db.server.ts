@@ -90,9 +90,10 @@ function getPrisma() {
 }
 
 const prisma = new Proxy({} as ExtendedPrismaClient, {
-  get(target, prop, receiver) {
+  get(target, prop) {
     const client = getPrisma();
-    return Reflect.get(client, prop, receiver);
+    const val = Reflect.get(client, prop);
+    return typeof val === "function" ? val.bind(client) : val;
   },
 });
 
