@@ -74,7 +74,11 @@ export default function Billing() {
 
   useEffect(() => {
     if (actionData && 'checkoutPlanId' in actionData) {
-       // @ts-ignore
+      if (isInsideIframe) {
+        setDemoPlanMessage("Checkout Blocked: Secure payment checkout sessions cannot be initialized within nested iframes. Please click 'Open in New Tab' inside the yellow header banner above to complete your subscription trial in a secure window.");
+        return;
+      }
+      // @ts-ignore
       if (typeof Paddle !== 'undefined') {
         try {
           // @ts-ignore
@@ -100,7 +104,7 @@ export default function Billing() {
         setDemoPlanMessage(`Demo Mode: Securing checkout session for dynamic billing setup. Target plan: ${actionData.checkoutPlanId}. User logged in: ${actionData.userEmail || "anonymous"}`);
       }
     }
-  }, [actionData]);
+  }, [actionData, isInsideIframe]);
 
   const plans = [
     {

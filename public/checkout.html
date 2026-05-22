@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paddle.js Integration Demo & Checkout Sandbox</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    code, pre {
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+
+  <!-- Load Paddle.js directly from official Paddle CDN -->
+  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+
+  <script type="text/javascript">
+    // Helper function to get query params or inputs and run checkout
+    function initializeAndCheckout() {
+      const tokenInput = document.getElementById('token-input').value.trim();
+      const priceIdInput = document.getElementById('price-input').value.trim();
+      const isSandbox = !tokenInput.startsWith('live_');
+
+      if (!tokenInput || tokenInput.includes('xxxxxx') || tokenInput === 'test_99bce225540de757f831d4cc5f5') {
+        alert('Please update the client token with your actual test_... or live_... client-side token!');
+        return;
+      }
+      if (!priceIdInput || priceIdInput.includes('pri_01h1vjes1y1')) {
+        alert('Please update the Price ID with your actual Paddle Price ID (e.g., pri_...)');
+        return;
+      }
+
+      try {
+        // Set environment (sandbox or production)
+        if (isSandbox) {
+          Paddle.Environment.set("sandbox");
+          console.log("[Paddle] Set environment to sandbox");
+        } else {
+          console.log("[Paddle] Set environment to production");
+        }
+
+        // Initialize with input token
+        Paddle.Initialize({
+          token: tokenInput
+        });
+
+        // Open checkout
+        Paddle.Checkout.open({
+          items: [
+            { priceId: priceIdInput, quantity: 1 }
+          ]
+        });
+
+        console.log("[Paddle] Checkout opening initialized for " + priceIdInput);
+      } catch (error) {
+        console.error("[Paddle] Error during checkout initialization: ", error);
+        alert("Paddle Error: " + error.message);
+      }
+    }
+
+    // Default static openCheckout function for the minimal direct copy-paste code below
+    function openCheckout() {
+      // Set to sandbox environment before Initialize
+      Paddle.Environment.set("sandbox");
+      
+      // Initialize with client token
+      Paddle.Initialize({
+        token: "test_99bce225540de757f831d4cc5f5", // <- Edit with your client-side token (test_... or live_...)
+      });
+
+      // Open checkout modal
+      Paddle.Checkout.open({
+        items: [
+          { priceId: "pri_01kqpe8ad9772rdsn3ddbw4bg3", quantity: 1 }, // <- Edit with your price ID
+          { priceId: "pri_01kqpe9hv3r1v9wfxxvnjgq9zk", quantity: 1 },
+          { priceId: "pri_01kqpebd19q7nppxkh53e0cnd3", quantity: 1 }
+        ],
+      });
+    }
+  </script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-blue-600 selection:text-white">
+
+  <!-- Header Banner -->
+  <header class="border-b border-slate-800 bg-slate-950/50 backdrop-blur px-6 py-4">
+    <div class="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-blue-600/10 rounded-lg text-blue-400">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-credit-card"><rect width="20" height="14" rx="2" ry="2" x="2" y="5"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg text-white">Paddle.js v2 Web Sandbox</h1>
+          <p class="text-xs text-slate-400">CDN script loader & checkout testbench</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-400/10 text-emerald-400">
+          ● CDN Loaded Successfully
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="max-w-5xl w-full mx-auto px-6 py-10 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+    
+    <!-- Left interactive test panel -->
+    <div class="lg:col-span-6 bg-slate-950/60 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
+      <div>
+        <h2 class="text-xl font-bold text-white tracking-tight mb-2">Configure Sandbox Checkout</h2>
+        <p class="text-slate-400 text-sm">
+          Instead of editing the checkout code file directly, you can insert your client-side token and price ID here to test your configuration live in the sandbox.
+        </p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label for="token-input" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+            Client-Side Token <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="text" 
+            id="token-input" 
+            placeholder="test_99bce2255xxxxxxx" 
+            class="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm transition"
+          >
+          <p class="text-xs text-slate-500 mt-1.5">
+            Use starting with <code class="text-blue-400">test_</code> for sandbox mode, or <code class="text-emerald-400">live_</code> for production mode.
+          </p>
+        </div>
+
+        <div>
+          <label for="price-input" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+            Paddle Price ID <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="text" 
+            id="price-input" 
+            placeholder="pri_01h1vjes1y163xfj1rh1tkfb65" 
+            class="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm transition"
+          >
+          <p class="text-xs text-slate-500 mt-1.5">
+            Your custom-configured price identifier created in the Paddle billing catalog.
+          </p>
+        </div>
+      </div>
+
+      <button 
+        onclick="initializeAndCheckout()" 
+        class="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20 active:shadow-none transform active:translate-y-0.5 transition flex items-center justify-center gap-2 group"
+      >
+        <span>Test Checkout Session</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-right group-hover:translate-x-1 transition-transform"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </button>
+
+      <div class="border-t border-slate-800 pt-4 flex items-start gap-2.5 text-xs text-slate-500">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+        <span>
+          Note: To complete or view payment modals from Paddle correctly inside AI Studio's sandbox, click <strong>"Open in New Tab"</strong> in the top-right of your toolbar to escape the nested frame security restrictions.
+        </span>
+      </div>
+    </div>
+
+    <!-- Right static integration instruction panel -->
+    <div class="lg:col-span-6 space-y-6">
+      <div class="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+        <h3 class="text-base font-semibold text-white mb-3">🎯 Complete Direct Integration Template</h3>
+        <p class="text-slate-400 text-xs mb-4">
+          Below is the minimal code structure that loads Paddle.js directly from the official CDN and sets up initialization prior to launching the checkout sheet:
+        </p>
+
+        <!-- Code Block copy block -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
+            <span class="text-xs font-mono text-slate-400">example-checkout.html</span>
+            <span class="text-[10px] text-blue-500 font-mono font-medium">Paddle.js v2 SDK</span>
+          </div>
+          <pre class="p-4 text-xs overflow-x-auto text-emerald-400 leading-relaxed font-mono"><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    <span class="text-slate-500">&lt;!-- Always load directly from CDN --&gt;</span>
+    &lt;script src="https://cdn.paddle.com/paddle/v2/paddle.js"&gt;&lt;/script&gt;
+    
+    &lt;script type="text/javascript"&gt;
+      <span class="text-slate-500">// 1. Set sandbox environment *before* Initialize</span>
+      Paddle.Environment.set("sandbox");
+      
+      <span class="text-slate-500">// 2. Initialize Paddle with Client-Side Token</span>
+      Paddle.Initialize({
+        token: "test_99bce2255xxxxxxx" <span class="text-slate-500">// Update token</span>
+      });
+
+      <span class="text-slate-500">// 3. Function to launch payment overlays</span>
+      function openCheckout() {
+        Paddle.Checkout.open({
+          items: [
+            { priceId: "pri_01kqpe8ad9772rdsn3ddbw4bg3", quantity: 1 },
+            { priceId: "pri_01kqpe9hv3r1v9wfxxvnjgq9zk", quantity: 1 },
+            { priceId: "pri_01kqpebd19q7nppxkh53e0cnd3", quantity: 1 }
+          ]
+        });
+      }
+    &lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;button onclick="openCheckout()"&gt;Buy now&lt;/button&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+        </div>
+      </div>
+
+      <!-- Quick Tips -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="p-4 bg-slate-950/40 border border-slate-800/60 rounded-xl">
+          <span class="text-xs font-semibold text-blue-400 uppercase tracking-widest block mb-1">CDN Method</span>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Directly including the script source guarantees compliance with compliance limits and ensures hotfixes are propagated in real-time.
+          </p>
+        </div>
+        <div class="p-4 bg-slate-950/40 border border-slate-800/60 rounded-xl">
+          <span class="text-xs font-semibold text-emerald-400 uppercase tracking-widest block mb-1">Sandbox Mode</span>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Must call <code class="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">Paddle.Environment.set("sandbox")</code> prior to execution to test dummy payments safely.
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800 bg-slate-950/20 py-4 px-6 text-center text-slate-500 text-xs">
+    <p>SiteGist Support Suite &copy; 2026. Made with Google AI Studio.</p>
+  </footer>
+
+</body>
+</html>
