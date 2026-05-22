@@ -2,14 +2,18 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
-import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus } from "lucide-react";
+import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus, Info, AlertTriangle, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const user = await getUser(request);
-  return json({ user });
+  return json({ 
+    user,
+    PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
+    PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -23,31 +27,77 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Return Paddle signal to the client
-  return json({ checkoutPlanId: planId, userEmail: user?.email });
+  return json({ 
+    checkoutPlanId: planId, 
+    userEmail: user?.email,
+    userId: user?.id
+  });
 }
 
 export default function Billing() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [calcMessages, setCalcMessages] = useState(5000);
+  const [demoPlanMessage, setDemoPlanMessage] = useState<string | null>(null);
+  const [isInsideIframe, setIsInsideIframe] = useState(false);
+  
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsInsideIframe(window.self !== window.top);
+    }
+  }, []);
   
   const isSubmitting = navigation.state === "submitting";
   const submittingPlanId = navigation.formData?.get("plan");
+
+  // Safe client-side Paddle initialization on load
+  useEffect(() => {
+    // @ts-ignore
+    if (typeof Paddle !== 'undefined') {
+      try {
+        // @ts-ignore
+        const clientToken = window.ENV?.VITE_PADDLE_CLIENT_TOKEN || "test_99bce225540de757f831d4cc5f5";
+        // @ts-ignore
+        Paddle.Environment.set(clientToken.startsWith('test_') ? 'sandbox' : 'production');
+        // @ts-ignore
+        Paddle.Initialize({ 
+          token: clientToken
+        });
+      } catch (err) {
+        console.warn("[Paddle Init] Failed to initialize:", err);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (actionData && 'checkoutPlanId' in actionData) {
        // @ts-ignore
       if (typeof Paddle !== 'undefined') {
-        // @ts-ignore
-        Paddle.Checkout.open({ 
-          product: actionData.checkoutPlanId, 
-          email: actionData.userEmail || "" 
-        });
+        try {
+          // @ts-ignore
+          Paddle.Checkout.open({ 
+            items: [
+              {
+                priceId: actionData.checkoutPlanId,
+                quantity: 1
+              }
+            ],
+            customer: {
+              email: actionData.userEmail || ""
+            },
+            customData: {
+              userId: actionData.userId || ""
+            }
+          });
+        } catch (checkoutErr) {
+          console.error("Paddle Checkout open failed:", checkoutErr);
+          setDemoPlanMessage("Secure checkout session could not be established. Please try again or contact support.");
+        }
       } else {
-        alert(`Paddle Checkout for ${actionData.checkoutPlanId} would open here.`);
+        setDemoPlanMessage(`Demo Mode: Securing checkout session for dynamic billing setup. Target plan: ${actionData.checkoutPlanId}. User logged in: ${actionData.userEmail || "anonymous"}`);
       }
     }
   }, [actionData]);
@@ -60,26 +110,26 @@ export default function Billing() {
       yearlyPrice: 19,
       description: "Perfect for personal projects",
       features: ["1 Chatbot", "1,000 Messages/mo", "50 Pages Crawled", "Basic AI Model"],
-      current: user?.subscriptionTier === "starter_plan",
+      current: user?.subscriptionTier === "starter_plan" || !user?.subscriptionTier || user?.subscriptionTier === "free",
     },
     {
-      id: "growth_plan",
+      id: PADDLE_BASIC_PLAN_ID,
       name: "Growth",
       monthlyPrice: 99,
       yearlyPrice: 59,
       popular: true,
       description: "For growing businesses",
       features: ["3 Chatbots", "5,000 Messages/mo", "500 Pages Crawled", "GPT-4o Access", "No Branding"],
-      current: user?.subscriptionTier === "growth_plan",
+      current: user?.subscriptionTier === PADDLE_BASIC_PLAN_ID,
     },
     {
-      id: "pro_plan",
+      id: PADDLE_PRO_PLAN_ID,
       name: "Scale",
       monthlyPrice: 299,
       yearlyPrice: 199,
       description: "For high-traffic sites",
       features: ["Unlimited Chatbots", "25,000 Messages/mo", "Unlimited Crawls", "Premium Support", "API Access"],
-      current: user?.subscriptionTier === "pro_plan",
+      current: user?.subscriptionTier === PADDLE_PRO_PLAN_ID,
     },
     {
       id: "enterprise_plan",
@@ -127,6 +177,59 @@ export default function Billing() {
           </div>
         </div>
       </div>
+
+      {/* Message Banner */}
+      <AnimatePresence>
+        {demoPlanMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="bg-zinc-50 border border-zinc-200 text-zinc-800 p-5 rounded-[24px] mb-8 max-w-4xl mx-auto flex items-start sm:items-center justify-between gap-4 shadow-sm"
+          >
+            <div className="flex items-start sm:items-center gap-3">
+              <Info className="w-5 h-5 text-primary shrink-0 mt-0.5 sm:mt-0" />
+              <p className="text-xs sm:text-sm font-semibold leading-relaxed">{demoPlanMessage}</p>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setDemoPlanMessage(null)}
+              className="text-zinc-400 hover:text-zinc-600 font-extrabold text-xs uppercase tracking-wider px-2 py-1 bg-white hover:bg-zinc-100 rounded-lg border border-zinc-100 transition-colors shrink-0"
+            >
+              Okay
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sandbox/iframe Environment Warnings for Payments */}
+      {isInsideIframe && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-950 p-6 rounded-[24px] mb-8 max-w-4xl mx-auto shadow-sm">
+          <div className="flex gap-4">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-2">
+              <h4 className="text-sm font-black tracking-tight text-amber-950 uppercase">Payment &amp; Sandbox Sandbox Detection</h4>
+              <p className="text-xs font-semibold leading-relaxed text-amber-800">
+                You are currently viewing this application inside the sandboxed <strong>AI Studio Iframe Preview</strong>. 
+                Most web browsers block third-party cookies, secure sessions, and payment modals (from providers like Paddle or Stripe) within nested preview panels.
+              </p>
+              <p className="text-xs font-semibold leading-relaxed text-amber-800">
+                To complete or test payment transactions successfully, please click the <strong>"Open in New Tab"</strong> button in your top-right toolbar or click below to launch the page in a secure native browser window where cookies and checkouts are allowed:
+              </p>
+              <div className="pt-2">
+                <a 
+                  href={typeof window !== "undefined" ? window.location.href : "/dashboard/billing"} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] uppercase tracking-wider px-4 py-2 rounded-xl border border-amber-700/20 transition-all shadow-sm"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Open in New Tab
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Plans Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-24">

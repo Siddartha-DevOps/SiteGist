@@ -27,6 +27,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       VITE_POSTHOG_HOST: process.env.VITE_POSTHOG_HOST,
       PARTYKIT_HOST: process.env.PARTYKIT_HOST,
       VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: process.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY,
+      VITE_PADDLE_CLIENT_TOKEN: process.env.VITE_PADDLE_CLIENT_TOKEN,
+      PADDLE_ENVIRONMENT: process.env.PADDLE_ENVIRONMENT,
     },
   });
 }
@@ -74,6 +76,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           data-domain="stegist.co"
           src="https://datafa.st/js/script.js"
         />
+        <script src="https://cdn.paddle.com/paddle/v2/paddle.js" />
         <Meta />
         <Links />
       </head>
