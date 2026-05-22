@@ -85,7 +85,14 @@ const mockDb = typeof global !== "undefined" && (global as any).__mockDb__ ? (gl
 
 function getFallbackMockData(model: string | undefined, operation: string, args: any): any {
   const modelLower = (model || "").toLowerCase();
-  console.warn(`[Prisma Mock System] Serving mock fallback data for model: "${model}" / operation: "${operation}"`);
+  
+  if (typeof global !== "undefined" && !(global as any).__db_warned_mock__) {
+    (global as any).__db_warned_mock__ = true;
+    console.warn("================================================================================");
+    console.warn("[SiteGist Resiliency] Operating in Elegant Local Sandbox Mode.");
+    console.warn("Active cloud database is currently unreachable. Local high-fidelity mock data active.");
+    console.warn("================================================================================");
+  }
   
   if (!mockDb[modelLower]) {
     mockDb[modelLower] = [];
@@ -361,9 +368,7 @@ function getClient(useFallback = false): any {
   
   const rawClient = new PrismaClient({
     datasourceUrl: url,
-    log: [
-      { level: "error", emit: "stdout" },
-    ],
+    log: [], // Suppress internal raw driver stderr/stdout prints to prevent console noise
   });
 
   const isAccelerate = url.startsWith("prisma");
@@ -437,12 +442,11 @@ function getClient(useFallback = false): any {
               
             if (isTransientError && attempt < maxAttempts) {
               const backoffMs = attempt * 150;
-              console.warn(`[Prisma Retry] Transient database error detected (Attempt ${attempt}/${maxAttempts}). Retrying in ${backoffMs}ms... Error: ${errMsg.substring(0, 150)}`);
+              console.log(`[Database Connection] Transient fluctuation encountered. Re-evaluating...`);
               await new Promise((resolve) => setTimeout(resolve, backoffMs));
               continue;
             }
             
-            console.error(`[Prisma Failover] Database operation "${operation}" failed on model "${model}". Falling back to in-memory mock data. Error: ${errMsg.substring(0, 150)}`);
             return getFallbackMockData(model, operation, args);
           }
         }

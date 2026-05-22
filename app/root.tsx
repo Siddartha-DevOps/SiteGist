@@ -47,8 +47,6 @@ export const links: LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const data = useRouteLoaderData("root") as { ENV: any } | undefined;
-  
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -83,11 +81,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body suppressHydrationWarning>
         {children}
         <ScrollRestoration />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.ENV = ${JSON.stringify(data?.ENV || {})}`,
-          }}
-        />
         <Scripts />
       </body>
     </html>
@@ -259,6 +252,7 @@ export default function App() {
   const isBlog = location.pathname.startsWith("/blog");
   const isEmbed = location.pathname.startsWith("/embed");
   const isDashboard = location.pathname.startsWith("/dashboard");
+  const data = useLoaderData<typeof loader>();
 
   return (
     <div key={location.pathname} className="min-h-screen flex flex-col">
@@ -267,6 +261,11 @@ export default function App() {
         <Outlet />
       </main>
       {!isEmbed && !isDashboard && <ChatWidget />}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `window.ENV = ${JSON.stringify(data?.ENV || {})}`,
+        }}
+      />
     </div>
   );
 }
