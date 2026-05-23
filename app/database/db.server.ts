@@ -311,28 +311,52 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
 }
 
 function getClient(useFallback = false): any {
-  // Load connection details directly from local .env to bypass any stale platform variables
-  try {
-    const envPath = path.join(process.cwd(), ".env");
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, "utf-8");
-      const dbUrlMatch = envContent.match(/DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
-      if (dbUrlMatch && dbUrlMatch[2]) {
-        const localUrl = dbUrlMatch[2].trim();
-        if (localUrl) {
-          process.env.DATABASE_URL = localUrl;
-        }
-      }
-      const directUrlMatch = envContent.match(/DIRECT_DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
-      if (directUrlMatch && directUrlMatch[2]) {
-        const localDirectUrl = directUrlMatch[2].trim();
-        if (localDirectUrl) {
-          process.env.DIRECT_DATABASE_URL = localDirectUrl;
-        }
-      }
+  // Helper to strip surrounding quotes if present
+  const stripQuotes = (val: string | undefined): string => {
+    if (!val) return "";
+    let trimmed = val.trim();
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      trimmed = trimmed.slice(1, -1).trim();
     }
-  } catch (err) {
-    console.warn("[Prisma Config] Local .env parsing failed or not found, using system variables:", err);
+    return trimmed;
+  };
+
+  // Clean the existing process.env variables from top-level platform injections
+  if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = stripQuotes(process.env.DATABASE_URL);
+  }
+  if (process.env.DIRECT_DATABASE_URL) {
+    process.env.DIRECT_DATABASE_URL = stripQuotes(process.env.DIRECT_DATABASE_URL);
+  }
+
+  // Load connection details directly from local .env ONLY if the primary platform variables are empty or placeholder
+  const isUrlEmptyOrPlaceholder = !process.env.DATABASE_URL || 
+                                   process.env.DATABASE_URL.trim() === "" || 
+                                   process.env.DATABASE_URL.includes("placeholder");
+
+  if (isUrlEmptyOrPlaceholder) {
+    try {
+      const envPath = path.join(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, "utf-8");
+        const dbUrlMatch = envContent.match(/DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
+        if (dbUrlMatch && dbUrlMatch[2]) {
+          const localUrl = stripQuotes(dbUrlMatch[2]);
+          if (localUrl && !localUrl.includes("placeholder")) {
+            process.env.DATABASE_URL = localUrl;
+          }
+        }
+        const directUrlMatch = envContent.match(/DIRECT_DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
+        if (directUrlMatch && directUrlMatch[2]) {
+          const localDirectUrl = stripQuotes(directUrlMatch[2]);
+          if (localDirectUrl && !localDirectUrl.includes("placeholder")) {
+            process.env.DIRECT_DATABASE_URL = localDirectUrl;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[Prisma Config] Local .env parsing failed or not found, using system variables:", err);
+    }
   }
 
   let url = process.env.DATABASE_URL || "";
@@ -359,12 +383,8 @@ function getClient(useFallback = false): any {
     }
   }
 
-  // Clean up quotes if present
-  if (url.startsWith('"') && url.endsWith('"')) {
-    url = url.slice(1, -1);
-  } else if (url.startsWith("'") && url.endsWith("'")) {
-    url = url.slice(1, -1);
-  }
+  // Clean up any remaining quotes if present
+  url = stripQuotes(url);
   
   const rawClient = new PrismaClient({
     datasourceUrl: url,
@@ -456,27 +476,7 @@ function getClient(useFallback = false): any {
     }
   });
 
-  // Optional: check connection early
-  // @ts-ignore
-  if (client.$connect) {
-    // @ts-ignore
-    client.$connect().catch((err: any) => {
-      const errorMsg = err.message || "";
-      if (errorMsg.includes("P6002")) {
-        console.error("--------------------------------------------------------------------------------");
-        console.error("CRITICAL DATABASE AUTHENTICATION ERROR (P6002)");
-        console.error("Your Prisma Accelerate API Key is invalid.");
-        console.error("1. Visit the Prisma Data Platform (https://console.prisma.io)");
-        console.error("2. Regenerate your Accelerate Connection String.");
-        console.error("3. Update your DATABASE_URL in the Settings menu of this app.");
-        console.error("Current URL starts with:", url.substring(0, 15) + "...");
-        console.error("--------------------------------------------------------------------------------");
-      } else {
-        console.error("DB Connection Error:", errorMsg);
-      }
-    });
-  }
-
+  // Skip early eager logging. Active query endpoints and startup config hooks handle the connection check.
   return client as any;
 }
 
