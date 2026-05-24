@@ -11,6 +11,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   return json({ 
     user,
+    PADDLE_STARTER_PLAN_ID: process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3",
     PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
     PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
   });
@@ -35,7 +36,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
+  const { user, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
@@ -108,13 +109,13 @@ export default function Billing() {
 
   const plans = [
     {
-      id: "starter_plan",
+      id: PADDLE_STARTER_PLAN_ID,
       name: "Starter",
       monthlyPrice: 39,
       yearlyPrice: 19,
       description: "Perfect for personal projects",
       features: ["1 Chatbot", "1,000 Messages/mo", "50 Pages Crawled", "Basic AI Model"],
-      current: user?.subscriptionTier === "starter_plan" || !user?.subscriptionTier || user?.subscriptionTier === "free",
+      current: user?.subscriptionTier === PADDLE_STARTER_PLAN_ID || user?.subscriptionTier === "starter_plan" || !user?.subscriptionTier || user?.subscriptionTier === "free",
     },
     {
       id: PADDLE_BASIC_PLAN_ID,

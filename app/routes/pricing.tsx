@@ -1,16 +1,107 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { Check, Sparkles, Minus, Plus, ArrowRight, Zap, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { getUser } from "~/backend/auth.server";
 
 type BillingCycle = "monthly" | "yearly";
 
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getUser(request);
+  return json({
+    user,
+    PADDLE_CLIENT_TOKEN: process.env.VITE_PADDLE_CLIENT_TOKEN || "live_7ff4397f21e4828fcac29997974",
+    PADDLE_STARTER_PLAN_ID: process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3", // Default starter plan ID
+    PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
+    PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
+  });
+}
+
 export default function Pricing() {
+  const loaderData = useLoaderData<typeof loader>();
+  const user = loaderData?.user || null;
+  const PADDLE_CLIENT_TOKEN = loaderData?.PADDLE_CLIENT_TOKEN || "";
+  const PADDLE_STARTER_PLAN_ID = loaderData?.PADDLE_STARTER_PLAN_ID || "";
+  const PADDLE_BASIC_PLAN_ID = loaderData?.PADDLE_BASIC_PLAN_ID || "";
+  const PADDLE_PRO_PLAN_ID = loaderData?.PADDLE_PRO_PLAN_ID || "";
+
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
   const [calcPlan, setCalcPlan] = useState("Growth");
   const [modelSplit, setModelSplit] = useState(50); // 0 = 100% GPT-4o-mini, 100 = 100% GPT-4o
+  const [isInsideIframe, setIsInsideIframe] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsInsideIframe(window.self !== window.top);
+    }
+  }, []);
+
+  // Safe client-side Paddle initialization on load
+  useEffect(() => {
+    // @ts-ignore
+    if (typeof Paddle !== 'undefined') {
+      try {
+        const clientToken = PADDLE_CLIENT_TOKEN || (window as any).ENV?.VITE_PADDLE_CLIENT_TOKEN || "test_99bce225540de757f831d4cc5f5";
+        // @ts-ignore
+        Paddle.Environment.set(clientToken.startsWith('test_') ? 'sandbox' : 'production');
+        // @ts-ignore
+        Paddle.Initialize({ 
+          token: clientToken
+        });
+      } catch (err) {
+        console.warn("[Paddle Init] Failed to initialize:", err);
+      }
+    }
+  }, [PADDLE_CLIENT_TOKEN]);
+
+  const handlePlanSelect = (planName: string) => {
+    if (isInsideIframe) {
+      setCheckoutError("Payment security note: Checkout cannot trigger safely within the nested AI Studio preview iframe. Please click the 'Open in New Tab' button in the top-right of your workspace toolbar to complete your subscription trial in a secure window.");
+      return;
+    }
+
+    // Determine target price ID
+    let priceId = "";
+    if (planName === "Starter") {
+      priceId = PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3";
+    } else if (planName === "Growth") {
+      priceId = PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3";
+    } else if (planName === "Scale") {
+      priceId = PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
+    }
+
+    // @ts-ignore
+    if (typeof Paddle !== 'undefined') {
+      try {
+        // @ts-ignore
+        Paddle.Checkout.open({ 
+          items: [
+            {
+              priceId: priceId,
+              quantity: 1
+            }
+          ],
+          customer: {
+            email: user?.email || ""
+          },
+          customData: {
+            userId: user?.id || ""
+          }
+        });
+      } catch (err) {
+        console.error("Paddle Checkout open failed:", err);
+        setCheckoutError("Failed to launch secure checkout. Please try again.");
+      }
+    } else {
+      setCheckoutError(`Demo Mode: Securing checkout session for plan "${planName}" (ID: ${priceId}). Register first or check your console.`);
+    }
+  };
 
   const plans = [
     {
@@ -162,6 +253,47 @@ export default function Pricing() {
           </div>
         </motion.div>
 
+        {/* Environment Warnings & Sandbox Banner */}
+        <AnimatePresence>
+          {checkoutError && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-amber-50 border border-amber-200 text-amber-950 p-6 rounded-[24px] mb-12 max-w-4xl mx-auto shadow-sm text-left flex items-start justify-between gap-4"
+            >
+              <div className="flex gap-3">
+                <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-black tracking-tight text-amber-950 uppercase mb-1">Secure Checkout Sandbox Info</h4>
+                  <p className="text-xs font-semibold leading-relaxed text-amber-800">
+                    {checkoutError}
+                  </p>
+                  {isInsideIframe && (
+                    <div className="pt-2">
+                      <a 
+                        href="/pricing" 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] uppercase tracking-wider px-4 py-2 rounded-xl transition-all shadow-sm"
+                      >
+                        Open in New Tab
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setCheckoutError(null)}
+                className="text-amber-400 hover:text-amber-600 font-extrabold text-xs uppercase tracking-wider px-2 py-1 bg-white hover:bg-amber-100 rounded-lg border border-amber-100 transition-colors shrink-0 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Pricing Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 text-left">
           {plans.map((plan, index) => (
@@ -204,17 +336,32 @@ export default function Pricing() {
                 </p>
               </div>
 
-              <a 
-                href={plan.name === "Enterprise" ? "/contact-us" : "/signup"}
-                className={`w-full py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 group/btn ${
-                  plan.popular 
-                    ? "bg-white text-brand-dark hover:bg-brand-accent hover:text-white" 
-                    : "bg-brand-dark text-white hover:bg-primary"
-                }`}
-              >
-                {plan.cta}
-                <ArrowRight className="w-4 h-4 transition-transform group-hover/btn:translate-x-1" />
-              </a>
+              {plan.name === "Enterprise" ? (
+                <a 
+                  href="/contact-us"
+                  className={`w-full py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 group/btn ${
+                    plan.popular 
+                      ? "bg-white text-brand-dark hover:bg-brand-accent hover:text-white" 
+                      : "bg-brand-dark text-white hover:bg-primary"
+                  }`}
+                >
+                  {plan.cta}
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover/btn:translate-x-1" />
+                </a>
+              ) : (
+                <button 
+                  type="button"
+                  onClick={() => handlePlanSelect(plan.name)}
+                  className={`w-full py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 group/btn cursor-pointer ${
+                    plan.popular 
+                      ? "bg-white text-brand-dark hover:bg-brand-accent hover:text-white" 
+                      : "bg-brand-dark text-white hover:bg-primary"
+                  }`}
+                >
+                  {plan.cta}
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover/btn:translate-x-1" />
+                </button>
+              )}
 
               <div className="mt-10 space-y-4">
                 <p className={`text-[10px] font-black uppercase tracking-widest ${plan.popular ? "text-white/40" : "text-brand-gray/40"}`}>What's Included</p>
@@ -334,7 +481,11 @@ export default function Pricing() {
                 </div>
 
                 <div className="mt-12 relative z-10">
-                  <button className="w-full py-4 bg-brand-accent text-white rounded-2xl font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-brand-accent/20">
+                  <button 
+                    type="button"
+                    onClick={() => handlePlanSelect(calcPlan)}
+                    className="w-full py-4 bg-brand-accent text-white rounded-2xl font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-brand-accent/20 cursor-pointer"
+                  >
                     Get Started with {calcPlan}
                   </button>
                 </div>
