@@ -8,7 +8,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       remix({
-        buildDirectory: "dist",
         future: {
           v3_fetcherPersist: true,
           v3_throwAbortReason: true,
