@@ -10,8 +10,8 @@
     "dev": "remix vite:dev",
     "build": "prisma generate && remix vite:build",
     "postinstall": "prisma generate",
-    "start": "remix-serve ./build/server/index.js",
-    "clean": "rm -rf build",
+    "start": "remix-serve ./dist/server/index.js",
+    "clean": "rm -rf build dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -73,8 +73,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           data-website-id="dfid_jdhKNHuiQeBJuwVkakfYd"
           data-domain="stegist.co"
           src="https://datafa.st/js/script.js"
-        />
-        <script src="https://cdn.paddle.com/paddle/v2/paddle.js" />
+        ></script>
+        <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
         <Meta />
         <Links />
       </head>
@@ -253,6 +253,25 @@ export default function App() {
   const isEmbed = location.pathname.startsWith("/embed");
   const isDashboard = location.pathname.startsWith("/dashboard");
   const data = useLoaderData<typeof loader>();
+
+  React.useEffect(() => {
+    // @ts-ignore
+    if (typeof Paddle !== "undefined") {
+      try {
+        const clientToken = data?.ENV?.VITE_PADDLE_CLIENT_TOKEN || "test_99bce225540de757f831d4cc5f5";
+        // Configure environment based on token prefix
+        // @ts-ignore
+        Paddle.Environment.set(clientToken.startsWith("test_") ? "sandbox" : "production");
+        // @ts-ignore
+        Paddle.Initialize({ 
+          token: clientToken 
+        });
+        console.log("[Paddle Global Setup] Paddle.js successfully loaded and initialized.");
+      } catch (err) {
+        console.warn("[Paddle Global Setup] Failed to register Paddle:", err);
+      }
+    }
+  }, [data?.ENV?.VITE_PADDLE_CLIENT_TOKEN]);
 
   return (
     <div key={location.pathname} className="min-h-screen flex flex-col">

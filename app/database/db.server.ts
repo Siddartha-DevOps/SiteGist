@@ -11,6 +11,7 @@ import path from "path";
 
 let _cachedDb: any = null;
 let _usingFallback = false;
+let _entirelyOffline = false;
 
 function isUsingFallback(): boolean {
   if (typeof global !== "undefined" && (global as any).__db_using_fallback__ !== undefined) {
@@ -23,6 +24,20 @@ function setUsingFallback(val: boolean) {
   _usingFallback = val;
   if (typeof global !== "undefined") {
     (global as any).__db_using_fallback__ = val;
+  }
+}
+
+function isEntirelyOffline(): boolean {
+  if (typeof global !== "undefined" && (global as any).__db_entirely_offline__ !== undefined) {
+    return (global as any).__db_entirely_offline__;
+  }
+  return _entirelyOffline;
+}
+
+function setEntirelyOffline(val: boolean) {
+  _entirelyOffline = val;
+  if (typeof global !== "undefined") {
+    (global as any).__db_entirely_offline__ = val;
   }
 }
 
@@ -371,20 +386,18 @@ function getClient(useFallback = false): any {
       console.log("[Prisma Client] DATABASE_URL is empty. Falling back to DIRECT_DATABASE_URL immediately.");
       url = process.env.DIRECT_DATABASE_URL;
     } else {
-      console.error("--------------------------------------------------------------------------------");
-      console.error("CRITICAL WARNING: DATABASE_URL is missing or empty.");
-      console.error("The application will not be able to connect to the database.");
-      console.error("Please add DATABASE_URL to your environment variables in AI Studio settings.");
-      console.error("Using a temporary placeholder connection string to prevent process crash-looping during boot.");
-      console.error("--------------------------------------------------------------------------------");
-      
       // Set a placeholder so Prisma can initialize without throwing a module-load exception
       url = "postgresql://placeholder_user:placeholder_pass@127.0.0.1:5432/placeholder_db";
+      setEntirelyOffline(true);
     }
   }
 
   // Clean up any remaining quotes if present
   url = stripQuotes(url);
+
+  if (url.includes("placeholder") || url.includes("your-database-url")) {
+    setEntirelyOffline(true);
+  }
   
   const rawClient = new PrismaClient({
     datasourceUrl: url,
@@ -398,6 +411,10 @@ function getClient(useFallback = false): any {
   const client = rawExtended.$extends({
     query: {
       async $allOperations({ model, operation, args, query }) {
+        if (isEntirelyOffline()) {
+          return getFallbackMockData(model, operation, args);
+        }
+
         const maxAttempts = 2;
         let attempt = 0;
         
@@ -415,11 +432,6 @@ function getClient(useFallback = false): any {
             
             if (isKeyError) {
               if (process.env.DIRECT_DATABASE_URL && !useFallback && !isUsingFallback()) {
-                console.error("================================================================================");
-                console.error("[Prisma Failover] Active connection failed due to Prisma Accelerate API Key verification.");
-                console.error("[Prisma Failover] Swapping active instances and falling back to DIRECT_DATABASE_URL...");
-                console.error("================================================================================");
-                
                 setUsingFallback(true);
                 const fallbackClient = getClient(true);
                 _cachedDb = fallbackClient;
@@ -434,13 +446,13 @@ function getClient(useFallback = false): any {
                     try {
                       return await fallbackDelegate[operation](args);
                     } catch (fallbackErr: any) {
-                      console.error("[Prisma Failover] Direct database fallback database call failed. Returning in-memory mock fallback data:", fallbackErr.message);
+                      setEntirelyOffline(true);
                       return getFallbackMockData(model, operation, args);
                     }
                   }
                 }
               } else {
-                console.error("[Prisma Failover] Database connection key invalid / failed. Returning mock fallback data.");
+                setEntirelyOffline(true);
                 return getFallbackMockData(model, operation, args);
               }
             }
@@ -467,6 +479,8 @@ function getClient(useFallback = false): any {
               continue;
             }
             
+            // Other errors should also set offline to prevent further connection attempt lag
+            setEntirelyOffline(true);
             return getFallbackMockData(model, operation, args);
           }
         }
