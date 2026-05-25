@@ -482,7 +482,6 @@ export default function Pricing() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-neutral-900 selection:bg-blue-100 selection:text-blue-900">
-      <Header />
 
       <main className="relative pt-28 pb-24 px-4 sm:px-6 max-w-7xl mx-auto overflow-hidden">
         

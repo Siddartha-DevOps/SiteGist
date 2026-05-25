@@ -1,9 +1,7 @@
-import { motion } from "framer-motion";
-import { Check, Sparkles, Box, Package, TrendingUp, Zap, Shield, Info } from "lucide-react";
-import { CheckoutButton } from "./CheckoutButton";
+import { Check, Loader2, ArrowRight, Star, Package, TrendingUp, Zap, Shield, Box } from "lucide-react";
 
 interface PricingCardProps {
-  name: string;
+  name: string;           // "Starter" | "Growth" | "Scale" | "Enterprise"
   price: number | string;
   yearlyTotal: number | null;
   billingCycle: "monthly" | "yearly";
@@ -15,6 +13,82 @@ interface PricingCardProps {
   isDisabled?: boolean;
   onSelect: () => void;
 }
+
+interface PlanConfig {
+  stripClass: string;
+  stripStyle?: React.CSSProperties;
+  buttonClass: string;
+  buttonStyle?: React.CSSProperties;
+  iconBgClass: string;
+  iconBgStyle?: React.CSSProperties;
+  checkmarkClass: string;
+  checkmarkStyle?: React.CSSProperties;
+  labelClass: string;
+  labelStyle?: React.CSSProperties;
+  iconColor: string;
+}
+
+const planConfigs: Record<string, PlanConfig> = {
+  starter: {
+    stripClass: "",
+    stripStyle: { backgroundColor: "#64748b" },
+    buttonClass: "text-white hover:opacity-90 shadow-xs",
+    buttonStyle: { backgroundColor: "#334155" },
+    iconBgClass: "",
+    iconBgStyle: { backgroundColor: "#f1f5f9" },
+    checkmarkClass: "",
+    checkmarkStyle: { color: "#64748b" },
+    labelClass: "",
+    labelStyle: { color: "#64748b" },
+    iconColor: "#64748b"
+  },
+  growth: {
+    stripClass: "",
+    stripStyle: { backgroundColor: "#2563eb" },
+    buttonClass: "text-white hover:opacity-90 shadow-sm",
+    buttonStyle: { backgroundColor: "#2563eb" },
+    iconBgClass: "",
+    iconBgStyle: { backgroundColor: "#eff6ff" },
+    checkmarkClass: "",
+    checkmarkStyle: { color: "#2563eb" },
+    labelClass: "",
+    labelStyle: { color: "#2563eb" },
+    iconColor: "#2563eb"
+  },
+  scale: {
+    stripClass: "",
+    stripStyle: { backgroundColor: "#7c3aed" },
+    buttonClass: "text-white hover:opacity-90 shadow-sm",
+    buttonStyle: { backgroundColor: "#7c3aed" },
+    iconBgClass: "",
+    iconBgStyle: { backgroundColor: "#f5f3ff" },
+    checkmarkClass: "",
+    checkmarkStyle: { color: "#7c3aed" },
+    labelClass: "",
+    labelStyle: { color: "#7c3aed" },
+    iconColor: "#7c3aed"
+  },
+  enterprise: {
+    stripClass: "bg-gradient-to-b from-[#f59e0b] to-[#ea580c]",
+    buttonClass: "bg-gradient-to-r from-[#f59e0b] to-[#ea580c] text-white hover:opacity-95 shadow-sm",
+    iconBgClass: "",
+    iconBgStyle: { backgroundColor: "rgba(245, 158, 11, 0.1)" },
+    checkmarkClass: "text-amber-600",
+    checkmarkStyle: { color: "#ea580c" },
+    labelClass: "text-amber-600",
+    labelStyle: { color: "#ea580c" },
+    iconColor: "#ea580c"
+  }
+};
+
+const defaultPlanConfig: PlanConfig = {
+  stripClass: "bg-slate-500",
+  buttonClass: "bg-slate-700 text-white hover:bg-slate-600",
+  iconBgClass: "bg-slate-50",
+  checkmarkClass: "text-slate-600",
+  labelClass: "text-slate-600",
+  iconColor: "#475569"
+};
 
 export function PricingCard({
   name,
@@ -29,154 +103,178 @@ export function PricingCard({
   isDisabled = false,
   onSelect
 }: PricingCardProps) {
-  const isCustomPrice = typeof price === "string";
+  const normName = (name || "").toLowerCase().trim();
+  const config = planConfigs[normName] || defaultPlanConfig;
 
-  // Map tier name to custom React icon with elegant colors
-  const getIcon = () => {
-    switch (name) {
-      case "Starter":
-        return (
-          <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100">
-            <Package className="w-4 h-4" />
-          </div>
-        );
-      case "Growth":
-        return (
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-blue-600 border border-indigo-100">
-            <TrendingUp className="w-4 h-4" />
-          </div>
-        );
-      case "Scale":
-        return (
-          <div className="w-8 h-8 rounded-lg bg-cyan-50 flex items-center justify-center text-blue-600 border border-cyan-100">
-            <Zap className="w-4 h-4" />
-          </div>
-        );
-      case "Enterprise":
-        return (
-          <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-blue-600 border border-purple-100">
-            <Shield className="w-4 h-4" />
-          </div>
-        );
+  // Icons based on distinct plans
+  const getIcon = (planName: string, iconColor: string) => {
+    const iconProps = { className: "w-4 h-4", style: { color: iconColor } };
+    switch (planName.toLowerCase()) {
+      case "starter":
+        return <Package {...iconProps} />;
+      case "growth":
+        return <TrendingUp {...iconProps} />;
+      case "scale":
+        return <Zap {...iconProps} />;
+      case "enterprise":
+        return <Shield {...iconProps} />;
       default:
-        return (
-          <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-            <Box className="w-4 h-4" />
-          </div>
-        );
+        return <Box {...iconProps} />;
     }
   };
 
-  // Divide features into 2 columns for beautiful symmetrical layout
-  const col1Features = features.slice(0, Math.ceil(features.length / 2));
-  const col2Features = features.slice(Math.ceil(features.length / 2));
+  // Divide features into two columns for split feature grid presentation
+  const firstHalf = features.slice(0, Math.ceil(features.length / 2));
+  const secondHalf = features.slice(Math.ceil(features.length / 2));
+
+  // Determine button text / Enterprise exceptions
+  const buttonText = name.toLowerCase() === "enterprise" ? "Contact us" : ctaText;
+
+  const handleClick = () => {
+    if (!isLoading && !isDisabled) {
+      onSelect();
+    }
+  };
 
   return (
     <div
-      className={`relative rounded-2xl p-6 sm:p-8 flex flex-col lg:flex-row gap-6 lg:gap-10 transition-all duration-300 border-2 w-full bg-white ${
+      className={`relative flex flex-col md:flex-row overflow-hidden rounded-2xl bg-white w-full transition-all duration-300 ${
         popular
-          ? "border-blue-600 ring-4 ring-blue-500/20 shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_40px_rgba(37,99,235,0.45)] hover:border-blue-700"
-          : "border-blue-400 ring-2 ring-blue-500/5 shadow-[0_0_20px_rgba(37,99,235,0.15)] hover:shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:border-blue-500"
-      }`}
+          ? "border-2 border-[#93c5fd] shadow-md shadow-blue-500/5 ring-2 ring-blue-500/5"
+          : "border-[0.5px] border-neutral-200 shadow-xs"
+      } ${isDisabled ? "opacity-60 pointer-events-none" : ""}`}
     >
-      {/* Left Part: Title, Price and Button */}
-      <div className="flex flex-col justify-between w-full lg:w-[280px] shrink-0">
+      {/* Popular Corner Ribbon */}
+      {popular && (
+        <div className="absolute top-0 right-0 overflow-hidden w-28 h-28 pointer-events-none z-10">
+          <div className="absolute top-[18px] right-[-24px] bg-[#2563eb] text-white text-[9px] font-black uppercase tracking-widest py-1 text-center w-36 rotate-45 shadow-sm">
+            Most Popular
+          </div>
+        </div>
+      )}
+
+      {/* 1. Left Accent Strip */}
+      <div 
+        className={`w-full h-1.5 md:h-auto md:w-[5px] shrink-0 ${config.stripClass}`}
+        style={config.stripStyle}
+      />
+
+      {/* 2. Left Panel */}
+      <div className="w-full md:w-[220px] md:min-w-[220px] md:max-w-[220px] shrink-0 p-6 flex flex-col justify-between border-b md:border-b-0 md:border-r border-neutral-200">
         <div>
-          {/* Header Row */}
-          <div className="flex items-center gap-2.5">
-            {getIcon()}
-            <span className="text-2xl font-black text-neutral-900 tracking-tight">{name}</span>
+          {/* Icon Circle + Plan Name + "Most popular" badge next to name */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div 
+              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${config.iconBgClass}`} 
+              style={config.iconBgStyle}
+            >
+              {getIcon(name, config.iconColor)}
+            </div>
+            <span className="text-xl font-black text-neutral-900 tracking-tight">{name}</span>
             {popular && (
-              <span className="px-2.5 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-wider rounded-md border border-blue-100">
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 text-[#2563eb] text-[9px] font-black uppercase tracking-wider rounded-full border border-blue-100 shrink-0">
+                <Star className="w-2 h-2 fill-[#2563eb]" />
                 Popular
               </span>
             )}
           </div>
 
-          {/* Pricing area */}
-          <div className="mt-5 mb-4">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-5xl font-black tracking-tight text-neutral-950">
-                {isCustomPrice ? price : `$${price}`}
-              </span>
-              {!isCustomPrice && (
-                <span className="text-neutral-500 text-base font-bold">/mo</span>
-              )}
-            </div>
-
-            {!isCustomPrice && yearlyTotal !== null && (
-              <div className="text-sm text-neutral-500 font-semibold mt-1.5">
-                billed <span className="font-extrabold text-neutral-900">${yearlyTotal}</span> yearly
+          {/* Large Price Display */}
+          <div className="mt-4">
+            {name.toLowerCase() === "enterprise" ? (
+              <div className="text-2xl font-black tracking-tight text-neutral-950">
+                Custom pricing
+              </div>
+            ) : (
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black tracking-tight text-neutral-950">
+                  {typeof price === "number" ? `$${price}` : price}
+                </span>
+                <span className="text-neutral-500 text-xs font-bold leading-none">/mo</span>
               </div>
             )}
 
-            <p className="text-sm text-neutral-500 mt-3 leading-relaxed font-semibold">
-              {description}
-            </p>
+            {/* "billed $XXX yearly" subtext */}
+            {billingCycle === "yearly" && yearlyTotal !== null && name.toLowerCase() !== "enterprise" && (
+              <div className="text-[11px] text-neutral-500 font-semibold mt-1">
+                billed <span className="font-extrabold text-[#334155]">${yearlyTotal}</span> yearly
+              </div>
+            )}
           </div>
+
+          {/* Short description text */}
+          <p className="text-xs text-neutral-500 mt-2 leading-relaxed font-semibold">
+            {description}
+          </p>
         </div>
 
         {/* CTA Button */}
-        <div className="mt-3">
-          {name === "Enterprise" && isCustomPrice ? (
-            <a
-              id="enterprise-link"
-              href="mailto:bhanu@sitegpt.ai"
-              className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all border bg-neutral-950 hover:bg-neutral-800 text-white shadow-xs"
-            >
-              Contact us
-            </a>
-          ) : (
-            <CheckoutButton
-              id={`btn-${name.toLowerCase().replace(/\s+/g, "-")}`}
-              text={ctaText}
-              onClick={onSelect}
-              isLoading={isLoading}
-              isDisabled={isDisabled}
-              variant={popular ? "popular" : "secondary"}
-            />
-          )}
+        <div className="mt-5">
+          <button
+            id={`btn-${name.toLowerCase().replace(/\s+/g, "-")}`}
+            type="button"
+            onClick={handleClick}
+            disabled={isLoading || isDisabled}
+            style={config.buttonStyle}
+            className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold tracking-tight flex items-center justify-center gap-1.5 transition-all duration-300 cursor-pointer select-none active:scale-[0.98] ${config.buttonClass} ${
+              isLoading || isDisabled ? "opacity-50 cursor-not-allowed pointer-events-none" : ""
+            }`}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>Loading…</span>
+              </>
+            ) : (
+              <>
+                <span>{buttonText}</span>
+                {name.toLowerCase() !== "enterprise" && (
+                  <ArrowRight className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5" />
+                )}
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Right Part: Included features */}
-      <div className="flex-1 lg:border-l lg:border-neutral-200/60 lg:pl-8 flex flex-col justify-center">
-        <span className="text-xs font-black tracking-wider uppercase block text-neutral-400 mb-4">
+      {/* 3. Right Panel */}
+      <div className="flex-1 p-6 md:p-8 flex flex-col justify-center">
+        <span 
+          className="text-[10px] font-black tracking-wider uppercase mb-4 block" 
+          style={config.labelStyle}
+        >
           INCLUDES:
         </span>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-          {/* Column 1 of Features */}
-          <div className="space-y-3.5">
-            {col1Features.map((feat, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <Check className="w-4.5 h-4.5 text-blue-600 stroke-[3.5] shrink-0" />
-                <div className="flex items-center gap-1">
-                  <span className="text-sm sm:text-base font-semibold text-neutral-800 hover:text-blue-600 transition-colors border-b border-dotted border-neutral-300">
-                    {feat}
-                  </span>
-                  <Info className="w-3.5 h-3.5 text-neutral-300 hover:text-neutral-500 transition-colors cursor-pointer shrink-0" />
-                </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5">
+          <div className="space-y-3">
+            {firstHalf.map((feat, i) => (
+              <div key={i} className="flex items-start gap-2.5 group">
+                <Check 
+                  className={`w-4 h-4 stroke-[3] mt-0.5 shrink-0 ${config.checkmarkClass}`} 
+                  style={config.checkmarkStyle} 
+                />
+                <span className="text-xs sm:text-sm font-semibold text-neutral-700 leading-snug group-hover:text-neutral-900 transition-colors">
+                  {feat}
+                </span>
               </div>
             ))}
           </div>
-
-          {/* Column 2 of Features */}
-          <div className="space-y-3.5">
-            {col2Features.map((feat, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <Check className="w-4.5 h-4.5 text-blue-600 stroke-[3.5] shrink-0" />
-                <div className="flex items-center gap-1">
-                  <span className="text-sm sm:text-base font-semibold text-neutral-800 hover:text-blue-600 transition-colors border-b border-dotted border-neutral-300">
-                    {feat}
-                  </span>
-                  <Info className="w-3.5 h-3.5 text-neutral-300 hover:text-neutral-500 transition-colors cursor-pointer shrink-0" />
-                </div>
+          <div className="space-y-3">
+            {secondHalf.map((feat, i) => (
+              <div key={i} className="flex items-start gap-2.5 group">
+                <Check 
+                  className={`w-4 h-4 stroke-[3] mt-0.5 shrink-0 ${config.checkmarkClass}`} 
+                  style={config.checkmarkStyle} 
+                />
+                <span className="text-xs sm:text-sm font-semibold text-neutral-700 leading-snug group-hover:text-neutral-900 transition-colors">
+                  {feat}
+                </span>
               </div>
             ))}
           </div>
         </div>
       </div>
-      </div>
+    </div>
   );
 }
