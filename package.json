@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "overrides": {
+    "node-domexception": "file:./packages/node-domexception"
+  },
   "scripts": {
     "dev": "remix vite:dev",
     "build": "prisma generate && remix vite:build",

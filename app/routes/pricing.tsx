@@ -17,8 +17,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user,
     PADDLE_CLIENT_TOKEN: process.env.VITE_PADDLE_CLIENT_TOKEN || "live_7ff4397f21e4828fcac29997974",
     PADDLE_STARTER_PLAN_ID: process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3", // Default starter plan ID
-    PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
-    PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
+    PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_GROWTH_PLAN_ID || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
+    PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
   });
 }
 
