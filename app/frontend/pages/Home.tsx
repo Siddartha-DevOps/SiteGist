@@ -34,12 +34,73 @@ export function HomePage() {
         <UseCasesSection />
         <FAQSection />
         <QuoteSection />
+        <TestimonialsSection />
         <BottomCTA />
       </main>
 
       <Footer />
       <ChatWidget />
     </div>
+  );
+}
+
+function TestimonialsSection() {
+  const testimonials = [
+    {
+      quote: "Before SiteGist, our customers waited hours for responses. Now, the bot solves their issues in seconds, and our lead conversion rate shot up by 35%!",
+      name: "Olivia Zhang",
+      role: "Head of Support, DevKit",
+      initials: "OZ",
+      color: "from-purple-500 to-indigo-500"
+    },
+    {
+      quote: "The sitemap crawler worked flawlessly on our entire docs directory. The setup was painless—I just pasted the script tag and it felt like magic.",
+      name: "Marcus Vance",
+      role: "VP of Engineering, PayFlow",
+      initials: "MV",
+      color: "from-blue-500 to-cyan-500"
+    },
+    {
+      quote: "We connected our company Wiki from Notion with a single click. Our customer service reps saved so much time. Highly recommend to any fast-growing SaaS.",
+      name: "Elena Rostova",
+      role: "Operations Director, SynthIQ",
+      initials: "ER",
+      color: "from-emerald-500 to-teal-500"
+    }
+  ];
+
+  return (
+    <section className="py-24 px-6 bg-zinc-50 border-y border-brand-border/40">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl md:text-5xl font-extrabold font-display text-brand-dark mb-4">
+            Loved by builders worldwide
+          </h2>
+          <p className="text-lg text-brand-gray font-normal max-w-xl mx-auto">
+            See how teams are supercharging their customer support and automation with SiteGist.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {testimonials.map((t, i) => (
+            <div key={i} className="bg-white p-8 rounded-3xl border border-brand-border/60 shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
+              <p className="text-brand-gray leading-relaxed mb-8 italic">
+                "{t.quote}"
+              </p>
+              <div className="flex items-center gap-4">
+                <div className={`w-11 h-11 rounded-full bg-gradient-to-tr ${t.color} flex items-center justify-center font-bold text-white text-sm shadow-sm`}>
+                  {t.initials}
+                </div>
+                <div>
+                  <p className="font-extrabold text-sm text-brand-dark">{t.name}</p>
+                  <p className="text-[11px] font-bold text-brand-gray uppercase tracking-wider">{t.role}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
