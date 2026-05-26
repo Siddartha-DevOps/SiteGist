@@ -147,7 +147,7 @@ function HeroSection() {
                ))}
              </div>
              <p className="text-xs sm:text-sm font-semibold text-zinc-600 text-left leading-relaxed">
-               SiteGist is new. We don't have 1,000 customer logos yet and we'd love your feedback. Try SiteGist free for 7 days — and tell us what you think!
+               SiteGist is new. We don't have 1,000 customers yet and we'd love your feedback. Try SiteGist free for 7 days — and tell us what you think!
              </p>
           </div>
         </motion.div>
