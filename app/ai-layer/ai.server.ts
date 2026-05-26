@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
-    hasOpenAI: !!(process.env.OPENAI_API_KEY),
+    hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
     hasPortkey: !!(process.env.PORTKEY_API_KEY),
     allKeys: Object.keys(process.env).filter(k => k.includes("KEY") || k.includes("API")).sort()
   });
@@ -115,7 +115,7 @@ let _openaiFoundVar = "none";
 let _lastOpenAIKey = "";
 
 function getOpenAI() {
-  const searchKeys = ["OPENAI_API_KEY", "VITE_OPENAI_API_KEY"];
+  const searchKeys = ["OPENAI_KEY", "OPENAI_API_KEY", "OpenAI_API_KEY", "VITE_OPENAI_API_KEY"];
   let currentKey = "";
   let currentVar = "none";
 
@@ -156,9 +156,9 @@ let _lastGeminiKey = "";
 
 function getGemini(): GoogleGenAI | null {
   const searchKeys = [
+    "VITE_GEMINI_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
-    "VITE_GEMINI_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
     "GOOGLE_GENAI_API_KEY",
     "AI_API_KEY",
@@ -515,10 +515,10 @@ How it works:
   try {
     if (gemini) {
       try {
-        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-1.5-flash stream...`);
+        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-3.5-flash stream...`);
         
         const result = await gemini.models.generateContentStream({
-          model: "gemini-1.5-flash",
+          model: "gemini-3.5-flash",
           contents: prompt
         });
         
@@ -651,7 +651,7 @@ How it works:
     
     if (gemini) {
       const vResp = await gemini.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents: verificationPrompt
       });
       const vText = vResp.text || "";
@@ -683,7 +683,7 @@ export async function* generateSimpleAIStream(prompt: string) {
     if (gemini) {
       try {
         const result = await gemini.models.generateContentStream({
-          model: "gemini-1.5-flash",
+          model: "gemini-3.5-flash",
           contents: prompt
         });
         for await (const chunk of result) {

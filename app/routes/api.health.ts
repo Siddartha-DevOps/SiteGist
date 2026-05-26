@@ -14,7 +14,7 @@ export async function loader() {
     },
     env: {
       hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
-      hasOpenAI: !!(process.env.OPENAI_API_KEY),
+      hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
       hasPinecone: !!(process.env.PINECONE_API_KEY),
       hasCohere: !!(process.env.PORTKEY_COHERE_VIRTUAL_KEY),
     }
@@ -39,11 +39,11 @@ export async function loader() {
 
   // 3. Check Gemini
   try {
-    const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    const key = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (key) {
       const ai = new GoogleGenAI({ apiKey: key });
       await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents: "hello"
       });
       diagnostic.services.gemini = "OK";
@@ -65,7 +65,7 @@ export async function loader() {
 
   // 4. Check OpenAI
   try {
-    const key = process.env.OPENAI_API_KEY;
+    const key = process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
     if (key) {
       const openai = new OpenAI({ apiKey: key });
       await openai.models.list();

@@ -431,7 +431,7 @@ export default function Pricing() {
     "Pricing": [
       {
         q: "Can I try a demo before signing up?",
-        a: "Yes, you can go to sitegpt.ai/demo and try out the demo. The demo bot you see on sitegpt.ai/demo is trained on the sitegpt.ai website content itself. So you can ask any questions related to SiteGPT website in that demo bot and it will answer it. You can also sign up for a 7-day free trial and try out everything on your own data."
+        a: "Yes, you can go to sitegist.co/demo and try out the demo. The demo bot you see on sitegist.co/demo is trained on the sitegist.co website content itself. So you can ask any questions related to SiteGist website in that demo bot and it will answer it. You can also sign up for a 7-day free trial and try out everything on your own data."
       },
       {
         q: "Are there customized enterprise tiers available?",
@@ -452,7 +452,7 @@ export default function Pricing() {
     "Technology and Integrations": [
       {
         q: "Does the chatbot update automatically when my website changes?",
-        a: "Yes! SiteGPT now supports automatic syncing of your content. Depending on your plan, you can set up automatic syncing on a monthly, weekly, or daily basis to keep your chatbot's knowledge up to date. You can also manually retrain/resync your chatbot anytime from the dashboard."
+        a: "Yes! SiteGist now supports automatic syncing of your content. Depending on your plan, you can set up automatic syncing on a monthly, weekly, or daily basis to keep your chatbot's knowledge up to date. You can also manually retrain/resync your chatbot anytime from the dashboard."
       },
       {
         q: "How do I embed the chatbot on my website?",
@@ -624,8 +624,8 @@ export default function Pricing() {
             <div className="bg-white border-2 border-blue-400/50 rounded-2xl p-5 shadow-[0_0_20px_rgba(37,99,235,0.08)] hover:border-blue-500 hover:shadow-[0_0_30px_rgba(37,99,235,0.18)] transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px] font-bold uppercase tracking-wider mb-2">Upgrade Option</span>
-                <h4 className="font-extrabold text-neutral-900 text-base">Remove SiteGPT Branding (Addon)</h4>
-                <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Remove the white label watermarks and SiteGPT logos from your chatbot widgets.</p>
+                <h4 className="font-extrabold text-neutral-900 text-base">Remove SiteGist Branding (Addon)</h4>
+                <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Remove the white label watermarks and SiteGist logos from your chatbot widgets.</p>
                 <div className="text-[10px] text-neutral-400 font-bold mt-2.5">billed $468 yearly</div>
               </div>
               <div className="text-right shrink-0 flex flex-row sm:flex-col items-baseline justify-between sm:justify-center border-t sm:border-t-0 border-neutral-100 pt-3 sm:pt-0">
@@ -905,7 +905,7 @@ export default function Pricing() {
                     type="button"
                     onClick={() => {
                       if (isEnterprise) {
-                        window.location.href = "mailto:bhanu@sitegpt.ai";
+                        window.location.href = "mailto:support@sitegist.co";
                       } else {
                         const targetId = calcCycle === "Yearly" 
                           ? planTiers.find((t) => t.name === calcPlan)?.yearlyPriceId 
@@ -953,7 +953,7 @@ export default function Pricing() {
             <p className="text-xs sm:text-sm text-neutral-500 font-medium mt-2 max-w-2xl mx-auto leading-relaxed">
               Have a different question and can't find the answer you're looking for? Reach out to our support team by sending us an email at{" "}
               <a 
-                href="mailto:bhanu@sitegpt.ai" 
+                href="mailto:support@sitegist.co" 
                 className="text-blue-600 font-extrabold hover:underline drop-shadow-[0_0_12px_rgba(21,93,238,0.4)] animate-pulse inline-block cursor-pointer"
               >
                 support@sitegist.co
