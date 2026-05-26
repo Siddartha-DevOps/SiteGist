@@ -77,15 +77,17 @@ function HeroSection() {
             </CTAButton>
           </div>
           
-          <div className="mt-12 flex items-center justify-center gap-4 opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-             <div className="flex -space-x-3">
+          <div className="mt-12 flex items-center justify-center gap-4 opacity-90 transition-all duration-500 max-w-2xl mx-auto bg-zinc-50 border border-zinc-100 p-4 rounded-2xl">
+             <div className="flex -space-x-3 shrink-0">
                {[1, 2, 3, 4].map(i => (
                  <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-zinc-100 overflow-hidden shadow-sm">
                    <img src={`https://i.pravatar.cc/100?img=${i+20}`} alt="User" />
                  </div>
                ))}
              </div>
-             <p className="text-sm font-bold text-zinc-500">Trusted by over 1,200+ companies</p>
+             <p className="text-xs sm:text-sm font-semibold text-zinc-600 text-left leading-relaxed">
+               SiteGist is new. We don't have 1,000 customer logos yet and we'd love your feedback. Try SiteGist free for 7 days — and tell us what you think!
+             </p>
           </div>
         </motion.div>
 
@@ -324,15 +326,20 @@ function QuoteSection() {
   return (
     <section className="py-32 px-6 relative overflow-hidden">
       <div className="max-w-4xl mx-auto text-center relative z-10">
-        <div className="w-20 h-20 rounded-full border-4 border-white bg-zinc-100 overflow-hidden shadow-2xl mx-auto mb-10">
-          <img src="https://i.pravatar.cc/200?img=12" alt="Founder" />
+        <div className="w-20 h-20 rounded-full border-4 border-white bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center shadow-2xl mx-auto mb-10 relative overflow-hidden">
+          <svg className="w-11 h-11 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+          </svg>
+          <div className="absolute inset-0 bg-gradient-to-t from-blue-900/25 via-transparent to-transparent" />
         </div>
         <p className="text-2xl md:text-3xl font-extrabold font-display italic leading-tight mb-10 text-brand-dark">
-          "SiteGist allowed us to automate 80% of our repetitive queries, saving us thousands in support costs while actually increasing customer satisfaction."
+          "<span className="text-blue-500 [text-shadow:0_0_15px_rgba(59,130,246,0.6)] font-extrabold">SiteGist</span> allows you to automate 80% of your repetitive queries, saving you thousands in support costs while actually increasing your customer satisfaction."
         </p>
         <div>
           <p className="font-extrabold text-brand-dark">Siddartha Reddy</p>
-          <p className="text-[11px] font-bold text-brand-gray uppercase tracking-widest mt-1">Founder, SiteGist</p>
+          <p className="text-[11px] font-bold text-brand-gray uppercase tracking-widest mt-1">
+            Founder, <span className="text-blue-500 [text-shadow:0_0_12px_rgba(59,130,246,0.5)] font-black">SiteGist</span>
+          </p>
         </div>
       </div>
       {/* Visual Accents */}
