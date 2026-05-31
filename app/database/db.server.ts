@@ -83,7 +83,11 @@ if (typeof global !== "undefined" && !(global as any).__mockDb__) {
       { id: "mock-msg-2", sessionId: "mock-sess-1", role: "assistant", content: "Yes! We run a 14-day fully-featured trial with support for multiple chatbot assistants.", feedback: 1, createdAt: new Date() }
     ],
     unansweredquestion: [],
-    blogpost: []
+    blogpost: [],
+    knowledgeqa: [
+      { id: "mock-qa-1", projectId: "mock-proj-1", question: "What is the pricing model?", answer: "We have clean, simple plans: Free, Pro ($19/mo), and custom Enterprise. No hidden fees.", triggerCount: 1, lastUsedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+      { id: "mock-qa-2", projectId: "mock-proj-1", question: "Can I try for free?", answer: "Yes! There is a 100% free Sandbox plan allowing you to create 1 chatbot and use up to 50 message credits per month.", triggerCount: 0, lastUsedAt: null, createdAt: new Date(), updatedAt: new Date() }
+    ]
   };
 }
 
@@ -95,7 +99,8 @@ const mockDb = typeof global !== "undefined" && (global as any).__mockDb__ ? (gl
   chatsession: [],
   message: [],
   unansweredquestion: [],
-  blogpost: []
+  blogpost: [],
+  knowledgeqa: []
 };
 
 function enrichWithMockRelations(modelLower: string, item: any): any {
@@ -108,11 +113,13 @@ function enrichWithMockRelations(modelLower: string, item: any): any {
       sessions: (mockDb.chatsession || []).filter((x: any) => x.projectId === res.id).length,
       leads: (mockDb.lead || []).filter((x: any) => x.projectId === res.id).length,
       integrations: (mockDb.integration || []).filter((x: any) => x.projectId === res.id).length,
+      knowledgeQAs: (mockDb.knowledgeqa || []).filter((x: any) => x.projectId === res.id).length,
     };
     res.knowledgeSources = (mockDb.knowledgesource || []).filter((x: any) => x.projectId === res.id);
     res.integrations = (mockDb.integration || []).filter((x: any) => x.projectId === res.id);
     res.sessions = (mockDb.chatsession || []).filter((x: any) => x.projectId === res.id);
     res.leads = (mockDb.lead || []).filter((x: any) => x.projectId === res.id);
+    res.knowledgeQAs = (mockDb.knowledgeqa || []).filter((x: any) => x.projectId === res.id);
   }
 
   if (modelLower === "chatsession" || modelLower === "session") {

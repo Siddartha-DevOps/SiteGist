@@ -332,6 +332,72 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
     return;
   }
 
+  // PREDEFINED Q&A INTERCEPTION LAYER
+  if (projectId !== "demo-project") {
+    try {
+      const { prisma } = await import("~/database/db.server");
+      const qas = await prisma.knowledgeQA.findMany({
+        where: { projectId }
+      });
+
+      if (qas && qas.length > 0) {
+        const getNormalizedText = (txt: string) => {
+          return txt.toLowerCase().trim().replace(/[?.,!：；？，。！]+/g, " ").replace(/\s+/g, " ").trim();
+        };
+
+        const normQuery = getNormalizedText(query);
+
+        // Score-based matching to choose the most optimal Q&A pair
+        let bestMatch: any = null;
+        let highestScore = 0;
+
+        for (const qa of qas) {
+          const normQuestion = getNormalizedText(qa.question);
+          let score = 0;
+
+          if (normQuery === normQuestion) {
+            score = 100; // Perfect direct match
+          } else if (normQuery.length >= 4 && normQuestion.includes(normQuery)) {
+            score = 80;  // Query is part of a custom question
+          } else if (normQuestion.length >= 4 && normQuery.includes(normQuestion)) {
+            score = 70;  // Custom question is part of the query
+          }
+
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = qa;
+          }
+        }
+
+        if (bestMatch && highestScore >= 70) {
+          console.log(`[QA Match] Custom answer match found for question: "${bestMatch.question}" (Score: ${highestScore})`);
+          
+          // Increment triggerCount and update lastUsedAt asynchronously
+          prisma.knowledgeQA.update({
+            where: { id: bestMatch.id },
+            data: {
+              triggerCount: { increment: 1 },
+              lastUsedAt: new Date()
+            }
+          }).catch((err: any) => console.error("[QA Stats Update Error] Failed:", err));
+
+          // Yield classification metadata first
+          yield `METADATA:${JSON.stringify({ source: "qa" })}`;
+
+          // Yield response with a highly satisfying typing simulation speed
+          const words = bestMatch.answer.split(" ");
+          for (let i = 0; i < words.length; i++) {
+            yield words[i] + (i < words.length - 1 ? " " : "");
+            await new Promise(resolve => setTimeout(resolve, 15));
+          }
+          return;
+        }
+      }
+    } catch (qaErr) {
+      console.error("[QA Lookup Error] Failed to perform QA database lookup:", qaErr);
+    }
+  }
+
   let context = "";
   let citationMetadata: { url?: string; title?: string }[] = [];
   
@@ -513,6 +579,7 @@ How it works:
   }, 30000);
 
   try {
+    yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
     if (gemini) {
       try {
         console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-3.5-flash stream...`);

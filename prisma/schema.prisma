@@ -64,6 +64,7 @@ model Project {
   unansweredQuestions UnansweredQuestion[]
   analyticsSnapshots  AnalyticsSnapshot[]
   integrations         Integration[]
+  knowledgeQAs         KnowledgeQA[]
 }
 
 model Integration {
@@ -167,4 +168,17 @@ model AnalyticsSnapshot {
   leadsCaptured   Int      @default(0)
   avgLatency      Float?
   unansweredCount Int      @default(0)
+}
+
+model KnowledgeQA {
+  id           String   @id @default(cuid())
+  projectId    String
+  question     String   @db.Text
+  answer       String   @db.Text
+  triggerCount Int      @default(0)
+  lastUsedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

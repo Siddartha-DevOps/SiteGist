@@ -6,7 +6,7 @@ import { prisma } from "~/database/db.server";
 import { chunkText, getSitemapUrls } from "~/ai-layer/crawler.server";
 import { upsertChunks } from "~/ai-layer/ai.server";
 import { scrapeUrl, getFirecrawl } from "~/ai-layer/firecrawl.server";
-import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database } from "lucide-react";
+import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { 
@@ -21,7 +21,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     where: { id: params.projectId, userId },
     include: { 
       integrations: true,
-      knowledgeSources: { orderBy: { createdAt: 'desc' } }
+      knowledgeSources: { orderBy: { createdAt: 'desc' } },
+      knowledgeQAs: { orderBy: { createdAt: 'desc' } }
     }
   });
   if (!project) return redirect("/dashboard");
@@ -49,6 +50,86 @@ export async function action({ request, params }: ActionFunctionArgs) {
       await prisma.knowledgeSource.delete({ where: { id: sourceId } });
     }
     return json({ success: true, message: "Source removed and vector data cleaned successfully" });
+  }
+
+  if (method === "add_qa") {
+    const question = (formData.get("question") as string || "").trim();
+    const answer = (formData.get("answer") as string || "").trim();
+
+    if (!question || !answer) {
+      return json({ error: "Both question and answer are required." }, { status: 400 });
+    }
+    if (question.length > 500) {
+      return json({ error: "Question cannot exceed 500 characters." }, { status: 400 });
+    }
+    if (answer.length > 5000) {
+      return json({ error: "Answer cannot exceed 5000 characters." }, { status: 400 });
+    }
+
+    const existingQA = await prisma.knowledgeQA.findFirst({
+      where: {
+        projectId: params.projectId!,
+        question: { equals: question, mode: "insensitive" }
+      }
+    });
+
+    if (existingQA) {
+      return json({ error: "A Q&A entry with this exact question already exists." }, { status: 400 });
+    }
+
+    await prisma.knowledgeQA.create({
+      data: {
+        projectId: params.projectId!,
+        question,
+        answer,
+        triggerCount: 0
+      }
+    });
+
+    return json({ success: true, message: "Manual Q&A entry added successfully!" });
+  }
+
+  if (method === "edit_qa") {
+    const id = formData.get("id") as string;
+    const question = (formData.get("question") as string || "").trim();
+    const answer = (formData.get("answer") as string || "").trim();
+
+    if (!id || !question || !answer) {
+      return json({ error: "ID, question and answer are required." }, { status: 400 });
+    }
+    if (question.length > 500 || answer.length > 5000) {
+      return json({ error: "Question or answer size limit exceeded." }, { status: 400 });
+    }
+
+    const existingQA = await prisma.knowledgeQA.findFirst({
+      where: {
+        projectId: params.projectId!,
+        question: { equals: question, mode: "insensitive" },
+        id: { not: id }
+      }
+    });
+
+    if (existingQA) {
+      return json({ error: "Another Q&A entry with this exact question already exists." }, { status: 400 });
+    }
+
+    await prisma.knowledgeQA.update({
+      where: { id },
+      data: { question, answer }
+    });
+
+    return json({ success: true, message: "Manual Q&A entry updated successfully!" });
+  }
+
+  if (method === "delete_qa") {
+    const id = formData.get("id") as string;
+    if (!id) return json({ error: "Missing Q&A entry ID." }, { status: 400 });
+
+    await prisma.knowledgeQA.delete({
+      where: { id }
+    });
+
+    return json({ success: true, message: "Manual Q&A entry deleted successfully!" });
   }
 
   if (!url && method !== "add_text" && method !== "upload_file") {
@@ -280,7 +361,20 @@ export default function TrainProject() {
   const actionData = useActionData<typeof action>() as any;
   const navigation = useNavigation();
   const isCrawling = navigation.state === "submitting";
-  const [activeTab, setActiveTab] = useState<"web" | "text" | "youtube" | "files">("web");
+  const [activeTab, setActiveTab] = useState<"web" | "text" | "youtube" | "files" | "qa">("web");
+  const [qaSearch, setQaSearch] = useState("");
+  const [qaPage, setQaPage] = useState(1);
+  const [editingQa, setEditingQa] = useState<any | null>(null);
+  const [qaQuestion, setQaQuestion] = useState("");
+  const [qaAnswer, setQaAnswer] = useState("");
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setEditingQa(null);
+      setQaQuestion("");
+      setQaAnswer("");
+    }
+  }, [actionData]);
 
   const [connecting, setConnecting] = useState<string | null>(null);
 
@@ -349,6 +443,12 @@ export default function TrainProject() {
           className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'youtube' ? 'bg-white shadow-sm text-primary' : 'text-text-muted'}`}
         >
           <Video className="w-4 h-4" /> YouTube
+        </button>
+        <button 
+          onClick={() => setActiveTab("qa")}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'qa' ? 'bg-white shadow-sm text-primary' : 'text-text-muted'}`}
+        >
+          <HelpCircle className="w-4 h-4" /> Q&A
         </button>
         <button 
           onClick={() => setActiveTab("connect" as any)}
@@ -584,11 +684,229 @@ export default function TrainProject() {
             </>
           )}
 
+          {activeTab === "qa" && (
+            <>
+              <h2 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                <HelpCircle className="text-primary w-6 h-6" /> {editingQa ? "Edit Predefined Q&A" : "Add Predefined Q&A"}
+              </h2>
+              <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
+                Provide preconfigured, high-quality answers to specific questions. Predefined Q&A matches will automatically override vector-based search.
+              </p>
+              
+              <Form method="post" className="space-y-6">
+                <input type="hidden" name="_action" value={editingQa ? "edit_qa" : "add_qa"} />
+                {editingQa && <input type="hidden" name="id" value={editingQa.id} />}
+                
+                <div>
+                  <label className="block text-sm font-bold mb-2">Question</label>
+                  <input 
+                    type="text" 
+                    name="question" 
+                    value={qaQuestion}
+                    onChange={(e) => setQaQuestion(e.target.value)}
+                    placeholder="E.g. What is your refund policy?"
+                    required
+                    maxLength={500}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all font-medium text-sm"
+                  />
+                  <span className="text-[10px] text-zinc-400 mt-1 block text-right">{qaQuestion.length}/500</span>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2">Answer</label>
+                  <textarea 
+                    name="answer" 
+                    value={qaAnswer}
+                    onChange={(e) => setQaAnswer(e.target.value)}
+                    rows={8}
+                    placeholder="E.g. We offer a 100% money-back guarantee within 14 days of purchase. No questions asked!"
+                    required
+                    maxLength={5000}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm leading-relaxed"
+                  ></textarea>
+                  <span className="text-[10px] text-zinc-400 mt-1 block text-right">{qaAnswer.length}/5000</span>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <button 
+                    type="submit" 
+                    disabled={isCrawling}
+                    className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                  >
+                    {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : editingQa ? "Update Entry" : "Create & Save"}
+                  </button>
+                  {editingQa && (
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setEditingQa(null);
+                        setQaQuestion("");
+                        setQaAnswer("");
+                      }}
+                      className="px-6 py-4 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold rounded-2xl transition-all"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </Form>
+            </>
+          )}
+
           <div className="mt-6">
             {actionData?.success && <p className="text-green-500 font-bold text-center">{actionData.message}</p>}
             {actionData?.error && <p className="text-red-500 font-bold text-center">{actionData.error}</p>}
           </div>
         </div>
+
+        {activeTab === "qa" && (
+          <div className="bg-white p-10 rounded-[40px] border border-zinc-100 h-fit space-y-8">
+            <div>
+              <div className="flex items-center justify-between gap-4 mb-2">
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                  <List className="text-primary w-6 h-6" /> Custom Answers ({((project as any).knowledgeQAs || []).length})
+                </h2>
+                <div className="text-[10px] font-black tracking-widest uppercase bg-zinc-100 text-zinc-500 px-3 py-1.5 rounded-lg border border-zinc-200/50">
+                  Total Hits: {((project as any).knowledgeQAs || []).reduce((acc: number, cur: any) => acc + (cur.triggerCount || 0), 0)}
+                </div>
+              </div>
+              <p className="text-xs text-zinc-400">Search, edit, or delete manual Q&A overrides designed for this chatbot.</p>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search predefined questions..."
+                value={qaSearch}
+                onChange={(e) => {
+                  setQaSearch(e.target.value);
+                  setQaPage(1); // Reset page on search
+                }}
+                className="w-full pl-12 pr-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm"
+              />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+            </div>
+
+            {/* List and Pagination */}
+            {(() => {
+              const allQAs = (project as any).knowledgeQAs || [];
+              const filteredQAs = allQAs.filter((qa: any) => 
+                qa.question.toLowerCase().includes(qaSearch.toLowerCase()) ||
+                qa.answer.toLowerCase().includes(qaSearch.toLowerCase())
+              );
+
+              const itemsPerPage = 5;
+              const totalPages = Math.ceil(filteredQAs.length / itemsPerPage);
+              const currentPage = Math.min(qaPage, totalPages || 1);
+              const indexOfLastItem = currentPage * itemsPerPage;
+              const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+              const currentItems = filteredQAs.slice(indexOfFirstItem, indexOfLastItem);
+
+              if (filteredQAs.length === 0) {
+                return (
+                  <div className="text-center py-12 border border-dashed border-zinc-200 rounded-3xl bg-zinc-50/50">
+                    <div className="w-12 h-12 bg-white rounded-2xl border border-zinc-100 flex items-center justify-center mx-auto mb-4">
+                      <HelpCircle className="w-6 h-6 text-zinc-400" />
+                    </div>
+                    <h3 className="font-bold text-zinc-700 text-sm mb-1">No Q&A matches found</h3>
+                    <p className="text-xs text-zinc-400 max-w-xs mx-auto">
+                      {allQAs.length === 0 
+                        ? "Create your very first manual predefined override answer in the left panel!"
+                        : "Try adjusting your search terms to locate specific overrides."}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  <div className="divide-y divide-zinc-100">
+                    {currentItems.map((qa: any) => (
+                      <div key={qa.id} className="py-4 first:pt-0 last:pb-0 flex flex-col gap-2 group">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-3">
+                            <h4 className="font-extrabold text-sm text-zinc-900 leading-snug">
+                              Q: {qa.question}
+                            </h4>
+                            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingQa(qa);
+                                  setQaQuestion(qa.question);
+                                  setQaAnswer(qa.answer);
+                                }}
+                                className="p-1.5 hover:bg-zinc-100 rounded-md text-zinc-400 hover:text-primary transition-colors"
+                                title="Edit Question"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <Form method="post" className="inline-block">
+                                <input type="hidden" name="_action" value="delete_qa" />
+                                <input type="hidden" name="id" value={qa.id} />
+                                <button
+                                  type="submit"
+                                  onClick={(e) => {
+                                    if (!confirm("Are you sure you want to delete this custom answer?")) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  className="p-1.5 hover:bg-red-50 rounded-md text-zinc-400 hover:text-red-500 transition-colors"
+                                  title="Delete Question"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </Form>
+                            </div>
+                          </div>
+                          <p className="text-xs text-zinc-500 leading-relaxed bg-zinc-50/50 p-3 rounded-xl border border-zinc-100/50 my-2 whitespace-pre-wrap">
+                            {qa.answer}
+                          </p>
+                          <div className="flex items-center gap-3 text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
+                            <span>Hits: {qa.triggerCount || 0}</span>
+                            <span>•</span>
+                            <span>Added: {new Date(qa.createdAt).toLocaleDateString()}</span>
+                            {qa.lastUsedAt && (
+                              <>
+                                <span>•</span>
+                                <span>Used: {new Date(qa.lastUsedAt).toLocaleDateString()}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between border-t border-zinc-100 pt-4 text-xs font-bold text-zinc-500">
+                      <span>Page {currentPage} of {totalPages}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={currentPage === 1}
+                          onClick={() => setQaPage(p => Math.max(1, p - 1))}
+                          className="p-2 border border-zinc-100 hover:bg-zinc-50 disabled:opacity-50 rounded-lg transition-all"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={currentPage === totalPages}
+                          onClick={() => setQaPage(p => Math.min(totalPages, p + 1))}
+                          className="p-2 border border-zinc-100 hover:bg-zinc-50 disabled:opacity-50 rounded-lg transition-all"
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {activeTab === "web" && (
           <div className="bg-white p-10 rounded-[40px] border border-zinc-100 h-fit">
