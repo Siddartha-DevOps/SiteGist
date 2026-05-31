@@ -224,6 +224,14 @@ export function ErrorBoundary() {
             ? "The page you're seeking couldn't be located. Let me guide you back to secure ground."
             : "We are currently streamlining our secure assistant connections to handle your request. Let's refresh the assistant or head back to the main portal."}
         </p>
+        {!is404 && errorString && (
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-8 text-left">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Error Diagnostics:</div>
+            <div className="text-red-600 font-mono text-[11px] leading-relaxed break-all max-h-24 overflow-y-auto w-full font-bold">
+              {errorString}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             onClick={() => {

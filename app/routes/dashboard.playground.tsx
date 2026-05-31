@@ -14,13 +14,31 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   
   if (!projectId) return redirect("/dashboard");
 
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, userId },
-  });
+  try {
+    let project = null;
 
-  if (!project) return redirect("/dashboard");
+    if (projectId === "mock-proj-1") {
+      // Allow any logged-in user to preview the Acme Website Chatbot (mock-proj-1)
+      project = await prisma.project.findFirst({
+        where: { id: projectId },
+      });
+    } else {
+      // Enforce owner checks for real user-defined projects
+      project = await prisma.project.findFirst({
+        where: { id: projectId, userId },
+      });
+    }
 
-  return json({ project });
+    if (!project) {
+      console.warn(`[Playground Loader] Project of ID ${projectId} not found or doesn't belong to userId ${userId}. Redirecting to dashboard.`);
+      return redirect("/dashboard");
+    }
+
+    return json({ project });
+  } catch (err: any) {
+    console.error("[Playground Loader] Failed to load the project:", err);
+    throw new Response("Internal Server Error during playground project load: " + (err.message || String(err)), { status: 500 });
+  }
 }
 
 export default function Playground() {
