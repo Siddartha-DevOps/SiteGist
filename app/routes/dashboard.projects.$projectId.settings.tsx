@@ -424,7 +424,7 @@ export default function ProjectSettings() {
         <div className="relative z-10">
           <h3 className="text-2xl font-bold mb-4">Preview your Bot</h3>
           <p className="text-zinc-400 mb-8 max-w-md">Remember to test your changes in the playground to ensure the instructions are working as expected.</p>
-          <Link to={`/dashboard/projects/${project.id}/playground`} className="inline-flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-bold transition-all">
+          <Link to={`/dashboard/playground?projectId=${project.id}`} className="inline-flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-bold transition-all">
             Open Playground <ArrowRight className="w-4 h-4" />
           </Link>
         </div>

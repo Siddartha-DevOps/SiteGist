@@ -189,7 +189,7 @@ export default function ProjectDetails() {
             <p className="text-primary-muted/80 text-sm mb-8 leading-relaxed">
               Test how your chatbot responds to questions before deploying.
             </p>
-            <Link to={`/dashboard/projects/${project.id}/playground`} className="w-full flex items-center justify-center gap-2 py-4 bg-white text-primary rounded-2xl font-black hover:bg-primary-muted transition-all">
+            <Link to={`/dashboard/playground?projectId=${project.id}`} className="w-full flex items-center justify-center gap-2 py-4 bg-white text-primary rounded-2xl font-black hover:bg-primary-muted transition-all">
               <Send className="w-4 h-4" /> Open Playground
             </Link>
           </div>
