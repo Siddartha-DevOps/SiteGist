@@ -97,11 +97,6 @@ export function LoginPage({ error, success, sentEmail, isSubmitting, devVerifica
                 siteKey={siteKey} 
                 options={{ theme: "light" }}
               />
-              {!configSiteKey && (
-                <p className="text-[10px] text-slate-400 mt-2 font-bold tracking-tight">
-                  Running in Turnstile Sandbox mode (solve challenge to submit)
-                </p>
-              )}
             </div>
             
             {error && (
@@ -122,10 +117,6 @@ export function LoginPage({ error, success, sentEmail, isSubmitting, devVerifica
               )}
             </button>
           </Form>
-          
-          <p className="mt-8 text-center text-xs text-slate-500 leading-relaxed font-medium">
-            No password needed. Enter your email and pass the secure Turnstile check to receive an instant sign-in link.
-          </p>
         </div>
       </div>
     </div>
