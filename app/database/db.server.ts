@@ -98,6 +98,56 @@ const mockDb = typeof global !== "undefined" && (global as any).__mockDb__ ? (gl
   blogpost: []
 };
 
+function enrichWithMockRelations(modelLower: string, item: any): any {
+  if (!item) return item;
+  const res = { ...item };
+
+  if (modelLower === "project") {
+    res._count = {
+      knowledgeSources: (mockDb.knowledgesource || []).filter((x: any) => x.projectId === res.id).length,
+      sessions: (mockDb.chatsession || []).filter((x: any) => x.projectId === res.id).length,
+      leads: (mockDb.lead || []).filter((x: any) => x.projectId === res.id).length,
+      integrations: (mockDb.integration || []).filter((x: any) => x.projectId === res.id).length,
+    };
+    res.knowledgeSources = (mockDb.knowledgesource || []).filter((x: any) => x.projectId === res.id);
+    res.integrations = (mockDb.integration || []).filter((x: any) => x.projectId === res.id);
+    res.sessions = (mockDb.chatsession || []).filter((x: any) => x.projectId === res.id);
+    res.leads = (mockDb.lead || []).filter((x: any) => x.projectId === res.id);
+  }
+
+  if (modelLower === "chatsession" || modelLower === "session") {
+    res._count = {
+      messages: (mockDb.message || []).filter((x: any) => x.sessionId === res.id).length
+    };
+    res.messages = (mockDb.message || []).filter((x: any) => x.sessionId === res.id);
+    const proj = (mockDb.project || []).find((p: any) => p.id === res.projectId) || {
+      id: res.projectId || "mock-proj-1",
+      name: "Default Website Chatbot",
+      userId: "demo-user-id"
+    };
+    res.project = proj;
+  }
+
+  if (modelLower === "blogpost") {
+    res.author = {
+      id: "author-1",
+      name: "Founder",
+      email: "founder@sitegist.co"
+    };
+  }
+
+  if (modelLower === "lead") {
+    const proj = (mockDb.project || []).find((p: any) => p.id === res.projectId) || {
+      id: res.projectId || "mock-proj-1",
+      name: "Default Website Chatbot",
+      userId: "demo-user-id"
+    };
+    res.project = proj;
+  }
+
+  return res;
+}
+
 function getFallbackMockData(model: string | undefined, operation: string, args: any): any {
   const modelLower = (model || "").toLowerCase();
   
@@ -133,21 +183,10 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
       });
     }
     
-    // Support project relation counts mock
-    if (modelLower === "project") {
-      result = result.map(proj => ({
-        ...proj,
-        _count: {
-          knowledgeSources: (mockDb.knowledgesource || []).filter((x: any) => x.projectId === proj.id).length,
-          sessions: (mockDb.chatsession || []).filter((x: any) => x.projectId === proj.id).length,
-          leads: (mockDb.lead || []).filter((x: any) => x.projectId === proj.id).length
-        }
-      }));
-    }
-    return result;
+    return result.map(item => enrichWithMockRelations(modelLower, item));
   }
   
-  if (operation === "findUnique" || operation === "findFirst") {
+  if (operation === "findUnique" || operation === "findFirst" || operation === "findUniqueOrThrow") {
     let result = [...list];
     if (args?.where) {
       result = result.filter((item: any) => {
@@ -165,20 +204,8 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
       });
     }
     
-    // Support project relation counts / include mock
-    if (modelLower === "project" && result.length > 0) {
-      result = result.map(proj => ({
-        ...proj,
-        _count: {
-          knowledgeSources: (mockDb.knowledgesource || []).filter((x: any) => x.projectId === proj.id).length,
-          sessions: (mockDb.chatsession || []).filter((x: any) => x.projectId === proj.id).length,
-          leads: (mockDb.lead || []).filter((x: any) => x.projectId === proj.id).length
-        }
-      }));
-    }
-    
     if (result.length > 0) {
-      return result[0];
+      return enrichWithMockRelations(modelLower, result[0]);
     }
     
     // Automatic creation of User if looking up by id to prevent login pages getting completely dead ends
@@ -193,7 +220,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         subscriptions: []
       };
       list.push(newUser);
-      return newUser;
+      return enrichWithMockRelations(modelLower, newUser);
     }
     if (modelLower === "user" && args?.where?.email) {
       const newUser = {
@@ -206,7 +233,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         subscriptions: []
       };
       list.push(newUser);
-      return newUser;
+      return enrichWithMockRelations(modelLower, newUser);
     }
     return null;
   }
@@ -235,7 +262,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
       updatedAt: new Date()
     };
     list.push(newItem);
-    return newItem;
+    return enrichWithMockRelations(modelLower, newItem);
   }
   
   if (operation === "update" || operation === "updateMany") {
@@ -267,7 +294,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
     if (operation === "updateMany") {
       return { count: updatedCount };
     }
-    return lastUpdatedItem;
+    return enrichWithMockRelations(modelLower, lastUpdatedItem);
   }
   
   if (operation === "upsert") {
@@ -286,7 +313,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         ...(args?.update || {}),
         updatedAt: new Date()
       };
-      return list[foundIdx];
+      return enrichWithMockRelations(modelLower, list[foundIdx]);
     } else {
       const newId = args?.where?.id || `mock-${modelLower}-${Math.random().toString(36).substring(2, 9)}`;
       const newItem = {
@@ -296,7 +323,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         updatedAt: new Date()
       };
       list.push(newItem);
-      return newItem;
+      return enrichWithMockRelations(modelLower, newItem);
     }
   }
   

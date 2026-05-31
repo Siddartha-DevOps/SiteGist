@@ -30,7 +30,25 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const baseUrl = new URL(request.url).origin;
+    let host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+    if (host.includes(",")) {
+      host = host.split(",")[0].trim();
+    }
+    if (!host) {
+      host = new URL(request.url).host;
+    }
+    
+    let proto = request.headers.get("x-forwarded-proto") || "";
+    if (proto.includes(",")) {
+      proto = proto.split(",")[0].trim();
+    }
+    proto = proto.toLowerCase().trim();
+    if (!proto) {
+      proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
+    }
+    
+    const baseUrl = `${proto}://${host}`;
+    
     await generateMagicLink(email, baseUrl);
     return json({ success: true, email });
   } catch (error) {

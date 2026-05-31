@@ -22,56 +22,24 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    // Create project with proper error handling and retry logic
-    let project;
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      try {
-        project = await prisma.project.create({
-          data: {
-            name,
-            userId,
-            settings: {
-              systemPrompt: "You are a helpful AI assistant. Answer based on the knowledge provided.",
-              branding: { 
-                primaryColor: "#155DEE",
-                botName: name,
-                welcomeMessage: `Hi! I'm ${name}. How can I help you today?`
-              }
-            }
-          },
-        });
-        break;
-      } catch (dbError) {
-        attempts++;
-        if (attempts >= maxAttempts) {
-          throw dbError;
+    const project = await prisma.project.create({
+      data: {
+        name,
+        userId,
+        settings: {
+          systemPrompt: "You are a helpful AI assistant. Answer based on the knowledge provided.",
+          branding: { 
+            primaryColor: "#155DEE",
+            botName: name,
+            welcomeMessage: `Hi! I'm ${name}. How can I help you today?`
+          }
         }
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
-
-    if (!project) {
-      throw new Error("Failed to create project after multiple attempts");
-    }
-
-    // Verify the project was created by fetching it
-    const verifiedProject = await prisma.project.findUnique({
-      where: { id: project.id }
+      },
     });
-
-    if (!verifiedProject) {
-      throw new Error("Project creation failed - could not verify project existence");
-    }
 
     return redirect(`/dashboard/projects/${project.id}`);
   } catch (error) {
-    console.error("[Create Chatbot Error]", error);
-    const errorMessage = error instanceof Error ? error.message : "Failed to create chatbot. Please try again.";
-    return json({ error: errorMessage }, { status: 500 });
+    return json({ error: "Failed to create chatbot. Please try again." }, { status: 500 });
   }
 }
 
@@ -145,7 +113,7 @@ export default function CreateChatbot() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full mt-10 py-5 bg-brand-dark text-white rounded-[24px] font-black text-lg shadow-xl shadow-brand-dark/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 group"
+                className="w-full mt-10 py-5 bg-brand-dark text-white rounded-[24px] font-black text-lg shadow-xl shadow-brand-dark/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-3 group"
               >
                 {isSubmitting ? (
                   <>

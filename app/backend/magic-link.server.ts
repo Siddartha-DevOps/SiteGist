@@ -8,11 +8,19 @@ const TOKEN_EXPIRATION_SEC = 60 * 15; // 15 minutes
 export async function generateMagicLink(email: string, baseUrl: string) {
   const token = randomBytes(32).toString("hex");
   const redis = getRedis();
+  let storedInRedis = false;
   
   if (redis) {
-    // Store token in Redis: key="magic_link:token", value="email", expires in 15 mins
-    await redis.set(`magic_link:${token}`, email, { ex: TOKEN_EXPIRATION_SEC });
-  } else {
+    try {
+      // Store token in Redis: key="magic_link:token", value="email", expires in 15 mins
+      await redis.set(`magic_link:${token}`, email, { ex: TOKEN_EXPIRATION_SEC });
+      storedInRedis = true;
+    } catch (err) {
+      console.error("[Magic Link] Redis set failed, falling back to database:", err);
+    }
+  }
+
+  if (!storedInRedis) {
     // Fallback to Database
     await prisma.verificationToken.create({
       data: {
@@ -24,6 +32,11 @@ export async function generateMagicLink(email: string, baseUrl: string) {
   }
 
   const magicLink = `${baseUrl}/api/auth/verify?token=${token}`;
+  
+  console.log("==================================================");
+  console.log(`[Auth Magic-Link] Generated for: ${email}`);
+  console.log(`[Auth Magic-Link] Login Link: ${magicLink}`);
+  console.log("==================================================");
   
   await sendEmail({
     to: email,
@@ -45,15 +58,44 @@ export async function generateMagicLink(email: string, baseUrl: string) {
   return token;
 }
 
+export async function checkMagicLinkWithoutConsuming(token: string) {
+  const redis = getRedis();
+  
+  if (redis) {
+    try {
+      const email = await redis.get<string>(`magic_link:${token}`);
+      if (email) {
+        return email;
+      }
+    } catch (err) {
+      console.error("[Magic Link] Redis check without consuming failed, falling back to database:", err);
+    }
+  }
+
+  const vToken = await prisma.verificationToken.findUnique({
+    where: { token }
+  });
+
+  if (!vToken || vToken.expiresAt < new Date()) {
+    return null;
+  }
+
+  return vToken.email;
+}
+
 export async function verifyMagicLink(token: string) {
   const redis = getRedis();
   
   if (redis) {
-    const email = await redis.get<string>(`magic_link:${token}`);
-    if (email) {
-      // Consume token
-      await redis.del(`magic_link:${token}`);
-      return email;
+    try {
+      const email = await redis.get<string>(`magic_link:${token}`);
+      if (email) {
+        // Consume token
+        await redis.del(`magic_link:${token}`).catch(() => {});
+        return email;
+      }
+    } catch (err) {
+      console.error("[Magic Link] Redis verify failed, falling back to database:", err);
     }
   }
 
