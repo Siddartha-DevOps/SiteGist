@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check } from "lucide-react";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -20,6 +20,38 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   const formData = await request.formData();
+
+  const actionType = formData.get("_action") as string;
+  if (actionType === "delete_project") {
+    try {
+      // Clear all child associations to prevent constraint issues on both real and fallback DBs
+      await prisma.unansweredQuestion.deleteMany({ where: { projectId: params.projectId } });
+      await prisma.knowledgeSource.deleteMany({ where: { projectId: params.projectId } });
+      await prisma.knowledgeQA.deleteMany({ where: { projectId: params.projectId } });
+      await prisma.integration.deleteMany({ where: { projectId: params.projectId } });
+      await prisma.lead.deleteMany({ where: { projectId: params.projectId } });
+      
+      // Delete messages before sessions to clear dependencies
+      const sessions = await prisma.chatSession.findMany({ where: { projectId: params.projectId } });
+      const sessionIds = sessions.map(s => s.id);
+      if (sessionIds.length > 0) {
+        await prisma.message.deleteMany({ where: { sessionId: { in: sessionIds } } });
+      }
+      await prisma.chatSession.deleteMany({ where: { projectId: params.projectId } });
+      
+      // Finally, delete the project
+      await prisma.project.delete({ where: { id: params.projectId } });
+    } catch (err) {
+      console.error("[Settings Delete Project] Safely cascading relations: ", err);
+      try {
+        await prisma.project.delete({ where: { id: params.projectId } });
+      } catch (innerErr) {
+        console.error("[Settings Delete Project] Force fallback delete failed:", innerErr);
+      }
+    }
+    return redirect("/dashboard");
+  }
+
   const name = formData.get("name") as string;
   const systemPrompt = formData.get("systemPrompt") as string;
   const primaryColor = formData.get("primaryColor") as string;
@@ -352,6 +384,29 @@ export default function ProjectSettings() {
               </button>
             </div>
           </Form>
+
+          {/* Danger Zone */}
+          <section className="bg-red-50/20 p-8 rounded-[32px] border border-red-100/60 mt-12">
+            <h2 className="text-xl font-bold mb-2 flex items-center gap-3 text-red-700">
+              <Trash2 className="w-5 h-5 text-red-500" /> Danger Zone
+            </h2>
+            <p className="text-xs text-red-600/85 mb-6 font-medium leading-relaxed">
+              Permanently delete this chatbot, along with all of its custom trained knowledge files, crawled URLs, manual Q&As, feedback stats, capture leads, and live inbox history. This process is irreversible.
+            </p>
+            <Form method="post" onSubmit={(e) => {
+              if (!confirm("Are you absolutely sure you want to delete this chatbot? This will permanently wipe all training data and live history. This action cannot be undone.")) {
+                e.preventDefault();
+              }
+            }}>
+              <input type="hidden" name="_action" value="delete_project" />
+              <button
+                type="submit"
+                className="px-6 py-4 bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-black rounded-2xl flex items-center gap-2 transition-all shadow-md shadow-red-200 uppercase tracking-widest"
+              >
+                <Trash2 className="w-4 h-4" /> Delete Chatbot Permanently
+              </button>
+            </Form>
+          </section>
         </div>
 
         {/* Live Preview Column */}

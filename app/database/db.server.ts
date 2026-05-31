@@ -55,39 +55,14 @@ if (typeof global !== "undefined" && !(global as any).__mockDb__) {
         subscriptions: []
       }
     ],
-    project: [
-      {
-        id: "mock-proj-1",
-        name: "Acme Website Chatbot",
-        userId: "demo-user-id",
-        settings: {
-          systemPrompt: "You are a helpful customer support agent for Acme Corp. Help users with pricing, features, and setup.",
-          branding: { primaryColor: "#2563eb" }
-        },
-        webhookUrl: "https://hooks.slack.com/services/mock",
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
-    ],
-    knowledgesource: [
-      { id: "mock-ks-1", projectId: "mock-proj-1", type: "web", source: "https://acme.com/help", title: "Help Center", content: "FAQs about Acme services.", createdAt: new Date(), updatedAt: new Date() }
-    ],
-    lead: [
-      { id: "mock-lead-1", projectId: "mock-proj-1", name: "Sarah Connor", email: "sarah@cyberdyne.com", phone: "+1 (555) 0199", company: "Teaser Tech", createdAt: new Date() }
-    ],
-    chatsession: [
-      { id: "mock-sess-1", projectId: "mock-proj-1", customerEmail: "sarah@cyberdyne.com", status: "active", mode: "ai", createdAt: new Date(), updatedAt: new Date() }
-    ],
-    message: [
-      { id: "mock-msg-1", sessionId: "mock-sess-1", role: "user", content: "Hello! Do you have a trial?", feedback: null, createdAt: new Date() },
-      { id: "mock-msg-2", sessionId: "mock-sess-1", role: "assistant", content: "Yes! We run a 14-day fully-featured trial with support for multiple chatbot assistants.", feedback: 1, createdAt: new Date() }
-    ],
+    project: [],
+    knowledgesource: [],
+    lead: [],
+    chatsession: [],
+    message: [],
     unansweredquestion: [],
     blogpost: [],
-    knowledgeqa: [
-      { id: "mock-qa-1", projectId: "mock-proj-1", question: "What is the pricing model?", answer: "We have clean, simple plans: Free, Pro ($19/mo), and custom Enterprise. No hidden fees.", triggerCount: 1, lastUsedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
-      { id: "mock-qa-2", projectId: "mock-proj-1", question: "Can I try for free?", answer: "Yes! There is a 100% free Sandbox plan allowing you to create 1 chatbot and use up to 50 message credits per month.", triggerCount: 0, lastUsedAt: null, createdAt: new Date(), updatedAt: new Date() }
-    ]
+    knowledgeqa: []
   };
 }
 
