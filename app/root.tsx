@@ -69,6 +69,47 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="twitter:image" content="/images/hero.png" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                var originalOnError = window.onerror;
+                window.onerror = function(message, source, lineno, colno, error) {
+                  var msg = String(message || '');
+                  var src = String(source || '');
+                  if (msg.indexOf('Script error') > -1 || msg.indexOf('cloudflare') > -1 || msg.indexOf('turnstile') > -1 || src.indexOf('cloudflare') > -1) {
+                    console.warn('[SiteGist Guard] Gracefully suppressed cross-origin sandbox script event:', message);
+                    return true;
+                  }
+                  if (originalOnError) {
+                    return originalOnError.apply(this, arguments);
+                  }
+                  return false;
+                };
+
+                window.addEventListener('error', function(event) {
+                  var msg = String(event.message || '');
+                  if (msg.indexOf('Script error') > -1 || msg.indexOf('cloudflare') > -1 || msg.indexOf('turnstile') > -1) {
+                    try {
+                      event.preventDefault();
+                      event.stopImmediatePropagation();
+                    } catch(e){}
+                  }
+                }, true);
+
+                window.addEventListener('unhandledrejection', function(event) {
+                  var reason = String(event.reason || '');
+                  if (reason.indexOf('cloudflare') > -1 || reason.indexOf('turnstile') > -1 || reason.indexOf('Script error') > -1) {
+                    try {
+                      event.preventDefault();
+                      event.stopImmediatePropagation();
+                    } catch(e){}
+                  }
+                }, true);
+              })();
+            `
+          }}
+        />
+        <script
           defer
           data-website-id="dfid_jdhKNHuiQeBJuwVkakfYd"
           data-domain="stegist.co"

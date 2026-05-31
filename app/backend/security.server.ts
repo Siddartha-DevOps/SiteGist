@@ -1,14 +1,17 @@
 export async function verifyTurnstile(token: string) {
   const secretKey = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY || "1x0000000000000000000000000000000AA";
 
-  const formData = new FormData();
-  formData.append("secret", secretKey);
-  formData.append("response", token);
+  const params = new URLSearchParams();
+  params.append("secret", secretKey);
+  params.append("response", token);
 
   try {
     const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
     });
 
     const data = await res.json();
