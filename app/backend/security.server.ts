@@ -1,10 +1,5 @@
 export async function verifyTurnstile(token: string) {
-  const secretKey = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
-  if (!secretKey) {
-    // If not configured, we allow it (development or not forced)
-    console.warn("CLOUDFLARE_TURNSTILE_SECRET_KEY not set, skipping verification.");
-    return true;
-  }
+  const secretKey = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY || "1x0000000000000000000000000000000AA";
 
   const formData = new FormData();
   formData.append("secret", secretKey);

@@ -22,11 +22,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: "Please enter a valid email address" }, { status: 400 });
   }
 
-  // Verify Turnstile if key is provided
-  if (process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY) {
-    if (typeof turnstileToken !== "string" || !(await verifyTurnstile(turnstileToken))) {
-      return json({ error: "Security check failed. Please try again." }, { status: 400 });
-    }
+  // Verify Turnstile security check
+  if (typeof turnstileToken !== "string" || !(await verifyTurnstile(turnstileToken))) {
+    return json({ error: "Security check failed. Please verify with the Turnstile challenge again." }, { status: 400 });
   }
 
   try {
@@ -49,8 +47,11 @@ export async function action({ request }: ActionFunctionArgs) {
     
     const baseUrl = `${proto}://${host}`;
     
-    await generateMagicLink(email, baseUrl);
-    return json({ success: true, email });
+    const token = await generateMagicLink(email, baseUrl);
+    const hasResend = !!process.env.RESEND_API_KEY;
+    const devVerificationUrl = `/api/auth/verify?token=${token}`;
+    
+    return json({ success: true, email, devVerificationUrl, hasResend });
   } catch (error) {
     console.error("Magic Link Error:", error);
     return json({ error: "Failed to send login link. Please try again." }, { status: 500 });
@@ -69,6 +70,8 @@ export default function Login() {
 
   const success = actionData && "success" in actionData ? actionData.success : undefined;
   const sentEmail = actionData && "email" in actionData ? actionData.email : undefined;
+  const devVerificationUrl = actionData && "devVerificationUrl" in actionData ? actionData.devVerificationUrl : undefined;
+  const hasResend = actionData && "hasResend" in actionData ? actionData.hasResend : undefined;
 
   return (
     <LoginPage 
@@ -76,6 +79,8 @@ export default function Login() {
       success={success}
       sentEmail={sentEmail}
       isSubmitting={isSubmitting} 
+      devVerificationUrl={devVerificationUrl}
+      hasResend={hasResend}
     />
   );
 }

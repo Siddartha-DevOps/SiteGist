@@ -1,7 +1,7 @@
 import { Form, Link } from "@remix-run/react";
 import { Loader2 } from "lucide-react";
 import { Logo } from "~/frontend/components/Logo";
-import { Turnstile } from "@marsidev/react-turnstile";
+import { Turnstile } from "~/frontend/components/Turnstile";
 
 interface SignupPageProps {
   error?: string;
