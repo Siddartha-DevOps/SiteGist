@@ -21,8 +21,11 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
   const resend = getResend();
   if (!resend) return;
 
+  const senderEmail = process.env.SENDER_EMAIL || "support@sitegist.co";
+  const fromName = process.env.SENDER_NAME || "SiteGist";
+
   return await resend.emails.send({
-    from: "SiteGist <onboarding@resend.dev>", // Replace with your domain
+    from: `${fromName} <${senderEmail}>`,
     to,
     subject,
     html,
