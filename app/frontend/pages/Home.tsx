@@ -105,6 +105,14 @@ function TestimonialsSection() {
 }
 
 function HeroSection() {
+  const highlightFeatures = [
+    "Personalized onboarding help",
+    "Friendly pricing as you scale",
+    "95+ languages supported",
+    "7-day free trial",
+    "Cancel anytime"
+  ];
+
   return (
     <section className="relative px-6 pt-32 md:pt-48 pb-24 overflow-hidden">
       {/* Subtle radial glow */}
@@ -118,31 +126,45 @@ function HeroSection() {
           className="max-w-4xl"
         >
           <div className="inline-flex items-center gap-2 px-4 py-1.5 mb-8 text-[11px] font-bold tracking-[0.1em] text-primary bg-primary-muted rounded-full uppercase border border-primary/10">
-            ✦ AI-Powered Knowledge Platform
+            ✦ Dedicated Customer Success Intelligence
           </div>
           
-          <h1 className="text-6xl md:text-8xl font-bold mb-8 leading-[1] tracking-[-0.03em] font-display text-brand-dark">
-            AI chatbot trained <br className="hidden md:block" /> on your <span className="wordmark-gist italic text-primary">website.</span>
+          <h1 className="text-5xl md:text-7xl font-extrabold mb-8 leading-[1.1] tracking-[-0.03em] font-display text-brand-dark">
+            Transform Your Documentation <br className="hidden md:block" /> Into an <span className="wordmark-gist italic text-primary">Expert AI Agent</span>
           </h1>
           
-          <p className="text-xl text-brand-gray mb-12 max-w-2xl mx-auto leading-relaxed font-medium">
-            The AI chatbot that's an expert on your website. Instantly answer questions, capture leads, and automate support 24/7.
+          <p className="text-lg md:text-xl text-brand-gray mb-10 max-w-3xl mx-auto leading-relaxed font-medium">
+            Empower your customers with a custom support companion trained directly on your product knowledge base, docs, and public pages. Instantly resolve complex inquiries and elevate customer success automatically.
           </p>
+
+          {/* Core Feature Badges */}
+          <div className="flex flex-wrap justify-center gap-x-6 gap-y-3 mb-12 max-w-3xl mx-auto">
+            {highlightFeatures.map((feature) => (
+              <div key={feature} className="flex items-center gap-2 text-sm font-semibold text-zinc-600 bg-zinc-50 border border-zinc-100 px-4 py-2 rounded-full shadow-sm hover:scale-105 transition-all duration-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{feature}</span>
+              </div>
+            ))}
+          </div>
           
           <div className="flex flex-col sm:flex-row items-center gap-4 justify-center">
-            <CTAButton to="/signup" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto">
-              Start Free Trial <ArrowRight className="w-5 h-5" />
+            <CTAButton to="/signup" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto shadow-lg shadow-primary/20">
+              Start a free trial <ArrowRight className="w-5 h-5 ml-1" />
             </CTAButton>
-            <CTAButton to="/login" variant="secondary" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto">
-              Sign In
+            <CTAButton to="/contact-us" variant="secondary" className="px-10 py-5 text-lg rounded-2xl w-full sm:w-auto border-zinc-200">
+              Book a demo
             </CTAButton>
           </div>
           
           <div className="mt-12 flex items-center justify-center gap-4 opacity-90 transition-all duration-500 max-w-2xl mx-auto bg-zinc-50 border border-zinc-100 p-4 rounded-2xl">
              <div className="flex -space-x-3 shrink-0">
                {[1, 2, 3, 4].map(i => (
-                 <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-zinc-100 overflow-hidden shadow-sm">
-                   <img src={`https://i.pravatar.cc/100?img=${i+20}`} alt="User" />
+                 <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-gradient-to-tr from-slate-200 to-slate-300 flex items-center justify-center shadow-sm relative overflow-hidden">
+                   {/* Placeholder: To restore images in the future, uncomment below and modify the src */}
+                   {/* <img src={`https://i.pravatar.cc/100?img=${i+20}`} alt="User" className="w-full h-full object-cover" /> */}
+                   <span className="text-[10px] font-bold text-slate-500 select-none">
+                     {["A", "M", "S", "K"][i-1] || "U"}
+                   </span>
                  </div>
                ))}
              </div>
@@ -200,16 +222,29 @@ function HeroSection() {
 }
 
 function TrustSection() {
-  const logos = ["Prisma", "Vercel", "DigitalOcean", "Supabase", "Stripe", "Clerk"];
+  const techStack = ["Prisma", "Vercel", "DigitalOcean", "Supabase", "Paddle", "Clerk"];
   return (
-    <section className="py-24 border-y border-brand-border bg-white">
-      <div className="max-w-7xl mx-auto px-6">
-        <p className="text-center text-[10px] font-bold uppercase tracking-[0.2em] text-brand-gray mb-12">
-          Trusted by high-growth product teams
+    <section className="py-20 border-y border-brand-border bg-slate-50/50">
+      <div className="max-w-7xl mx-auto px-6 text-center">
+        <p className="text-center text-[10px] font-bold uppercase tracking-[0.2em] text-brand-gray mb-10">
+          Tech Stack Built For This Product
         </p>
-        <div className="flex flex-wrap justify-center items-center gap-x-16 gap-y-10 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all duration-700">
-           {logos.map(logo => (
-             <span key={logo} className="text-2xl font-extrabold font-display tracking-tighter text-brand-dark">{logo}</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6 max-w-5xl mx-auto justify-center">
+           {techStack.map(platform => (
+             <div 
+               key={platform} 
+               className="relative group flex flex-col items-center justify-center p-6 bg-white border border-dashed border-zinc-200 rounded-2xl transition-all duration-300 hover:border-primary/40 text-center"
+             >
+               {/* Placeholder: To restore logo images in the future, uncomment below and add icon paths */}
+               {/* <img src={`/images/logos/${platform.toLowerCase()}.svg`} alt={platform} className="w-12 h-12 mb-2" /> */}
+               
+               <span className="text-lg font-bold font-display tracking-tight text-zinc-500 select-none group-hover:text-primary transition-colors">
+                 {platform}
+               </span>
+               <span className="absolute -top-2 right-4 px-2 py-0.5 bg-blue-50 border border-blue-100 rounded-full text-[8.5px] font-bold tracking-wider text-blue-600 uppercase group-hover:bg-primary-muted group-hover:text-primary transition-colors">
+                 Built
+               </span>
+             </div>
            ))}
         </div>
       </div>
