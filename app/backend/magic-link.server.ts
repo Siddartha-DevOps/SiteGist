@@ -40,17 +40,50 @@ export async function generateMagicLink(email: string, baseUrl: string) {
   
   await sendEmail({
     to: email,
-    subject: "Login to SiteGist",
+    subject: "Sign in to SiteGist",
     html: `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-        <h2 style="color: #6c5ce7;">Login to SiteGist</h2>
-        <p>Click the button below to log in to your account. This link will expire in 15 minutes.</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${magicLink}" style="background-color: #6c5ce7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Log in</a>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; padding: 40px 20px; text-align: center;">
+        <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; padding: 48px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+          <!-- Logo Brand Header -->
+          <div style="font-size: 20px; font-weight: 800; color: #2563eb; margin-bottom: 24px; letter-spacing: -0.5px;">
+            SiteGist
+          </div>
+          
+          <!-- Heading -->
+          <h1 style="font-size: 28px; font-weight: 800; color: #0f172a; margin-top: 0; margin-bottom: 24px; letter-spacing: -0.5px;">
+            Sign in to SiteGist
+          </h1>
+          
+          <!-- Recipient Text Block -->
+          <p style="font-size: 15px; color: #475569; line-height: 24px; margin-bottom: 4px;">
+            We received a request to sign in to SiteGist using
+          </p>
+          <p style="margin-top: 0; margin-bottom: 24px;">
+            <a href="mailto:${email}" style="color: #2563eb; font-weight: 700; text-decoration: underline; font-size: 15px;">${email}</a>.
+          </p>
+          
+          <p style="font-size: 15px; color: #475569; line-height: 24px; margin-bottom: 24px;">
+            Click the button below to sign in.
+          </p>
+          
+          <!-- Large Blue Button -->
+          <div style="margin-bottom: 32px;">
+            <a href="${magicLink}" style="background-color: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: 800; font-size: 15px; display: inline-block;">
+              Sign in to SiteGist
+            </a>
+          </div>
+          
+          <!-- Divider -->
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+          
+          <!-- Raw Link Fallback -->
+          <p style="font-size: 12px; color: #64748b; margin-bottom: 8px; font-weight: 500;">
+            Or copy and paste this link:
+          </p>
+          <p style="margin: 0; word-break: break-all;">
+            <a href="${magicLink}" style="color: #2563eb; text-decoration: underline; font-size: 13px; font-weight: 500;">${magicLink}</a>
+          </p>
         </div>
-        <p style="color: #666; font-size: 14px;">If you didn't request this link, you can safely ignore this email.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-        <p style="color: #999; font-size: 12px;">SiteGist Technologies Inc.</p>
       </div>
     `
   });
