@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { pineconeIndex } from "~/lib/pinecone.server";
 import { getPortkey } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
+import crypto from "crypto";
 
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
@@ -297,11 +298,18 @@ export async function upsertChunks(projectId: string, chunks: { text: string; me
         } catch (embedErr) {
           console.warn("[AI] Failed to embed text chunk during upsert:", embedErr);
         }
+        
+        // Generate a deterministic hash based on text content to avoid duplicate indexing
+        const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
+        const chunkId = `${projectId}-${hash}-${i}`;
+        const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
+
         return {
-          id: `${projectId}-${Date.now()}-${i}`,
+          id: chunkId,
           values,
           metadata: {
             ...chunk.metadata,
+            source: sourceUrlOrTitle,
             text: chunk.text,
             projectId,
           },
@@ -325,15 +333,17 @@ export async function upsertChunks(projectId: string, chunks: { text: string; me
 
 export async function deleteSourceChunks(projectId: string, sourceValue: string) {
   const index = pineconeIndex;
-  // We specify the namespace and filter by the source identifier
-  // Note: Depending on Pinecone version/config, this might need specific indexed metadata fields
+  // We specify the namespace and filter by either url or source field to prevent orphan chunks
   try {
     await index.namespace(projectId).deleteMany({
       filter: {
-        source: { "$eq": sourceValue }
+        "$or": [
+          { source: { "$eq": sourceValue } },
+          { url: { "$eq": sourceValue } }
+        ]
       }
     });
-    console.log(`[AI] Deleted chunks for source: ${sourceValue} in project: ${projectId}`);
+    console.log(`[AI] Deleted chunks for source matching: "${sourceValue}" in project: ${projectId}`);
   } catch (error) {
     console.error(`[AI] Error deleting chunks for source ${sourceValue}:`, error);
   }
