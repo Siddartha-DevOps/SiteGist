@@ -286,21 +286,41 @@ export async function embedText(text: string) {
 }
 
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
-  const index = pineconeIndex;
-  
-  const vectors = await Promise.all(
-    chunks.map(async (chunk, i) => ({
-      id: `${projectId}-${Date.now()}-${i}`,
-      values: await embedText(chunk.text),
-      metadata: {
-        ...chunk.metadata,
-        text: chunk.text,
-        projectId,
-      },
-    }))
-  );
+  try {
+    const index = pineconeIndex;
+    
+    const vectors = await Promise.all(
+      chunks.map(async (chunk, i) => {
+        let values: number[] = [];
+        try {
+          values = await embedText(chunk.text);
+        } catch (embedErr) {
+          console.warn("[AI] Failed to embed text chunk during upsert:", embedErr);
+        }
+        return {
+          id: `${projectId}-${Date.now()}-${i}`,
+          values,
+          metadata: {
+            ...chunk.metadata,
+            text: chunk.text,
+            projectId,
+          },
+        };
+      })
+    );
 
-  await index.namespace(projectId).upsert({ records: vectors });
+    // Only upload if we actually got valid non-empty vectors with embedding values (Pinecone requires values of the dimensions matching index)
+    const validVectors = vectors.filter(v => v.values && v.values.length > 0);
+    if (validVectors.length > 0) {
+      await index.namespace(projectId).upsert({ records: validVectors });
+      console.log(`[AI] Successfully upserted ${validVectors.length} chunks to Pinecone vector database.`);
+    } else {
+      console.warn("[AI] No valid vector embedding could be created for chunks. Stored content in main database only.");
+    }
+  } catch (error) {
+    console.error("[AI] Error upserting chunks to Pinecone vector store (falling back gracefully to Prisma DB storage):", error);
+    // Suppress error so training action finishes successfully, storing documents in SQLite/MySQL knowledgeSource for keyword search.
+  }
 }
 
 export async function deleteSourceChunks(projectId: string, sourceValue: string) {
@@ -416,12 +436,21 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       console.log(`[Hybrid Search] Stage 2: Parallel Search (Vector + Keyword)`);
       
       // 1. Vector Search (Pinecone)
-      const embedding = await embedText(searchTerms);
-      const vectorTask = index.namespace(projectId).query({
-        vector: embedding,
-        topK: 20,
-        includeMetadata: true,
-      });
+      let vectorResults: any = { matches: [] };
+      let vectorTask = Promise.resolve({ matches: [] });
+      try {
+        const embedding = await embedText(searchTerms);
+        vectorTask = index.namespace(projectId).query({
+          vector: embedding,
+          topK: 20,
+          includeMetadata: true,
+        }).catch((err: any) => {
+          console.warn("[Hybrid Search] Pinecone vector search failed inside promise:", err);
+          return { matches: [] };
+        });
+      } catch (err) {
+        console.warn("[Hybrid Search] Pinecone initialization/embedding failed during search:", err);
+      }
 
       // 2. Keyword Search (BM25 Surrogate via Prisma)
       // We extract key nouns/terms from the query for better matching
@@ -435,9 +464,13 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
           ]
         },
         take: 5
+      }).catch((err: any) => {
+        console.error("[Hybrid Search] Keyword search task failed inside promise:", err);
+        return [];
       });
 
-      const [vectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
+      const [resolvedVectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
+      vectorResults = resolvedVectorResults || { matches: [] };
 
       console.log(`[Hybrid Search] Vector: ${vectorResults.matches?.length || 0}, Keyword: ${keywordResults?.length || 0}`);
 

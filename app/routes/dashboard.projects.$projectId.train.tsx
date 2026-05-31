@@ -3,9 +3,8 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { chunkText, getSitemapUrls } from "~/ai-layer/crawler.server";
+import { chunkText, getSitemapUrls, crawlUrl } from "~/ai-layer/crawler.server";
 import { upsertChunks } from "~/ai-layer/ai.server";
-import { scrapeUrl, getFirecrawl } from "~/ai-layer/firecrawl.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
@@ -138,9 +137,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (method === "crawl_single") {
     try {
-      const data = await scrapeUrl(url);
-      const content = data.markdown || data.html || "";
-      const title = data.metadata?.title || url;
+      const data = await crawlUrl(url);
+      if (!data) {
+        return json({ error: "Could not crawl or fetch the page. Please verify the URL and try again." }, { status: 400 });
+      }
+      const content = data.content || "";
+      const title = data.title || url;
 
       const existing = await prisma.knowledgeSource.findFirst({
         where: { projectId: params.projectId, source: url, type: "web" },
@@ -166,9 +168,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const chunks = chunkText(content);
       await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url, title } })));
 
-      return json({ success: true, message: "Page crawled with Firecrawl and indexed successfully" });
+      return json({ success: true, message: "Page crawled and indexed successfully" });
     } catch (e: any) {
-      return json({ error: `Firecrawl Error: ${e.message}` }, { status: 500 });
+      return json({ error: `Crawl Error: ${e.message}` }, { status: 400 });
     }
   }
 
@@ -305,17 +307,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "No URLs found in this sitemap" }, { status: 400 });
     }
 
-    const { scrapeUrl } = await import("~/ai-layer/firecrawl.server");
     const results = [];
     const maxToCrawl = Math.min(urls.length, 30); // Crawl up to 30 pages to prevent extreme timeouts
     const crawledUrls = urls.slice(0, maxToCrawl);
 
     for (const itemUrl of crawledUrls) {
       try {
-        const data = await scrapeUrl(itemUrl);
-        if (data && (data.markdown || data.html)) {
-          const content = data.markdown || data.html || "";
-          const title = data.metadata?.title || itemUrl;
+        const data = await crawlUrl(itemUrl);
+        if (data && data.content) {
+          const content = data.content || "";
+          const title = data.title || itemUrl;
           
           const existing = await prisma.knowledgeSource.findFirst({
             where: { projectId: params.projectId, source: itemUrl, type: "web" },
@@ -341,7 +342,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           const chunks = chunkText(content);
           await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url: itemUrl, title } })));
           results.push(itemUrl);
-        }
+         }
       } catch (err) {
         console.error(`Sitemap scrape failed for ${itemUrl}:`, err);
       }
