@@ -14,7 +14,7 @@ interface LoginPageProps {
 
 export function LoginPage({ error, success, sentEmail, isSubmitting, devVerificationUrl, hasResend }: LoginPageProps) {
   const configSiteKey = typeof window !== "undefined" ? (window as any).ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY : undefined;
-  const siteKey = configSiteKey || "1x00000000000000000000AA"; // Fallback to Cloudflare's public testing siteKey
+  const siteKey = configSiteKey || undefined; // Only render when configured in environment
 
   if (success) {
     return (
@@ -107,13 +107,17 @@ export function LoginPage({ error, success, sentEmail, isSubmitting, devVerifica
               />
             </div>
             
-            <div className="flex flex-col items-center justify-center my-4 overflow-hidden rounded-xl border border-[#e2e8f0] p-4 bg-slate-50/50">
-              {/* Embedded Turnstile with light theme */}
-              <Turnstile 
-                siteKey={siteKey} 
-                options={{ theme: "light" }}
-              />
-            </div>
+            {siteKey ? (
+              <div className="flex flex-col items-center justify-center my-4 overflow-hidden rounded-xl border border-[#e2e8f0] p-4 bg-slate-50/50">
+                {/* Embedded Turnstile with light theme */}
+                <Turnstile 
+                  siteKey={siteKey} 
+                  options={{ theme: "light" }}
+                />
+              </div>
+            ) : (
+              <input type="hidden" name="cf-turnstile-response" value="bypass-token" />
+            )}
             
             {error && (
               <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium border border-red-100 italic">

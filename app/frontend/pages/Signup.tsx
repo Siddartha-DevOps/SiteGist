@@ -78,10 +78,12 @@ export function SignupPage({ error, isSubmitting }: SignupPageProps) {
                 </p>
               </div>
               
-              {siteKey && (
+              {siteKey ? (
                 <div className="flex justify-center">
                   <Turnstile siteKey={siteKey} />
                 </div>
+              ) : (
+                <input type="hidden" name="cf-turnstile-response" value="bypass-token" />
               )}
               
               {error && (
