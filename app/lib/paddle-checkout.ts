@@ -72,6 +72,13 @@ interface OpenCheckoutParams {
 let isCheckoutOpen = false;
 
 /**
+ * Resets the active checkout guard state.
+ */
+export function resetCheckoutState(): void {
+  isCheckoutOpen = false;
+}
+
+/**
  * Initiates the Paddle secure checkout window overlay.
  * Throws functional errors and guards against duplicate execution.
  */
@@ -108,12 +115,6 @@ export async function openCheckout({
     // 2. Prevent duplicate checkout presentation crashes
     if (isCheckoutOpen) {
       const err = new Error("A payment checkout flow is already active.");
-      onFailure?.(err);
-      return reject(err);
-    }
-
-    if (!priceId) {
-      const err = new Error("A valid Paddle Price ID is required to initiate checkout.");
       onFailure?.(err);
       return reject(err);
     }
@@ -155,6 +156,7 @@ export async function openCheckout({
               break;
 
             case "checkout.payment.failed":
+              isCheckoutOpen = false;
               onFailure?.(event.data || new Error("Payment transaction failed."));
               break;
 

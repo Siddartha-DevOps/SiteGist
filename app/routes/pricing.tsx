@@ -29,7 +29,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { getUser } from "~/backend/auth.server";
-import { openCheckout } from "~/lib/paddle-checkout";
+import { openCheckout, resetCheckoutState } from "~/lib/paddle-checkout";
 import { PricingCard } from "~/frontend/components/billing/PricingCard";
 
 type BillingCycle = "monthly" | "yearly";
@@ -106,6 +106,8 @@ export default function Pricing() {
     if (typeof window === "undefined") return;
 
     const handleWindowFocus = () => {
+      // Release any static block locks from the utility module
+      resetCheckoutState();
       setTimeout(() => {
         setToasts((prev) => {
           const hasLoader = prev.some((t) => t.type === "loading");
@@ -166,6 +168,7 @@ export default function Pricing() {
     let hasResolved = false;
     const safetyTimeoutId = setTimeout(() => {
       if (!hasResolved) {
+        resetCheckoutState();
         removeToast(loadToastId);
         setActiveCheckoutId((prev) => (prev === priceId ? null : prev));
         triggerToast("Checkout load tip: If checkout opened in a separate tab or window, please complete it there.", "info");
@@ -214,6 +217,7 @@ export default function Pricing() {
         },
         onFailure: (err) => {
           markResolved();
+          resetCheckoutState();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast(`Checkout failed: ${err?.message || "Internal error"}`, "error");
@@ -221,6 +225,7 @@ export default function Pricing() {
       });
     } catch (e: any) {
       markResolved();
+      resetCheckoutState();
       removeToast(loadToastId);
       setActiveCheckoutId(null);
       triggerToast(e?.message || "Failed to trigger Paddle.js overlay checkout.", "error");
