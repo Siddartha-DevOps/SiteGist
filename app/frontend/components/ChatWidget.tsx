@@ -104,7 +104,7 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
 
     const userMessage = textToSend.trim();
     const now = new Date();
-    if (!overrideInput) setInput("");
+    setInput("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage, timestamp: now }]);
     setIsTyping(true);
     setShowSuggestions(false);
@@ -171,14 +171,14 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
                   return newMessages;
                 });
               }
+              if (data.sessionId) {
+                setSessionId(data.sessionId);
+              }
             } catch (e) {
               console.warn("Failed to parse SSE data line:", trimmedLine);
             }
-          } else if (trimmedLine.startsWith("event: session")) {
-            // Wait for next 'data' line which follows session event
-          } else if (trimmedLine.startsWith("event: metadata")) {
-            const data = JSON.parse(trimmedLine.slice(15));
-            if (data.sessionId) setSessionId(data.sessionId);
+          } else if (trimmedLine.startsWith("event: ")) {
+            // Stream metadata and type indicators are followed by corresponding data lines. Safe to skip here.
           }
         }
       }
