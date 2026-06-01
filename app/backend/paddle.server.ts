@@ -14,8 +14,9 @@ export function getPaddle() {
       return null;
     }
 
+    // Default the API Environment to production (Live: https://api.paddle.com) rather than sandbox (https://sandbox-api.paddle.com)
     _paddle = new Paddle(apiKey, {
-      environment: (process.env.PADDLE_ENVIRONMENT as Environment) || Environment.sandbox,
+      environment: (process.env.PADDLE_ENVIRONMENT as Environment) || Environment.production,
     });
   }
   return _paddle;

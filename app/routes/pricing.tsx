@@ -86,13 +86,45 @@ export default function Pricing() {
   };
 
   const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setToasts((prev) => {
+      const toastToRemove = prev.find((t) => t.id === id);
+      if (toastToRemove && toastToRemove.type === "loading") {
+        setActiveCheckoutId(null);
+      }
+      return prev.filter((t) => t.id !== id);
+    });
   };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setIsInsideIframe(window.self !== window.top);
     }
+  }, []);
+
+  // Gracefully clean up any hanging checkout loaders when returning to this page/tab
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleWindowFocus = () => {
+      setTimeout(() => {
+        setToasts((prev) => {
+          const hasLoader = prev.some((t) => t.type === "loading");
+          if (hasLoader) {
+            setActiveCheckoutId(null);
+            return prev.filter((t) => t.type !== "loading");
+          }
+          return prev;
+        });
+      }, 1200);
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    document.addEventListener("visibilitychange", handleWindowFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      document.removeEventListener("visibilitychange", handleWindowFocus);
+    };
   }, []);
 
   // Safe initialization of client side Paddle framework matching token
@@ -130,6 +162,21 @@ export default function Pricing() {
     setActiveCheckoutId(priceId);
     const loadToastId = triggerToast(`Connecting to Paddle checkout for ${tierName} Plan...`, "loading");
 
+    // Safety timeout: if loading takes longer than 5 seconds, clear the loading state
+    let hasResolved = false;
+    const safetyTimeoutId = setTimeout(() => {
+      if (!hasResolved) {
+        removeToast(loadToastId);
+        setActiveCheckoutId((prev) => (prev === priceId ? null : prev));
+        triggerToast("Checkout load tip: If checkout opened in a separate tab or window, please complete it there.", "info");
+      }
+    }, 5000);
+
+    const markResolved = () => {
+      hasResolved = true;
+      clearTimeout(safetyTimeoutId);
+    };
+
     try {
       await openCheckout({
         priceId,
@@ -141,33 +188,39 @@ export default function Pricing() {
           billingCycle
         },
         onLoaded: () => {
+          markResolved();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast(`Secure Paddle Checkout for ${tierName} loaded.`, "success");
         },
         onClosed: () => {
+          markResolved();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast("Checkout overlay was closed without transaction details.", "info");
         },
         onCompleted: (payload) => {
+          markResolved();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast(`Success! Your subscription checkout for ${tierName} is complete.`, "success");
           console.log("[Checkout Completed Signal]", payload);
         },
         onSuccess: (p) => {
+          markResolved();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast("Transaction complete! Your account details have been updated.", "success");
         },
         onFailure: (err) => {
+          markResolved();
           removeToast(loadToastId);
           setActiveCheckoutId(null);
           triggerToast(`Checkout failed: ${err?.message || "Internal error"}`, "error");
         }
       });
     } catch (e: any) {
+      markResolved();
       removeToast(loadToastId);
       setActiveCheckoutId(null);
       triggerToast(e?.message || "Failed to trigger Paddle.js overlay checkout.", "error");

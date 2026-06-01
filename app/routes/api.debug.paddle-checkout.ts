@@ -40,7 +40,7 @@ export async function loader() {
     backend: {
       hasApiKey: paddleApiKey.length > 0,
       hasWebhookSecret: paddleWebhookSecret.length > 0,
-      configuredEnv: paddleEnv || "sandbox (default)",
+      configuredEnv: paddleEnv || "production (default)",
       isEnvMismatch: (clientToken.startsWith("test_") && paddleEnv === "production") || (clientToken.startsWith("live_") && paddleEnv === "sandbox")
     }
   };
