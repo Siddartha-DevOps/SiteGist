@@ -1,4 +1,4 @@
-import { Form, Link } from "@remix-run/react";
+import { Form, Link, useRouteLoaderData } from "@remix-run/react";
 import { Loader2 } from "lucide-react";
 import { Logo } from "~/frontend/components/Logo";
 import { Turnstile } from "~/frontend/components/Turnstile";
@@ -13,7 +13,8 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ error, success, sentEmail, isSubmitting, devVerificationUrl, hasResend }: LoginPageProps) {
-  const configSiteKey = typeof window !== "undefined" ? (window as any).ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY : undefined;
+  const rootData = useRouteLoaderData<any>("root");
+  const configSiteKey = rootData?.ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY || (typeof window !== "undefined" ? (window as any).ENV?.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY : undefined);
   const siteKey = configSiteKey || undefined; // Only render when configured in environment
 
   if (success) {

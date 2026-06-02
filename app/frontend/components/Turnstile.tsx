@@ -118,7 +118,7 @@ export function Turnstile({ siteKey, options }: TurnstileProps) {
   return (
     <div 
       ref={containerRef} 
-      className="cf-turnstile-container min-h-[65px] flex items-center justify-center w-full min-w-[250px]" 
+      className="cf-turnstile-container h-[65px] max-h-[65px] overflow-hidden flex items-start justify-center w-full min-w-[250px]" 
     />
   );
 }
