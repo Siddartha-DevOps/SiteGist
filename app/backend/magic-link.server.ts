@@ -8,27 +8,24 @@ const TOKEN_EXPIRATION_SEC = 60 * 15; // 15 minutes
 export async function generateMagicLink(email: string, baseUrl: string) {
   const token = randomBytes(32).toString("hex");
   const redis = getRedis();
-  let storedInRedis = false;
   
+  // Always save to database for maximum durability and consistency
+  const expiresAt = new Date(Date.now() + TOKEN_EXPIRATION_SEC * 1000);
+  await prisma.verificationToken.create({
+    data: {
+      email,
+      token,
+      expiresAt
+    }
+  });
+
   if (redis) {
     try {
-      // Store token in Redis: key="magic_link:token", value="email", expires in 15 mins
+      // Also store token in Redis: key="magic_link:token", value="email", expires in 15 mins for caching speed
       await redis.set(`magic_link:${token}`, email, { ex: TOKEN_EXPIRATION_SEC });
-      storedInRedis = true;
     } catch (err) {
-      console.error("[Magic Link] Redis set failed, falling back to database:", err);
+      console.error("[Magic Link] Redis set failed:", err);
     }
-  }
-
-  if (!storedInRedis) {
-    // Fallback to Database
-    await prisma.verificationToken.create({
-      data: {
-        email,
-        token,
-        expiresAt: new Date(Date.now() + TOKEN_EXPIRATION_SEC * 1000)
-      }
-    });
   }
 
   const magicLink = `${baseUrl}/api/auth/verify?token=${token}`;
@@ -101,7 +98,7 @@ export async function checkMagicLinkWithoutConsuming(token: string) {
         return email;
       }
     } catch (err) {
-      console.error("[Magic Link] Redis check without consuming failed, falling back to database:", err);
+      console.error("[Magic Link] Redis check without consuming failed:", err);
     }
   }
 
@@ -109,7 +106,14 @@ export async function checkMagicLinkWithoutConsuming(token: string) {
     where: { token }
   });
 
-  if (!vToken || vToken.expiresAt < new Date()) {
+  if (!vToken) {
+    console.warn(`[Magic Link Check] No token found in Database for: ${token.slice(0, 8)}...`);
+    return null;
+  }
+
+  const now = new Date();
+  if (vToken.expiresAt < now) {
+    console.warn(`[Magic Link Check] Token is expired. DB expiresAt: ${vToken.expiresAt.toISOString()}, Now: ${now.toISOString()}`);
     return null;
   }
 
@@ -118,33 +122,46 @@ export async function checkMagicLinkWithoutConsuming(token: string) {
 
 export async function verifyMagicLink(token: string) {
   const redis = getRedis();
+  let email: string | null = null;
   
   if (redis) {
     try {
-      const email = await redis.get<string>(`magic_link:${token}`);
+      email = await redis.get<string>(`magic_link:${token}`);
       if (email) {
-        // Consume token
+        // Consumer from Redis
         await redis.del(`magic_link:${token}`).catch(() => {});
-        return email;
       }
     } catch (err) {
-      console.error("[Magic Link] Redis verify failed, falling back to database:", err);
+      console.error("[Magic Link] Redis verify failed:", err);
     }
   }
 
-  // Fallback to Database or if Redis missed
-  const vToken = await prisma.verificationToken.findUnique({
-    where: { token }
-  });
+  // Fallback to database lookup if Redis missed or failed
+  if (!email) {
+    const vToken = await prisma.verificationToken.findUnique({
+      where: { token }
+    });
 
-  if (!vToken || vToken.expiresAt < new Date()) {
-    return null;
+    if (vToken) {
+      const now = new Date();
+      if (vToken.expiresAt >= now) {
+        email = vToken.email;
+      } else {
+        console.warn(`[Magic Link Verify] Token in DB is expired. DB expiresAt: ${vToken.expiresAt.toISOString()}, Now: ${now.toISOString()}`);
+      }
+    } else {
+      console.warn("[Magic Link Verify] Token not found in Database fallback either");
+    }
   }
 
-  // Consume token
-  await prisma.verificationToken.delete({
-    where: { id: vToken.id }
-  });
+  // Always attempt to delete from DB to prevent replay attacks / reuse
+  try {
+    await prisma.verificationToken.delete({
+      where: { token }
+    });
+  } catch (err) {
+    // Already deleted or not exists; ignore
+  }
 
-  return vToken.email;
+  return email;
 }
