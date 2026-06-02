@@ -50,26 +50,6 @@ export function LoginPage({ error, success, sentEmail, isSubmitting, devVerifica
                 Check your spam/junk folder, or <Link to="/login" className="text-blue-600 hover:underline font-bold">try again</Link>
               </p>
             </div>
-
-            {devVerificationUrl && (
-              <div className="mt-6 p-5 rounded-[24px] bg-slate-50 border border-slate-200/60 text-left">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="flex h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider">SiteGist Fast Pass</span>
-                </div>
-                <p className="text-[11px] font-medium text-slate-500 mb-3 leading-relaxed">
-                  {!hasResend 
-                    ? "Since RESEND_API_KEY is not defined in your environment variables, we generated an instant-bypass login link below for your testing convenience."
-                    : "We've detected you are running in a container sandbox. Feel free to use this fast-pass link to sign in instantly:"}
-                </p>
-                <a 
-                  href={devVerificationUrl}
-                  className="w-full inline-flex items-center justify-center py-3 px-4 bg-zinc-950 hover:bg-black active:scale-95 text-white font-extrabold text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm text-center"
-                >
-                  Proceed directly to Dashboard
-                </a>
-              </div>
-            )}
           </div>
         </div>
       </div>
