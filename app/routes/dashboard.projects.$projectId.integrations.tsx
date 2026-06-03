@@ -1,10 +1,72 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Link, useRevalidator } from "@remix-run/react";
+import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink } from "lucide-react";
 import { useState, useEffect } from "react";
+
+export async function action({ params, request }: ActionFunctionArgs) {
+  const userId = await requireUserId(request);
+
+  const project = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+  });
+  if (!project) return json({ error: "Not found" }, { status: 404 });
+
+  const formData = await request.formData();
+  const _action = formData.get("_action") as string;
+
+  // --- SLACK ---
+  if (_action === "connect_slack") {
+    const webhookUrl = (formData.get("webhookUrl") as string)?.trim();
+    if (!webhookUrl || !webhookUrl.startsWith("https://hooks.slack.com/")) {
+      return json(
+        { error: "Enter a valid Slack Incoming Webhook URL (https://hooks.slack.com/...)" },
+        { status: 400 }
+      );
+    }
+    await prisma.integration.upsert({
+      where: { projectId_provider: { projectId: project.id, provider: "slack" } },
+      create: { projectId: project.id, provider: "slack", accessToken: webhookUrl, details: { webhookUrl } },
+      update: { accessToken: webhookUrl, details: { webhookUrl } },
+    });
+    return json({ success: true });
+  }
+
+  if (_action === "disconnect_slack") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "slack" },
+    });
+    return json({ success: true });
+  }
+
+  // --- ZAPIER ---
+  if (_action === "connect_zapier") {
+    const webhookUrl = (formData.get("webhookUrl") as string)?.trim();
+    if (!webhookUrl || !webhookUrl.startsWith("https://hooks.zapier.com/")) {
+      return json(
+        { error: "Enter a valid Zapier Webhook URL (https://hooks.zapier.com/...)" },
+        { status: 400 }
+      );
+    }
+    await prisma.integration.upsert({
+      where: { projectId_provider: { projectId: project.id, provider: "zapier" } },
+      create: { projectId: project.id, provider: "zapier", accessToken: webhookUrl, details: { webhookUrl } },
+      update: { accessToken: webhookUrl, details: { webhookUrl } },
+    });
+    return json({ success: true });
+  }
+
+  if (_action === "disconnect_zapier") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "zapier" },
+    });
+    return json({ success: true });
+  }
+
+  return json({ error: "Unknown action" }, { status: 400 });
+}
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -22,6 +84,26 @@ export default function ProjectIntegrations() {
   const { project } = useLoaderData<typeof loader>();
   const [connecting, setConnecting] = useState<string | null>(null);
   const revalidator = useRevalidator();
+  const [slackInput, setSlackInput] = useState("");
+  const [zapierInput, setZapierInput] = useState("");
+
+  const slackFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const zapierFetcher = useFetcher<{ error?: string; success?: boolean }>();
+
+  // Trigger revalidation/refresh when a fetcher finishes successfully
+  useEffect(() => {
+    if (slackFetcher.data?.success) {
+      setSlackInput("");
+      revalidator.revalidate();
+    }
+  }, [slackFetcher.data, revalidator]);
+
+  useEffect(() => {
+    if (zapierFetcher.data?.success) {
+      setZapierInput("");
+      revalidator.revalidate();
+    }
+  }, [zapierFetcher.data, revalidator]);
 
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
@@ -36,6 +118,7 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
+    if (provider !== 'notion' && provider !== 'google_drive') return;
     setConnecting(provider);
     try {
       const endpoint = provider === 'notion' ? 'notion' : 'google';
@@ -76,14 +159,14 @@ export default function ProjectIntegrations() {
       name: "Slack",
       description: "Respond to inquiries directly from Slack threads.",
       icon: <Share2 className="w-6 h-6 text-purple-600" />,
-      connected: !!project.webhookUrl,
+      connected: project.integrations.some(i => i.provider === 'slack'),
     },
     {
       id: "zapier",
       name: "Zapier",
       description: "Connect triggers and actions to 5,000+ other apps.",
       icon: <ZapIcon className="w-6 h-6 text-orange-600" />,
-      connected: false,
+      connected: project.integrations.some(i => i.provider === 'zapier'),
     }
   ];
 
@@ -116,18 +199,121 @@ export default function ProjectIntegrations() {
             <h3 className="text-xl font-bold mb-2">{item.name}</h3>
             <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
             
-            <button 
-              onClick={() => !item.connected && handleConnect(item.id)}
-              disabled={item.connected || connecting === item.id}
-              className={`w-full py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 ${
-                item.connected 
-                  ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
-                  : "bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98]"
-              }`}
-            >
-              {connecting === item.id ? "Connecting..." : item.connected ? "Already Integrated" : `Connect ${item.name}`}
-              {!item.connected && <ExternalLink className="w-4 h-4" />}
-            </button>
+            {item.id !== 'slack' && item.id !== 'zapier' && (
+              <button 
+                onClick={() => !item.connected && handleConnect(item.id)}
+                disabled={item.connected || connecting === item.id}
+                className={`w-full py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 ${
+                  item.connected 
+                    ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
+                    : "bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98]"
+                }`}
+              >
+                {connecting === item.id ? "Connecting..." : item.connected ? "Already Integrated" : `Connect ${item.name}`}
+                {!item.connected && <ExternalLink className="w-4 h-4" />}
+              </button>
+            )}
+
+            {item.id === 'slack' && (
+              <div className="mt-0">
+                {!item.connected ? (
+                  <slackFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="connect_slack" />
+                    <input
+                      type="url"
+                      name="webhookUrl"
+                      value={slackInput}
+                      onChange={(e) => setSlackInput(e.target.value)}
+                      placeholder="https://hooks.slack.com/services/..."
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    {slackFetcher.data?.error && (
+                      <p className="text-xs text-red-500 font-bold mb-2">{slackFetcher.data.error}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!slackInput || slackFetcher.state === "submitting"}
+                      className="w-full py-4 rounded-2xl font-black transition-all bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {slackFetcher.state === "submitting" ? "Saving..." : "Connect Slack"}
+                    </button>
+                    <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
+                      Get your Webhook URL from{" "}
+                      <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" className="text-primary underline font-bold">
+                        Slack App settings
+                      </a>
+                    </p>
+                  </slackFetcher.Form>
+                ) : (
+                  <slackFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="disconnect_slack" />
+                    <button
+                      type="submit"
+                      className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
+                    >
+                      Already Integrated
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all"
+                    >
+                      Disconnect Slack
+                    </button>
+                  </slackFetcher.Form>
+                )}
+              </div>
+            )}
+
+            {item.id === 'zapier' && (
+              <div className="mt-0">
+                {!item.connected ? (
+                  <zapierFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="connect_zapier" />
+                    <input
+                      type="url"
+                      name="webhookUrl"
+                      value={zapierInput}
+                      onChange={(e) => setZapierInput(e.target.value)}
+                      placeholder="https://hooks.zapier.com/hooks/catch/..."
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    {zapierFetcher.data?.error && (
+                      <p className="text-xs text-red-500 font-bold mb-2">{zapierFetcher.data.error}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!zapierInput || zapierFetcher.state === "submitting"}
+                      className="w-full py-4 rounded-2xl font-black transition-all bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {zapierFetcher.state === "submitting" ? "Saving..." : "Connect Zapier"}
+                    </button>
+                    <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
+                      Create a{" "}
+                      <a href="https://zapier.com/apps/webhook" target="_blank" rel="noopener noreferrer" className="text-primary underline font-bold">
+                        Webhooks by Zapier
+                      </a>
+                      {" "}trigger and paste the URL above
+                    </p>
+                  </zapierFetcher.Form>
+                ) : (
+                  <zapierFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="disconnect_zapier" />
+                    <button
+                      type="submit"
+                      className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
+                    >
+                      Already Integrated
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all"
+                    >
+                      Disconnect Zapier
+                    </button>
+                  </zapierFetcher.Form>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
