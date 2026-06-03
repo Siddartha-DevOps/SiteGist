@@ -192,9 +192,16 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
     
     // Automatic creation of User if looking up by id to prevent login pages getting completely dead ends
     if (modelLower === "user" && args?.where?.id) {
+      let email = "demo-user@stegist.co";
+      if (args.where.id.startsWith("usr_hex_")) {
+        try {
+          const hex = args.where.id.substring("usr_hex_".length);
+          email = Buffer.from(hex, "hex").toString("utf-8");
+        } catch (e) {}
+      }
       const newUser = {
         id: args.where.id,
-        email: "demo-user@stegist.co",
+        email,
         role: "OWNER",
         subscriptionTier: "pro",
         createdAt: new Date(),
@@ -205,8 +212,9 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
       return enrichWithMockRelations(modelLower, newUser);
     }
     if (modelLower === "user" && args?.where?.email) {
+      const safeId = "usr_hex_" + Buffer.from(args.where.email).toString("hex");
       const newUser = {
-        id: "demo-user-id",
+        id: safeId,
         email: args.where.email,
         role: "OWNER",
         subscriptionTier: "pro",
@@ -236,7 +244,14 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
   
   if (operation === "create" || operation === "createMany") {
     const data = args?.data || {};
-    const newId = data.id || `mock-${modelLower}-${Math.random().toString(36).substring(2, 9)}`;
+    let newId = data.id;
+    if (!newId) {
+      if (modelLower === "user" && data.email) {
+        newId = "usr_hex_" + Buffer.from(data.email).toString("hex");
+      } else {
+        newId = `mock-${modelLower}-${Math.random().toString(36).substring(2, 9)}`;
+      }
+    }
     const newItem = {
       id: newId,
       ...data,
