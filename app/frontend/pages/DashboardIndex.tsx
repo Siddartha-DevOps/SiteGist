@@ -1,5 +1,5 @@
 import { Form, Link } from "@remix-run/react";
-import { Plus, Globe, ChevronRight, MessageSquare, Loader2, PlayCircle, Bot, TrendingUp, Users, Activity } from "lucide-react";
+import { Plus, Globe, ChevronRight, MessageSquare, Loader2, PlayCircle, Bot, TrendingUp, Users, Activity, Search } from "lucide-react";
 import React from 'react';
 import { 
   AreaChart, 
@@ -34,12 +34,34 @@ const CellAny = Cell as any;
 
 export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTrendData }: DashboardIndexPageProps) {
   const [mounted, setMounted] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [sort, setSort] = React.useState<"newest"|"oldest"|"most_sessions"|"name_az">("newest");
+  const [filter, setFilter] = React.useState<"all"|"trained"|"untrained">("all");
+
   React.useEffect(() => {
     setMounted(true);
   }, []);
 
   const totalLeads = projects.reduce((acc, p) => acc + (p._count.leads || 0), 0);
   const totalSessions = projects.reduce((acc, p) => acc + (p._count.sessions || 0), 0);
+
+  const filteredProjects = projects
+    .filter((p) => {
+      const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+      const isTrained = p._count.knowledgeSources > 0;
+      const matchesFilter =
+        filter === "all" ? true :
+        filter === "trained" ? isTrained :
+        !isTrained;
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) => {
+      if (sort === "newest") return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      if (sort === "oldest") return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      if (sort === "most_sessions") return b._count.sessions - a._count.sessions;
+      if (sort === "name_az") return a.name.localeCompare(b.name);
+      return 0;
+    });
 
   return (
     <div className="animate-in fade-in duration-500 pb-20">
@@ -229,50 +251,107 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-          {projects.map((project) => (
-            <Link 
-              key={project.id} 
-              to={`/dashboard/projects/${project.id}`}
-              className="group block p-6 bg-white border border-brand-border rounded-[32px] hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5 transition-all relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ChevronRight className="w-5 h-5 text-primary" />
-              </div>
-              
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-14 h-14 bg-brand-light rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ring-1 ring-brand-border">
-                  <Bot className="text-primary w-7 h-7" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-brand-dark mb-1 group-hover:text-primary transition-colors">
-                    {project.name}
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-brand-online rounded-full"></div>
-                    <span className="text-[11px] font-bold text-brand-gray uppercase tracking-widest">Active</span>
-                  </div>
-                </div>
-              </div>
+        <div>
+          {/* Search / Sort / Filter Controls */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            {/* Search input */}
+            <input
+              type="text"
+              placeholder="Search chatbots..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 px-4 py-2.5 text-sm font-medium border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/50"
+            />
 
-              <div className="grid grid-cols-2 gap-4 mt-8">
-                <div className="p-4 bg-brand-light/50 rounded-2xl border border-brand-border/50">
-                  <p className="text-[10px] font-bold text-brand-gray uppercase tracking-widest mb-1 opacity-60">Knowledge</p>
-                  <div className="flex items-center gap-2 text-brand-dark font-bold">
-                    <Globe className="w-4 h-4 text-primary" />
-                    <span>{project._count.knowledgeSources} Items</span>
-                  </div>
-                </div>
-                <div className="p-4 bg-brand-light/50 rounded-2xl border border-brand-border/50">
-                  <p className="text-[10px] font-bold text-brand-gray uppercase tracking-widest mb-1 opacity-60">Sessions</p>
-                  <div className="flex items-center gap-2 text-brand-dark font-bold">
-                    <MessageSquare className="w-4 h-4 text-primary" />
-                    <span>{project._count.sessions} Chats</span>
-                  </div>
-                </div>
+            {/* Sort dropdown */}
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as any)}
+              className="px-4 py-2.5 text-sm font-bold border border-brand-border rounded-xl outline-none bg-white text-brand-dark cursor-pointer"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="most_sessions">Most Sessions</option>
+              <option value="name_az">Name A–Z</option>
+            </select>
+
+            {/* Filter pills */}
+            <div className="flex gap-2">
+              {(["all", "trained", "untrained"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
+                    filter === f
+                      ? "bg-primary text-white"
+                      : "bg-brand-light text-brand-gray hover:text-brand-dark border border-brand-border"
+                  }`}
+                >
+                  {f === "all" ? "All" : f === "trained" ? "Trained" : "Not Trained"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+            {filteredProjects.length === 0 && projects.length > 0 && (
+              <div className="col-span-2 text-center py-16 text-brand-gray font-bold">
+                No chatbots match your search or filter.
               </div>
-            </Link>
-          ))}
+            )}
+            {filteredProjects.map((project) => (
+              <Link 
+                key={project.id} 
+                to={`/dashboard/projects/${project.id}`}
+                className="group block p-6 bg-white border border-brand-border rounded-[32px] hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5 transition-all relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ChevronRight className="w-5 h-5 text-primary" />
+                </div>
+                
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-14 h-14 bg-brand-light rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ring-1 ring-brand-border">
+                    <Bot className="text-primary w-7 h-7" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-brand-dark mb-1 group-hover:text-primary transition-colors">
+                      {project.name}
+                    </h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="w-2 h-2 bg-brand-online rounded-full"></div>
+                      <span className="text-[11px] font-bold text-brand-gray uppercase tracking-widest">Active</span>
+                      {project._count.knowledgeSources > 0 ? (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-100 uppercase tracking-widest">
+                          Trained
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase tracking-widest">
+                          Not Trained
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mt-8">
+                  <div className="p-4 bg-brand-light/50 rounded-2xl border border-brand-border/50">
+                    <p className="text-[10px] font-bold text-brand-gray uppercase tracking-widest mb-1 opacity-60">Knowledge</p>
+                    <div className="flex items-center gap-2 text-brand-dark font-bold">
+                      <Globe className="w-4 h-4 text-primary" />
+                      <span>{project._count?.knowledgeSources || 0} Items</span>
+                    </div>
+                  </div>
+                  <div className="p-4 bg-brand-light/50 rounded-2xl border border-brand-border/50">
+                    <p className="text-[10px] font-bold text-brand-gray uppercase tracking-widest mb-1 opacity-60">Sessions</p>
+                    <div className="flex items-center gap-2 text-brand-dark font-bold">
+                      <MessageSquare className="w-4 h-4 text-primary" />
+                      <span>{project._count?.sessions || 0} Chats</span>
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </div>

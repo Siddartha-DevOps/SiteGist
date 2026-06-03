@@ -18,9 +18,10 @@ import { motion, AnimatePresence } from "framer-motion";
 
 interface DashboardLayoutPageProps {
   user: any;
+  subscriptionStatus: string | null;
 }
 
-export function DashboardLayoutPage({ user }: DashboardLayoutPageProps) {
+export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayoutPageProps) {
   const location = useLocation();
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -36,10 +37,13 @@ export function DashboardLayoutPage({ user }: DashboardLayoutPageProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const hasActiveSub = subscriptionStatus === "active";
+
   const navItems = [
     { label: "Chatbots", icon: LayoutDashboard, href: "/dashboard" },
-    ...(user?.role === "OWNER" ? [{ label: "Blog", icon: FileText, href: "/dashboard/blog" }] : []),
-    { label: "Start Trial", icon: Sparkles, href: "/pricing" },
+    hasActiveSub
+      ? { label: "Billing", icon: Sparkles, href: "/dashboard/billing" }
+      : { label: "Upgrade Plan", icon: Sparkles, href: "/pricing" },
     { label: "Profile", icon: User, href: "/dashboard/settings" },
     { label: "Docs", icon: BookOpen, href: "/docs" },
     { label: "Support", icon: LifeBuoy, href: "mailto:support@sitegist.co", external: true },
@@ -52,11 +56,22 @@ export function DashboardLayoutPage({ user }: DashboardLayoutPageProps) {
       <header className="z-30 shrink-0 bg-white py-3 border-b border-brand-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between">
-            {/* Logo */}
-            <div className="shrink-0 mr-auto lg:mx-0">
+            {/* Logo & Subscription Status Badge */}
+            <div className="shrink-0 mr-auto lg:mx-0 flex items-center gap-3">
               <Link to="/" className="flex transition-transform hover:scale-[1.02]">
                 <Logo size="sm" variant="light" />
               </Link>
+              {hasActiveSub ? (
+                <div id="badge-pro-active" className="px-2.5 py-1 bg-primary/10 text-primary text-[10px] font-black uppercase tracking-widest rounded-full leading-none flex items-center gap-1.5 ring-1 ring-primary/20">
+                  <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
+                  Pro Plan Active
+                </div>
+              ) : (
+                <div id="badge-free-trial" className="px-2.5 py-1 bg-zinc-100 text-zinc-500 text-[10px] font-black uppercase tracking-widest rounded-full leading-none flex items-center gap-1.5 ring-1 ring-zinc-200">
+                  <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>
+                  {subscriptionStatus === "trialing" ? "Trial" : "Free Plan"}
+                </div>
+              )}
             </div>
 
             {/* Center Navigation */}
@@ -64,6 +79,7 @@ export function DashboardLayoutPage({ user }: DashboardLayoutPageProps) {
               {navItems.map((item) => (
                 <Link
                   key={item.href}
+                  id={`nav-item-${item.label.toLowerCase().replace(" ", "-")}`}
                   to={item.href}
                   target={item.external ? "_blank" : undefined}
                   rel={item.external ? "noopener noreferrer" : undefined}

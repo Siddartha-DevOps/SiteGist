@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
+import { prisma } from "~/database/db.server";
 import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus, Info, AlertTriangle, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -9,8 +10,51 @@ import { motion, AnimatePresence } from "framer-motion";
 export async function loader({ request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const user = await getUser(request);
+
+  // Active subscription check
+  const activeSub = await prisma.billingSubscription.findFirst({
+    where: { userId, status: "active" },
+    orderBy: { createdAt: "desc" }
+  });
+
+  let daysLeft = 24;
+  if (activeSub) {
+    const created = new Date(activeSub.createdAt);
+    const now = new Date();
+    const nextBillDate = new Date(created);
+    while (nextBillDate <= now) {
+      nextBillDate.setMonth(nextBillDate.getMonth() + 1);
+    }
+    const diffTime = nextBillDate.getTime() - now.getTime();
+    daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  // Retrieve actual user usage stats
+  const messagesCount = await prisma.message.count({
+    where: { session: { project: { userId } } }
+  });
+  
+  const chatbotsCount = await prisma.project.count({
+    where: { userId }
+  });
+
+  const knowledgeCount = await prisma.knowledgeSource.count({
+    where: { project: { userId } }
+  });
+
+  const leadsCount = await prisma.lead.count({
+    where: { project: { userId } }
+  });
+
   return json({ 
     user,
+    daysLeft,
+    usage: {
+      messages: messagesCount,
+      chatbots: chatbotsCount,
+      knowledge: knowledgeCount,
+      leads: leadsCount
+    },
     PADDLE_STARTER_PLAN_ID: process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3",
     PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_GROWTH_PLAN_ID || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
     PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
@@ -36,7 +80,43 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
+  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
+  
+  // Determine current subscription tier limits
+  const tier = (user?.subscriptionTier || "free").toLowerCase();
+  
+  let limits = {
+    messages: 100,
+    chatbots: 1,
+    knowledge: 10,
+    leads: 50,
+    name: "Free Plan"
+  };
+
+  if (tier === "pro" || tier === "pro_plan" || tier.includes("pro") || tier.includes("scale") || tier.includes("growth") || tier === "starter_plan" || tier.includes("starter") || tier.includes("starter_plan")) {
+    limits = {
+      messages: 5000,
+      chatbots: 5,
+      knowledge: 100,
+      leads: 1000,
+      name: "Pro Plan"
+    };
+  } else if (tier === "scale" || tier === "scale_plan" || tier.includes("enterprise")) {
+    limits = {
+      messages: 50000,
+      chatbots: 25,
+      knowledge: 1000,
+      leads: 10000,
+      name: "Scale Plan"
+    };
+  }
+
+  const getProgressBarColor = (percentage: number) => {
+    if (percentage < 70) return "bg-emerald-500";
+    if (percentage <= 90) return "bg-amber-500";
+    return "bg-red-500";
+  };
+
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
@@ -235,6 +315,58 @@ export default function Billing() {
           </div>
         </div>
       )}
+
+      {/* Dynamic Usage Quota Section */}
+      <div id="usage-quota-section" className="mb-12 bg-white border border-zinc-100 rounded-[32px] p-8 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h2 className="text-2xl font-black font-display text-zinc-900">Your Usage This Month</h2>
+            <p className="text-sm font-bold text-zinc-400 mt-1">
+              Active plan: <span className="text-primary uppercase tracking-wide font-black">{limits.name}</span>
+            </p>
+          </div>
+          <div className="px-5 py-2.5 bg-zinc-50 rounded-2xl border border-zinc-100 text-right shrink-0">
+            <span className="text-xl font-black text-zinc-900 font-display block leading-none mb-1">{daysLeft}</span>
+            <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Days left in cycle</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[
+            { label: "Messages Used", current: usage.messages, limit: limits.messages },
+            { label: "Chatbots Created", current: usage.chatbots, limit: limits.chatbots },
+            { label: "Pages / Knowledge Sources", current: usage.knowledge, limit: limits.knowledge },
+            { label: "Leads Captured", current: usage.leads, limit: limits.leads },
+          ].map((item) => {
+            const percentage = item.limit > 0 ? Math.round((item.current / item.limit) * 100) : 0;
+            const clampPercent = Math.min(100, percentage);
+            const barColor = getProgressBarColor(clampPercent);
+
+            return (
+              <div key={item.label} className="p-5 bg-zinc-50/50 rounded-2xl border border-zinc-100 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">{item.label}</span>
+                    <span className="text-xs font-black text-zinc-900 bg-white px-2 py-0.5 rounded border border-zinc-100">
+                      {percentage}%
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1 mb-4">
+                    <span className="text-2xl font-extrabold text-zinc-900">{item.current.toLocaleString()}</span>
+                    <span className="text-xs font-bold text-zinc-400">/ {item.limit.toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="w-full bg-zinc-200/60 h-2.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${barColor}`} 
+                    style={{ width: `${clampPercent}%` }} 
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Plans Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-24">

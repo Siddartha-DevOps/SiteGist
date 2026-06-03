@@ -50,6 +50,7 @@ if (typeof global !== "undefined" && !(global as any).__mockDb__) {
         email: "demo-user@stegist.co",
         role: "OWNER",
         subscriptionTier: "pro",
+        subscriptionStatus: "active",
         createdAt: new Date(),
         updatedAt: new Date(),
         subscriptions: []
@@ -62,7 +63,8 @@ if (typeof global !== "undefined" && !(global as any).__mockDb__) {
     message: [],
     unansweredquestion: [],
     blogpost: [],
-    knowledgeqa: []
+    knowledgeqa: [],
+    projectmember: []
   };
 }
 
@@ -75,7 +77,8 @@ const mockDb = typeof global !== "undefined" && (global as any).__mockDb__ ? (gl
   message: [],
   unansweredquestion: [],
   blogpost: [],
-  knowledgeqa: []
+  knowledgeqa: [],
+  projectmember: []
 };
 
 function enrichWithMockRelations(modelLower: string, item: any): any {
@@ -204,6 +207,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         email,
         role: "OWNER",
         subscriptionTier: "pro",
+        subscriptionStatus: "active",
         createdAt: new Date(),
         updatedAt: new Date(),
         subscriptions: []
@@ -218,6 +222,7 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
         email: args.where.email,
         role: "OWNER",
         subscriptionTier: "pro",
+        subscriptionStatus: "active",
         createdAt: new Date(),
         updatedAt: new Date(),
         subscriptions: []
