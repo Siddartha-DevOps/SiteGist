@@ -434,82 +434,84 @@ function getClient(useFallback = false): any {
   // Intercept operations and implement robust automatic failover query retry
   const client = rawExtended.$extends({
     query: {
-      async $allOperations({ model, operation, args, query }) {
-        if (isEntirelyOffline()) {
-          return getFallbackMockData(model, operation, args);
-        }
-
-        const maxAttempts = 2;
-        let attempt = 0;
-        
-        while (attempt < maxAttempts) {
-          attempt++;
-          try {
-            return await query(args);
-          } catch (err: any) {
-            const errMsg = err.message || "";
-            
-            // Check for API key / Accelerate errors
-            const isKeyError = errMsg.includes("P6002") || 
-                               errMsg.includes("API key is invalid") || 
-                               (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
-            
-            if (isKeyError) {
-              if (process.env.DIRECT_DATABASE_URL && !useFallback && !isUsingFallback()) {
-                setUsingFallback(true);
-                const fallbackClient = getClient(true);
-                _cachedDb = fallbackClient;
-                if (typeof global !== "undefined") {
-                  (global as any).__db_fallback__ = fallbackClient;
-                }
-                
-                // Re-bind to the correct model and run the query directly
-                if (model) {
-                  const fallbackDelegate = fallbackClient[model];
-                  if (fallbackDelegate && typeof fallbackDelegate[operation] === "function") {
-                    try {
-                      return await fallbackDelegate[operation](args);
-                    } catch (fallbackErr: any) {
-                      setEntirelyOffline(true);
-                      return getFallbackMockData(model, operation, args);
-                    }
-                  }
-                }
-              } else {
-                setEntirelyOffline(true);
-                return getFallbackMockData(model, operation, args);
-              }
-            }
-            
-            // Check for transient socket resets, connection drops, or Peer Connection Resets (e.g., Os { code: 104, kind: ConnectionReset })
-            const isTransientError = 
-              errMsg.includes("ConnectionReset") ||
-              errMsg.includes("Connection reset") ||
-              errMsg.includes("104") ||
-              errMsg.includes("Io") ||
-              errMsg.includes("ECONNRESET") ||
-              errMsg.includes("socket hang up") ||
-              errMsg.includes("EPIPE") ||
-              errMsg.includes("ETIMEDOUT") ||
-              errMsg.includes("P1017") || 
-              errMsg.includes("closed by peer") ||
-              errMsg.toLowerCase().includes("connection reset") ||
-              errMsg.toLowerCase().includes("can't reach database");
-              
-            if (isTransientError && attempt < maxAttempts) {
-              const backoffMs = attempt * 150;
-              console.log(`[Database Connection] Transient fluctuation encountered. Re-evaluating...`);
-              await new Promise((resolve) => setTimeout(resolve, backoffMs));
-              continue;
-            }
-            
-            // Other errors should also set offline to prevent further connection attempt lag
-            setEntirelyOffline(true);
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          if (isEntirelyOffline()) {
             return getFallbackMockData(model, operation, args);
           }
+
+          const maxAttempts = 2;
+          let attempt = 0;
+          
+          while (attempt < maxAttempts) {
+            attempt++;
+            try {
+              return await query(args);
+            } catch (err: any) {
+              const errMsg = err.message || "";
+              
+              // Check for API key / Accelerate errors
+              const isKeyError = errMsg.includes("P6002") || 
+                                 errMsg.includes("API key is invalid") || 
+                                 (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
+              
+              if (isKeyError) {
+                if (process.env.DIRECT_DATABASE_URL && !useFallback && !isUsingFallback()) {
+                  setUsingFallback(true);
+                  const fallbackClient = getClient(true);
+                  _cachedDb = fallbackClient;
+                  if (typeof global !== "undefined") {
+                    (global as any).__db_fallback__ = fallbackClient;
+                  }
+                  
+                  // Re-bind to the correct model and run the query directly
+                  if (model) {
+                    const fallbackDelegate = fallbackClient[model];
+                    if (fallbackDelegate && typeof fallbackDelegate[operation] === "function") {
+                      try {
+                        return await fallbackDelegate[operation](args);
+                      } catch (fallbackErr: any) {
+                        setEntirelyOffline(true);
+                        return getFallbackMockData(model, operation, args);
+                      }
+                    }
+                  }
+                } else {
+                  setEntirelyOffline(true);
+                  return getFallbackMockData(model, operation, args);
+                }
+              }
+              
+              // Check for transient socket resets, connection drops, or Peer Connection Resets (e.g., Os { code: 104, kind: ConnectionReset })
+              const isTransientError = 
+                errMsg.includes("ConnectionReset") ||
+                errMsg.includes("Connection reset") ||
+                errMsg.includes("104") ||
+                errMsg.includes("Io") ||
+                errMsg.includes("ECONNRESET") ||
+                errMsg.includes("socket hang up") ||
+                errMsg.includes("EPIPE") ||
+                errMsg.includes("ETIMEDOUT") ||
+                errMsg.includes("P1017") || 
+                errMsg.includes("closed by peer") ||
+                errMsg.toLowerCase().includes("connection reset") ||
+                errMsg.toLowerCase().includes("can't reach database");
+                
+              if (isTransientError && attempt < maxAttempts) {
+                const backoffMs = attempt * 150;
+                console.log(`[Database Connection] Transient fluctuation encountered. Re-evaluating...`);
+                await new Promise((resolve) => setTimeout(resolve, backoffMs));
+                continue;
+              }
+              
+              // Other errors should also set offline to prevent further connection attempt lag
+              setEntirelyOffline(true);
+              return getFallbackMockData(model, operation, args);
+            }
+          }
+          // Fallback return if loop finishes without throwing (TypeScript safety)
+          return getFallbackMockData(model, operation, args);
         }
-        // Fallback return if loop finishes without throwing (TypeScript safety)
-        return getFallbackMockData(model, operation, args);
       }
     }
   });
@@ -558,10 +560,125 @@ function getPrisma() {
   return client;
 }
 
+function wrapModelDelegate(modelName: string, delegate: any): any {
+  if (!delegate || typeof delegate !== "object") return delegate;
+  
+  return new Proxy(delegate, {
+    get(target, prop) {
+      const origMethod = Reflect.get(target, prop);
+      if (typeof origMethod !== "function") {
+        return origMethod;
+      }
+      
+      return async function (...args: any[]) {
+        const operation = String(prop);
+        
+        if (isEntirelyOffline()) {
+          return getFallbackMockData(modelName, operation, args[0]);
+        }
+        
+        try {
+          return await origMethod.apply(target, args);
+        } catch (err: any) {
+          const errMsg = err.message || "";
+          console.warn(`[Prisma Wrapper] Operation '${modelName}.${operation}' failed. Checking failover... Error:`, errMsg);
+          
+          const isKeyError = errMsg.includes("P5000") ||
+                             errMsg.includes("P6002") || 
+                             errMsg.includes("API key is invalid") || 
+                             (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
+                             
+          if (isKeyError) {
+            if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
+              console.log(`[Prisma Failover] API Key/Accelerate error detected. Activating DIRECT_DATABASE_URL failover.`);
+              setUsingFallback(true);
+              
+              // Get direct client
+              const fallbackClient = getPrisma(); // Will return fallback direct connection client as isUsingFallback() is now true
+              const fallbackDelegate = fallbackClient[modelName];
+              
+              if (fallbackDelegate && typeof fallbackDelegate[operation] === "function") {
+                try {
+                  console.log(`[Prisma Failover] Retrying '${modelName}.${operation}' using direct connection...`);
+                  return await fallbackDelegate[operation](...args);
+                } catch (fallbackErr: any) {
+                  console.error(`[Prisma Failover] Direct connection retry also failed. Falling back completely offline.`, fallbackErr.message);
+                  setEntirelyOffline(true);
+                  return getFallbackMockData(modelName, operation, args[0]);
+                }
+              }
+            } else {
+              console.log(`[Prisma Failover] Direct database failover not possible or already utilized. Falling back completely offline.`);
+              setEntirelyOffline(true);
+              return getFallbackMockData(modelName, operation, args[0]);
+            }
+          }
+          
+          // Check for transient errors
+          const isTransientError = 
+            errMsg.includes("ConnectionReset") ||
+            errMsg.includes("Connection reset") ||
+            errMsg.includes("104") ||
+            errMsg.includes("Io") ||
+            errMsg.includes("ECONNRESET") ||
+            errMsg.includes("socket hang up") ||
+            errMsg.includes("EPIPE") ||
+            errMsg.includes("ETIMEDOUT") ||
+            errMsg.includes("P1017") || 
+            errMsg.includes("closed by peer") ||
+            errMsg.toLowerCase().includes("connection reset") ||
+            errMsg.toLowerCase().includes("can't reach database");
+            
+          if (isTransientError) {
+            console.log(`[Prisma Wrapper] Transient fluctuation. Falling back to mock database to keep app responsive.`);
+            setEntirelyOffline(true);
+            return getFallbackMockData(modelName, operation, args[0]);
+          }
+          
+          // Fallback for generic/other errors: go offline and return mock data to prevent blocking user in current run
+          console.warn(`[Prisma Wrapper] Unknown database error occurred. Operating offline fallback.`, errMsg);
+          setEntirelyOffline(true);
+          return getFallbackMockData(modelName, operation, args[0]);
+        }
+      };
+    }
+  });
+}
+
 const prisma = new Proxy({} as ExtendedPrismaClient, {
   get(target, prop) {
     const client = getPrisma();
     const val = Reflect.get(client, prop);
+    
+    if (typeof prop === "string" && val && typeof val === "object" && !prop.startsWith("$")) {
+      return wrapModelDelegate(prop, val);
+    }
+    
+    if (typeof prop === "string" && typeof val === "function" && prop.startsWith("$")) {
+      return async function (...args: any[]) {
+        try {
+          return await val.apply(client, args);
+        } catch (err: any) {
+          const errMsg = err.message || "";
+          console.warn(`[Prisma Wrapper] Client operation '${prop}' failed:`, errMsg);
+          const isKeyError = errMsg.includes("P5000") || errMsg.includes("P6002") || errMsg.includes("API key is invalid");
+          if (isKeyError && process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
+            setUsingFallback(true);
+            const fallbackClient = getPrisma();
+            const fallbackMethod = fallbackClient[prop];
+            if (typeof fallbackMethod === "function") {
+              try {
+                return await fallbackMethod.apply(fallbackClient, args);
+              } catch (fallbackErr) {
+                return [];
+              }
+            }
+          }
+          return [];
+        }
+      };
+    }
+    
     return typeof val === "function" ? val.bind(client) : val;
   },
 });
