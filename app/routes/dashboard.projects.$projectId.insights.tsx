@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
+import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar } from "lucide-react";
@@ -16,6 +16,12 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   });
 
   if (!project) return redirect("/dashboard");
+
+  // Read range from search param
+  const url = new URL(request.url);
+  const range = parseInt(url.searchParams.get("range") || "7", 10);
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - range);
 
   // Get messages with feedback
   const messagesWithFeedback = await prisma.message.findMany({
@@ -40,22 +46,50 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Mock data for charts since we might not have enough real data yet
-  const chartData = [
-    { day: 'Mon', messages: 12, leads: 2 },
-    { day: 'Tue', messages: 19, leads: 3 },
-    { day: 'Wed', messages: 15, leads: 1 },
-    { day: 'Thu', messages: 22, leads: 5 },
-    { day: 'Fri', messages: 30, leads: 8 },
-    { day: 'Sat', messages: 25, leads: 4 },
-    { day: 'Sun', messages: 18, leads: 2 },
-  ];
+  // Step 1: try AnalyticsSnapshot records first
+  const snapshots = await prisma.analyticsSnapshot.findMany({
+    where: { projectId: params.projectId, date: { gte: startDate } },
+    orderBy: { date: "asc" },
+  });
 
-  const sentimentData = [
-    { name: 'Positive', value: 45, color: '#22c55e' },
-    { name: 'Neutral', value: 30, color: '#94a3b8' },
-    { name: 'Negative', value: 15, color: '#ef4444' },
-  ];
+  let chartData: { day: string; messages: number; leads: number }[];
+
+  if (snapshots.length > 0) {
+    chartData = snapshots.map((s) => ({
+      day: new Date(s.date).toLocaleDateString("en-US", { weekday: "short" }),
+      messages: s.messagesCount,
+      leads: s.leadsCaptured,
+    }));
+  } else {
+    // Step 2: fall back to aggregating from raw Message + Lead tables by day
+    const rawMessages = await prisma.message.findMany({
+      where: {
+        session: { projectId: params.projectId },
+        createdAt: { gte: startDate },
+        role: "assistant",
+      },
+      select: { createdAt: true },
+    });
+    const rawLeads = await prisma.lead.findMany({
+      where: { projectId: params.projectId, createdAt: { gte: startDate } },
+      select: { createdAt: true },
+    });
+
+    chartData = Array.from({ length: range }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (range - 1 - i));
+      const dateKey = date.toDateString();
+      return {
+        day: date.toLocaleDateString("en-US", { weekday: "short" }),
+        messages: rawMessages.filter(
+          (m) => new Date(m.createdAt).toDateString() === dateKey
+        ).length,
+        leads: rawLeads.filter(
+          (l) => new Date(l.createdAt).toDateString() === dateKey
+        ).length,
+      };
+    });
+  }
 
   const totalSessions = await prisma.chatSession.count({
     where: { projectId: params.projectId }
@@ -67,6 +101,63 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   const conversionRate = totalSessions > 0 ? ((totalLeads / totalSessions) * 100).toFixed(1) : 0;
 
+  const totalAssistantMessages = await prisma.message.count({
+    where: {
+      session: { projectId: params.projectId },
+      role: "assistant",
+    },
+  });
+
+  const csatScore =
+    thumbsUpCount + thumbsDownCount > 0
+      ? Math.round((thumbsUpCount / (thumbsUpCount + thumbsDownCount)) * 100)
+      : null;
+
+  // Real sentiment breakdown based on all assistant messages
+  const positivePct =
+    totalAssistantMessages > 0
+      ? Math.round((thumbsUpCount / totalAssistantMessages) * 100)
+      : 0;
+  const negativePct =
+    totalAssistantMessages > 0
+      ? Math.round((thumbsDownCount / totalAssistantMessages) * 100)
+      : 0;
+  const notRatedPct = Math.max(0, 100 - positivePct - negativePct);
+
+  const latencyResult = await prisma.analyticsSnapshot.aggregate({
+    where: { projectId: params.projectId, avgLatency: { not: null } },
+    _avg: { avgLatency: true },
+  });
+  const avgResponseSpeed = latencyResult._avg.avgLatency
+    ? `${latencyResult._avg.avgLatency.toFixed(2)}s`
+    : "N/A";
+
+  const totalUserMessages = await prisma.message.count({
+    where: {
+      session: { projectId: params.projectId },
+      role: "user",
+    },
+  });
+
+  const unansweredCount = unanswered.length;
+
+  const coveragePercent =
+    totalUserMessages === 0
+      ? 100
+      : Math.max(
+          0,
+          Math.round(
+            ((totalUserMessages - unansweredCount) / totalUserMessages) * 100
+          )
+        );
+
+  const engagedSessions = await prisma.chatSession.count({
+    where: {
+      projectId: params.projectId,
+      messages: { some: { role: "user" } },
+    },
+  });
+
   return json({ 
     project, 
     messagesWithFeedback, 
@@ -75,19 +166,26 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     thumbsDownCount, 
     chartData,
     sentimentData: [
-      { name: 'Positive', value: thumbsUpCount > 0 ? Math.round((thumbsUpCount / (thumbsUpCount + thumbsDownCount || 1)) * 100) : 0, color: '#22c55e' },
-      { name: 'Neutral', value: totalSessions > 0 ? 30 : 0, color: '#94a3b8' },
-      { name: 'Negative', value: thumbsDownCount > 0 ? Math.round((thumbsDownCount / (thumbsUpCount + thumbsDownCount || 1)) * 100) : 0, color: '#ef4444' },
+      { name: "Positive", value: positivePct, color: "#22c55e" },
+      { name: "Not Rated", value: notRatedPct, color: "#94a3b8" },
+      { name: "Negative", value: negativePct, color: "#ef4444" },
     ],
+    csatScore,
+    positivePct,
+    negativePct,
+    notRatedPct,
     totalSessions,
     totalLeads,
     conversionRate,
-    sourcePerformance: [
-      { name: 'Website', value: Math.round(totalSessions * 0.4) },
-      { name: 'Widget', value: Math.round(totalSessions * 0.3) },
-      { name: 'API', value: Math.round(totalSessions * 0.2) },
-      { name: 'Embed', value: Math.round(totalSessions * 0.1) },
-    ]
+    avgResponseSpeed,
+    coveragePercent,
+    unansweredCount,
+    conversionFunnel: [
+      { name: "Sessions Started", value: totalSessions },
+      { name: "Engaged (sent msg)", value: engagedSessions },
+      { name: "Leads Captured", value: totalLeads },
+    ],
+    range
   });
 }
 
@@ -103,8 +201,13 @@ export default function ProjectInsights() {
     totalSessions,
     totalLeads,
     conversionRate,
-    sourcePerformance
+    conversionFunnel,
+    avgResponseSpeed,
+    csatScore,
+    coveragePercent
   } = useLoaderData<typeof loader>();
+
+  const [searchParams, setSearchParams] = useSearchParams();
 
   return (
     <div className="max-w-6xl">
@@ -123,7 +226,7 @@ export default function ProjectInsights() {
           { label: "Total Sessions", value: totalSessions, icon: MessageSquare, color: "text-blue-500", bg: "bg-blue-50" },
           { label: "Leads Captured", value: totalLeads, icon: Users, color: "text-purple-500", bg: "bg-purple-50" },
           { label: "Conversion Rate", value: `${conversionRate}%`, icon: TrendingUp, color: "text-green-500", bg: "bg-green-50" },
-          { label: "Response Speed", value: "0.8s", icon: Clock, color: "text-brand-orange", bg: "bg-brand-orange/5" },
+          { label: "Response Speed", value: avgResponseSpeed, icon: Clock, color: "text-brand-orange", bg: "bg-brand-orange/5" },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm">
             <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
@@ -142,9 +245,13 @@ export default function ProjectInsights() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <Calendar className="w-5 h-5 text-primary" /> User Engagement Trends
             </h2>
-            <select className="bg-zinc-50 border-none text-xs font-bold px-3 py-1.5 rounded-lg outline-none">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
+            <select
+              value={searchParams.get("range") || "7"}
+              onChange={(e) => setSearchParams({ range: e.target.value })}
+              className="bg-zinc-50 border-none text-xs font-bold px-3 py-1.5 rounded-lg outline-none cursor-pointer"
+            >
+              <option value="7">Last 7 Days</option>
+              <option value="30">Last 30 Days</option>
             </select>
           </div>
           <div className="h-[300px] w-full">
@@ -187,19 +294,21 @@ export default function ProjectInsights() {
                   dataKey="value"
                   stroke="none"
                 >
-                  {sentimentData.map((entry, index) => (
+                  {sentimentData.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-               <span className="text-3xl font-black">92%</span>
+               <span className="text-3xl font-black">
+                 {csatScore !== null ? `${csatScore}%` : "N/A"}
+               </span>
                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">CSAT Score</span>
             </div>
           </div>
           <div className="space-y-4 px-2">
-            {sentimentData.map((item) => (
+            {sentimentData.map((item: any) => (
               <div key={item.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
@@ -213,14 +322,14 @@ export default function ProjectInsights() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         {/* Lead Sources */}
+         {/* Lead Sources / Funnel */}
          <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
            <h2 className="text-xl font-bold mb-8 flex items-center gap-2">
              <BarChart3 className="w-5 h-5 text-purple-500" /> Conversion Funnel
            </h2>
            <div className="h-[250px]">
              <ResponsiveContainer width="100%" height="100%">
-               <BarChart data={sourcePerformance} layout="vertical">
+               <BarChart data={conversionFunnel} layout="vertical">
                  <XAxis type="number" hide />
                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 700, fill: '#18181b'}} width={80} />
                  <Tooltip />
@@ -236,9 +345,32 @@ export default function ProjectInsights() {
                <AlertCircle className="w-10 h-10" />
             </div>
             <h3 className="text-2xl font-black mb-3">Knowledge Coverage</h3>
-            <p className="text-text-muted text-sm mb-6 max-w-sm mx-auto">Your bot has answered <span className="text-green-500 font-bold">100%</span> of questions correctly this week based on indexed data.</p>
+            <p className="text-text-muted text-sm mb-6 max-w-sm mx-auto">
+              Your bot has answered{" "}
+              <span
+                className={`font-bold ${
+                  coveragePercent >= 90
+                    ? "text-green-500"
+                    : coveragePercent >= 70
+                    ? "text-amber-500"
+                    : "text-red-500"
+                }`}
+              >
+                {coveragePercent}%
+              </span>{" "}
+              of questions correctly this period based on indexed data.
+            </p>
             <div className="w-full bg-zinc-100 h-3 rounded-full overflow-hidden mb-8">
-               <div className="bg-green-500 h-full w-[96%]" />
+               <div
+                 className={`h-full transition-all ${
+                   coveragePercent >= 90
+                     ? "bg-green-500"
+                     : coveragePercent >= 70
+                     ? "bg-amber-500"
+                     : "bg-red-500"
+                 }`}
+                 style={{ width: `${coveragePercent}%` }}
+               />
             </div>
             <Link to={`/dashboard/projects/${project.id}/train`} className="text-primary font-black uppercase tracking-widest text-[11px] hover:underline">
                Expand Knowledge Base →
