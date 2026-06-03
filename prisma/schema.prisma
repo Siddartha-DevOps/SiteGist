@@ -106,9 +106,14 @@ model ChatSession {
   customerEmail String? // For guest identification
   status      String    @default("active") // active, resolved
   mode        String    @default("ai") // ai, human
+  isRead      Boolean   @default(false)
+  isStarred   Boolean   @default(false)
+  isArchived  Boolean   @default(false)
+  assignedTo  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   messages    Message[]
+  tags        ConversationTag[]
 }
 
 model Message {
@@ -205,4 +210,14 @@ model ProjectMember {
   role      MemberRole @default(VIEWER)
   createdAt DateTime @default(now())
   @@unique([projectId, email])
+}
+
+model ConversationTag {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  label     String
+  color     String      @default("#6366f1")
+  createdAt DateTime    @default(now())
+  @@unique([sessionId, label])
 }

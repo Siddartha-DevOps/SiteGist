@@ -1,25 +1,31 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Form, useNavigation, Link } from "@remix-run/react";
+import { useLoaderData, Form, useNavigation, Link, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare } from "lucide-react";
+import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus } from "lucide-react";
 import { format } from "date-fns";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
-  const session = await (prisma.chatSession as any).findUnique({
+  const session = await prisma.chatSession.findUnique({
     where: { id: params.sessionId },
     include: {
       messages: { orderBy: { createdAt: "asc" } },
-      project: { select: { name: true, userId: true } }
+      project: { select: { name: true, userId: true } },
+      tags: { orderBy: { createdAt: "asc" } },
     },
   });
 
   if (!session || session.project.userId !== userId) {
     return redirect("/dashboard/inbox");
   }
+
+  await prisma.chatSession.update({
+    where: { id: params.sessionId },
+    data: { isRead: true },
+  });
 
   return json({ session });
 }
@@ -35,6 +41,51 @@ export async function action({ request, params }: ActionFunctionArgs) {
     await prisma.chatSession.update({
       where: { id: params.sessionId },
       data: { mode: newMode }
+    });
+    return json({ success: true });
+  }
+
+  if (action === "toggle_star") {
+    const sess = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
+    await prisma.chatSession.update({
+      where: { id: params.sessionId },
+      data: { isStarred: !sess!.isStarred },
+    });
+    return json({ success: true });
+  }
+
+  if (action === "toggle_archive") {
+    const sess = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
+    await prisma.chatSession.update({
+      where: { id: params.sessionId },
+      data: { isArchived: !sess!.isArchived },
+    });
+    return json({ success: true });
+  }
+
+  if (action === "add_tag") {
+    const label = (formData.get("label") as string)?.trim().toLowerCase();
+    const color = (formData.get("color") as string) || "#6366f1";
+    if (!label) return json({ error: "Label required" }, { status: 400 });
+    await prisma.conversationTag.upsert({
+      where: { sessionId_label: { sessionId: params.sessionId!, label } },
+      create: { sessionId: params.sessionId!, label, color },
+      update: {},
+    });
+    return json({ success: true });
+  }
+
+  if (action === "remove_tag") {
+    const tagId = formData.get("tagId") as string;
+    await prisma.conversationTag.delete({ where: { id: tagId } });
+    return json({ success: true });
+  }
+
+  if (action === "assign") {
+    const assignedTo = (formData.get("assignedTo") as string)?.trim() || null;
+    await prisma.chatSession.update({
+      where: { id: params.sessionId },
+      data: { assignedTo },
     });
     return json({ success: true });
   }
@@ -65,6 +116,7 @@ export default function SessionDetail() {
   const isSending = navigation.state === "submitting";
   const scrollRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const fetcher = useFetcher();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -101,6 +153,34 @@ export default function SessionDetail() {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Star button */}
+          <fetcher.Form method="post">
+            <input type="hidden" name="_action" value="toggle_star" />
+            <button
+              type="submit"
+              title={session.isStarred ? "Unstar" : "Star"}
+              className={`p-2.5 rounded-xl border transition-all ${
+                session.isStarred
+                  ? "bg-yellow-50 border-yellow-200 text-yellow-500"
+                  : "bg-zinc-50 border-zinc-100 text-zinc-400 hover:bg-zinc-100"
+              }`}
+            >
+              <Star className="w-4 h-4" fill={session.isStarred ? "currentColor" : "none"} />
+            </button>
+          </fetcher.Form>
+
+          {/* Archive button */}
+          <fetcher.Form method="post">
+            <input type="hidden" name="_action" value="toggle_archive" />
+            <button
+              type="submit"
+              title={session.isArchived ? "Unarchive" : "Archive"}
+              className="p-2.5 rounded-xl border bg-zinc-50 border-zinc-100 text-zinc-400 hover:bg-zinc-100 transition-all"
+            >
+              <Archive className="w-4 h-4" />
+            </button>
+          </fetcher.Form>
+
            <Form method="post">
               <input type="hidden" name="_action" value="toggle_mode" />
               <button 
@@ -116,6 +196,84 @@ export default function SessionDetail() {
               </button>
            </Form>
         </div>
+      </div>
+
+      {/* Tags and Assign Panel */}
+      <div className="px-6 py-3 border-b border-zinc-50 bg-white flex items-center gap-6 flex-wrap">
+
+        {/* Tags */}
+        <div className="flex items-center gap-2 flex-wrap flex-1">
+          <Tag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          {session.tags.map((tag: any) => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest"
+              style={{ backgroundColor: tag.color + "20", color: tag.color, border: `1px solid ${tag.color}40` }}
+            >
+              {tag.label}
+              <fetcher.Form method="post" className="inline">
+                <input type="hidden" name="_action" value="remove_tag" />
+                <input type="hidden" name="tagId" value={tag.id} />
+                <button type="submit" className="ml-0.5 hover:opacity-60">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </fetcher.Form>
+            </span>
+          ))}
+          {/* Add tag form */}
+          {(() => {
+            const [showTagInput, setShowTagInput] = useState(false);
+            const [tagInput, setTagInput] = useState("");
+            return showTagInput ? (
+              <fetcher.Form
+                method="post"
+                onSubmit={() => { setShowTagInput(false); setTagInput(""); }}
+                className="flex items-center gap-1"
+              >
+                <input type="hidden" name="_action" value="add_tag" />
+                <input
+                  name="label"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  placeholder="tag name"
+                  autoFocus
+                  className="w-24 px-2 py-0.5 text-xs border border-brand-border rounded-lg outline-none focus:border-primary"
+                />
+                <button type="submit" className="text-[10px] font-black text-primary px-2 py-1 hover:underline">
+                  Add
+                </button>
+                <button type="button" onClick={() => setShowTagInput(false)} className="text-[10px] text-zinc-400 px-1">
+                  ✕
+                </button>
+              </fetcher.Form>
+            ) : (
+              <button
+                onClick={() => setShowTagInput(true)}
+                className="text-[10px] font-black text-zinc-400 hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-brand-light"
+              >
+                + Add tag
+              </button>
+            );
+          })()}
+        </div>
+
+        {/* Assign to */}
+        <fetcher.Form method="post" className="flex items-center gap-2 shrink-0">
+          <input type="hidden" name="_action" value="assign" />
+          <UserPlus className="w-3.5 h-3.5 text-zinc-400" />
+          <input
+            name="assignedTo"
+            defaultValue={session.assignedTo || ""}
+            placeholder="Assign to email..."
+            className="w-44 px-3 py-1.5 text-xs font-medium border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40"
+          />
+          <button
+            type="submit"
+            className="text-[10px] font-black text-primary hover:underline uppercase tracking-widest"
+          >
+            Save
+          </button>
+        </fetcher.Form>
       </div>
 
       {/* Messages Area */}
