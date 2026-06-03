@@ -4,7 +4,7 @@ import { prisma } from "~/database/db.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json();
-  const { projectId, name, email, phone, company } = body;
+  const { projectId, name, email, phone, company, sessionId } = body;
 
   if (!projectId || !email) {
     return json({ error: "Project ID and Email are required" }, { status: 400 });
@@ -18,6 +18,7 @@ export async function action({ request }: ActionFunctionArgs) {
       email,
       phone,
       company,
+      ...(sessionId ? { sessionId } : {}),
     },
   });
 

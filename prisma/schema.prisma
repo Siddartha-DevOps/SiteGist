@@ -114,6 +114,7 @@ model ChatSession {
   updatedAt   DateTime  @updatedAt
   messages    Message[]
   tags        ConversationTag[]
+  lead        Lead?
 }
 
 model Message {
@@ -149,14 +150,21 @@ model BillingSubscription {
 }
 
 model Lead {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   projectId String
-  project   Project  @relation(fields: [projectId], references: [id])
+  project   Project   @relation(fields: [projectId], references: [id])
   name      String?
   email     String?
   phone     String?
   company   String?
-  createdAt DateTime @default(now())
+  status    String    @default("new")
+  isStarred Boolean   @default(false)
+  isArchived Boolean  @default(false)
+  notes     String?   @db.Text
+  sessionId String?   @unique
+  session   ChatSession? @relation(fields: [sessionId], references: [id])
+  tags      LeadTag[]
+  createdAt DateTime  @default(now())
 }
 
 model UnansweredQuestion {
@@ -221,3 +229,14 @@ model ConversationTag {
   createdAt DateTime    @default(now())
   @@unique([sessionId, label])
 }
+
+model LeadTag {
+  id      String   @id @default(cuid())
+  leadId  String
+  lead    Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  label   String
+  color   String   @default("#6366f1")
+  createdAt DateTime @default(now())
+  @@unique([leadId, label])
+}
+

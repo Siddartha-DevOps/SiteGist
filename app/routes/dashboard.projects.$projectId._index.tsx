@@ -69,6 +69,14 @@ export default function ProjectDetails() {
             <Link to={`/dashboard/projects/${project.id}/integrations`} className="btn-outline flex items-center gap-2">
               <Share2 className="w-4 h-4" /> Integrations
             </Link>
+            <Link to={`/dashboard/projects/${project.id}/leads`} className="btn-outline flex items-center gap-2">
+              <Users className="w-4 h-4" /> Leads
+              {project._count.leads > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 bg-primary/10 text-primary text-[10px] font-black rounded-full">
+                  {project._count.leads}
+                </span>
+              )}
+            </Link>
             <Link to={`/dashboard/projects/${project.id}/insights`} className="btn-outline flex items-center gap-2">
               <BarChart3 className="w-4 h-4" /> Insights
             </Link>
