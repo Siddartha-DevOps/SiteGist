@@ -17,17 +17,9 @@ import {
 interface DashboardIndexPageProps {
   projects: any[];
   isCreating: boolean;
+  analyticsData: Array<{ name: string; leads: number; messages: number }>;
+  hasTrendData: boolean;
 }
-
-const analyticsData = [
-  { name: 'Mon', leads: 4, messages: 24 },
-  { name: 'Tue', leads: 7, messages: 35 },
-  { name: 'Wed', leads: 5, messages: 30 },
-  { name: 'Thu', leads: 9, messages: 48 },
-  { name: 'Fri', leads: 12, messages: 52 },
-  { name: 'Sat', leads: 8, messages: 40 },
-  { name: 'Sun', leads: 15, messages: 63 },
-];
 
 const AreaChartAny = AreaChart as any;
 const AreaAny = Area as any;
@@ -40,7 +32,7 @@ const BarChartAny = BarChart as any;
 const BarAny = Bar as any;
 const CellAny = Cell as any;
 
-export function DashboardIndexPage({ projects, isCreating }: DashboardIndexPageProps) {
+export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTrendData }: DashboardIndexPageProps) {
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => {
     setMounted(true);
@@ -90,46 +82,54 @@ export function DashboardIndexPage({ projects, isCreating }: DashboardIndexPageP
             
             <div className="h-[240px] w-full">
               {mounted && (
-                <ResponsiveContainerAny width="100%" height="100%">
-                  <AreaChartAny data={analyticsData}>
-                    <defs>
-                      <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#155DEE" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#155DEE" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGridAny strokeDasharray="3 3" vertical={false} stroke="#F1F1F4" />
-                    <XAxisAny 
-                      dataKey="name" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{fill: '#A1A1AA', fontSize: 10, fontWeight: 700}}
-                      dy={10}
-                    />
-                    <YAxisAny 
-                      hide 
-                    />
-                    <TooltipAny 
-                      contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px -5px rgba(0,0,0,0.1)', fontSize: '12px', fontWeight: 'bold'}}
-                    />
-                    <AreaAny 
-                      type="monotone" 
-                      dataKey="messages" 
-                      stroke="#A78BFA" 
-                      fillOpacity={1} 
-                      fill="url(#colorLeads)" 
-                      strokeWidth={3}
-                    />
-                    <AreaAny 
-                      type="monotone" 
-                      dataKey="leads" 
-                      stroke="#155DEE" 
-                      fillOpacity={1} 
-                      fill="url(#colorLeads)" 
-                      strokeWidth={4}
-                    />
-                  </AreaChartAny>
-                </ResponsiveContainerAny>
+                hasTrendData ? (
+                  <ResponsiveContainerAny width="100%" height="100%">
+                    <AreaChartAny data={analyticsData}>
+                      <defs>
+                        <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#155DEE" stopOpacity={0.1}/>
+                          <stop offset="95%" stopColor="#155DEE" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGridAny strokeDasharray="3 3" vertical={false} stroke="#F1F1F4" />
+                      <XAxisAny 
+                        dataKey="name" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{fill: '#A1A1AA', fontSize: 10, fontWeight: 700}}
+                        dy={10}
+                      />
+                      <YAxisAny 
+                        hide 
+                      />
+                      <TooltipAny 
+                        contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px -5px rgba(0,0,0,0.1)', fontSize: '12px', fontWeight: 'bold'}}
+                      />
+                      <AreaAny 
+                        type="monotone" 
+                        dataKey="messages" 
+                        stroke="#A78BFA" 
+                        fillOpacity={1} 
+                        fill="url(#colorLeads)" 
+                        strokeWidth={3}
+                      />
+                      <AreaAny 
+                        type="monotone" 
+                        dataKey="leads" 
+                        stroke="#155DEE" 
+                        fillOpacity={1} 
+                        fill="url(#colorLeads)" 
+                        strokeWidth={4}
+                      />
+                    </AreaChartAny>
+                  </ResponsiveContainerAny>
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center p-6 bg-zinc-50/50 rounded-2xl w-full h-full border border-dashed border-zinc-200">
+                    <Activity className="w-8 h-8 text-zinc-400 mb-2 animate-pulse" />
+                    <p className="text-sm font-bold text-brand-dark">No analytics history available yet.</p>
+                    <p className="text-xs text-brand-gray mt-1 max-w-sm">Analytics will start showing once your chatbots begin receiving messages and capturing leads.</p>
+                  </div>
+                )
               )}
             </div>
           </div>

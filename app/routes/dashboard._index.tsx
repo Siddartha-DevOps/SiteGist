@@ -22,12 +22,91 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       orderBy: { updatedAt: "desc" },
     });
-    return json({ projects, dbError: null, errorMessage: null });
+
+    const projectIds = projects.map(p => p.id);
+
+    // Fetch all leads for these projects from database
+    const leads = await prisma.lead.findMany({
+      where: {
+        projectId: { in: projectIds }
+      },
+      select: {
+        createdAt: true
+      }
+    });
+
+    // Fetch all messages for the sessions of these projects from database
+    const messages = await prisma.message.findMany({
+      where: {
+        session: {
+          projectId: { in: projectIds }
+        }
+      },
+      select: {
+        createdAt: true
+      }
+    });
+
+    // Generate the last 7 days dynamically
+    const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      return {
+        dateStr,
+        name: daysOfWeek[d.getDay()],
+        leads: 0,
+        messages: 0
+      };
+    });
+
+    leads.forEach(lead => {
+      if (!lead.createdAt) return;
+      const d = new Date(lead.createdAt);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const dayBucket = last7Days.find(day => day.dateStr === dateStr);
+      if (dayBucket) {
+        dayBucket.leads += 1;
+      }
+    });
+
+    messages.forEach(message => {
+      if (!message.createdAt) return;
+      const d = new Date(message.createdAt);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const dayBucket = last7Days.find(day => day.dateStr === dateStr);
+      if (dayBucket) {
+        dayBucket.messages += 1;
+      }
+    });
+
+    const totalTrendValues = last7Days.reduce((acc, curr) => acc + curr.leads + curr.messages, 0);
+    const hasTrendData = totalTrendValues > 0;
+
+    return json({ 
+      projects, 
+      analyticsData: last7Days, 
+      hasTrendData, 
+      dbError: null, 
+      errorMessage: null 
+    });
   } catch (error: any) {
     console.error("[Dashboard] Database error:", error.message);
     const isP6002 = error.message.includes("P6002") || error.message.includes("API Key is invalid");
     return json({ 
       projects: [], 
+      analyticsData: [],
+      hasTrendData: false,
       dbError: isP6002 ? "PRISMA_AUTH_ERROR" : "GENERAL_ERROR",
       errorMessage: error.message 
     });
@@ -58,7 +137,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function ProjectsIndex() {
-  const { projects, dbError, errorMessage } = useLoaderData<typeof loader>();
+  const { projects, analyticsData, hasTrendData, dbError, errorMessage } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isCreating = navigation.state === "submitting" && !!navigation.formData?.get("name");
 
@@ -86,5 +165,5 @@ export default function ProjectsIndex() {
     );
   }
 
-  return <DashboardIndexPage projects={projects} isCreating={isCreating} />;
+  return <DashboardIndexPage projects={projects} isCreating={isCreating} analyticsData={(analyticsData || []) as any} hasTrendData={!!hasTrendData} />;
 }
