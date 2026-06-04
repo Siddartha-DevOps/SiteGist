@@ -37,7 +37,8 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    return redirect(`/dashboard/projects/${project.id}`);
+    // Redirect to dashboard so the project list loads fresh (avoids Prisma Accelerate read-after-write lag)
+    return redirect(`/dashboard?new=${project.id}`);
   } catch (error) {
     return json({ error: "Failed to create chatbot. Please try again." }, { status: 500 });
   }

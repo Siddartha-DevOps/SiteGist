@@ -8,24 +8,27 @@ import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const user = await getUser(request);
-  const project = await prisma.project.findFirst({
-    where: { 
+  const findProject = () => prisma.project.findFirst({
+    where: {
       id: params.projectId,
       OR: [
         { userId },
         { members: { some: { email: user?.email || "" } } }
       ]
     },
-    include: { 
+    include: {
       knowledgeSources: true,
-      _count: {
-        select: {
-          sessions: true,
-          leads: true,
-        }
-      }
+      _count: { select: { sessions: true, leads: true } }
     },
   });
+
+  let project = await findProject();
+
+  // Retry once after a short delay to handle Prisma Accelerate read-after-write lag
+  if (!project) {
+    await new Promise(r => setTimeout(r, 600));
+    project = await findProject();
+  }
 
   if (!project) return redirect("/dashboard");
 
