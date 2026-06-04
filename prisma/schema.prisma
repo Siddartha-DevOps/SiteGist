@@ -241,3 +241,15 @@ model LeadTag {
   @@unique([leadId, label])
 }
 
+model BillingPayment {
+  id            String   @id @default(cuid())
+  userId        String
+  transactionId String   @unique
+  amount        Float
+  currency      String
+  status        String
+  invoiceUrl    String?
+  paidAt        DateTime
+  createdAt     DateTime @default(now())
+}
+

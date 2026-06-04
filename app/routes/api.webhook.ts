@@ -90,5 +90,49 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (eventType === "transaction.completed") {
+    const txn = data as any;
+    const transactionId = txn.id;
+    const status = txn.status || "completed";
+    const currency = txn.currencyCode || txn.currency_code || "USD";
+
+    // Paddle reports totals in the currency's smallest unit (e.g. cents) as a string
+    const rawTotal = txn.details?.totals?.grandTotal ?? txn.details?.totals?.total ?? "0";
+    const amount = Number(rawTotal) / 100;
+
+    // Paddle does NOT include the PDF URL in the webhook; capture it if present, else null.
+    const invoiceUrl = txn.invoice_pdf_url || txn.invoicePdfUrl || null;
+    const paidAt = txn.billedAt ? new Date(txn.billedAt) : new Date();
+
+    // Resolve the owning user: customData.userId first, then via the customer id.
+    let txnUser = null;
+    const txnUserId = txn.customData?.userId || customData.userId;
+    if (txnUserId) {
+      txnUser = await prisma.user.findUnique({ where: { id: txnUserId } });
+    }
+    if (!txnUser && txn.customerId) {
+      const sub = await prisma.billingSubscription.findFirst({
+        where: { externalCustomerId: txn.customerId },
+      });
+      if (sub) txnUser = await prisma.user.findUnique({ where: { id: sub.userId } });
+    }
+
+    if (txnUser && transactionId) {
+      await prisma.billingPayment.upsert({
+        where: { transactionId },
+        update: { amount, currency, status, invoiceUrl, paidAt },
+        create: {
+          userId: txnUser.id,
+          transactionId,
+          amount,
+          currency,
+          status,
+          invoiceUrl,
+          paidAt,
+        },
+      });
+    }
+  }
+
   return json({ received: true });
 }

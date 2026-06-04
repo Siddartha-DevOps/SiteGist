@@ -99,6 +99,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error("[Billing] Subscription query failed:", e);
   }
 
+  // Billing history (most recent first)
+  let payments: {
+    id: string;
+    transactionId: string;
+    amount: number;
+    currency: string;
+    status: string;
+    invoiceUrl: string | null;
+    paidAt: string;
+  }[] = [];
+  try {
+    const rows = await prisma.billingPayment.findMany({
+      where: { userId },
+      orderBy: { paidAt: "desc" },
+      take: 24,
+    });
+    payments = rows.map((p) => ({
+      id: p.id,
+      transactionId: p.transactionId,
+      amount: p.amount,
+      currency: p.currency,
+      status: p.status,
+      invoiceUrl: p.invoiceUrl,
+      paidAt: p.paidAt.toISOString(),
+    }));
+  } catch (e) {
+    console.error("[Billing] Payment history query failed:", e);
+  }
+
   return json({ 
     user,
     daysLeft,
@@ -116,6 +145,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     messagesUsed,
     nextBilledAt,
     daysRemaining,
+    payments,
   });
 }
 
@@ -138,7 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining } = useLoaderData<typeof loader>();
+  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining, payments } = useLoaderData<typeof loader>();
   
   const isUnlimited = messageLimit === -1;
   const usagePercent = isUnlimited ? 0 : Math.min(100, Math.round((messagesUsed / messageLimit) * 100));
@@ -555,6 +585,60 @@ export default function Billing() {
           </div>
         ))}
       </div>
+
+      {/* Billing History */}
+      {payments && payments.length > 0 && (
+        <div className="max-w-4xl mx-auto mb-24">
+          <h3 className="text-2xl font-black mb-6 font-display text-zinc-900">Billing History</h3>
+          <div className="bg-white border border-zinc-100 rounded-[40px] overflow-hidden shadow-sm">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-zinc-100 bg-zinc-50/50">
+                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Date</th>
+                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Amount</th>
+                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Status</th>
+                  <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-right">Invoice</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => (
+                  <tr key={p.id} className="border-b border-zinc-50 last:border-0 hover:bg-zinc-50/40 transition-colors">
+                    <td className="px-8 py-5 text-sm font-bold text-zinc-700">
+                      {new Date(p.paidAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td className="px-8 py-5 text-sm font-black text-zinc-900">
+                      {p.amount.toLocaleString("en-US", { style: "currency", currency: p.currency || "USD" })}
+                    </td>
+                    <td className="px-8 py-5">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wide ${
+                        p.status === "completed" || p.status === "paid"
+                          ? "bg-green-50 text-green-600 border border-green-100"
+                          : "bg-zinc-100 text-zinc-500 border border-zinc-200"
+                      }`}>
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="px-8 py-5 text-right">
+                      {p.invoiceUrl ? (
+                        <a
+                          href={p.invoiceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-black text-primary hover:underline"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Download
+                        </a>
+                      ) : (
+                        <span className="text-xs font-bold text-zinc-300">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Pricing Calculator */}
       <div className="mb-24 bg-zinc-50 rounded-[60px] p-12 border border-zinc-100">
