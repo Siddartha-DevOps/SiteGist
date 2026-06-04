@@ -128,6 +128,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error("[Billing] Payment history query failed:", e);
   }
 
+  // Chatbot usage
+  let chatbotCount = 0;
+  try {
+    chatbotCount = await prisma.project.count({ where: { userId } });
+  } catch (e) {
+    console.error("[Billing] Chatbot count failed:", e);
+  }
+
+  // Chatbot limit based on current plan (-1 = unlimited)
+  const PADDLE_STARTER = process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3";
+  const PADDLE_BASIC   = process.env.VITE_PADDLE_GROWTH_PLAN_ID   || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3";
+  const PADDLE_PRO     = process.env.VITE_PADDLE_SCALE_PLAN_ID    || process.env.VITE_PADDLE_PRO_PLAN_ID   || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
+
+  const chatbotLimitMap: Record<string, number> = {
+    [PADDLE_STARTER]:  1,
+    "starter_plan":    1,
+    "free":            1,
+    [PADDLE_BASIC]:    3,
+    [PADDLE_PRO]:     -1,
+    "enterprise_plan": -1,
+  };
+  const chatbotLimit = chatbotLimitMap[user?.subscriptionTier ?? "free"] ?? 1;
+
   return json({ 
     user,
     daysLeft,
@@ -146,6 +169,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     nextBilledAt,
     daysRemaining,
     payments,
+    chatbotCount,
+    chatbotLimit,
   });
 }
 
@@ -168,11 +193,17 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining, payments } = useLoaderData<typeof loader>();
+  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining, payments, chatbotCount, chatbotLimit } = useLoaderData<typeof loader>();
   
   const isUnlimited = messageLimit === -1;
   const usagePercent = isUnlimited ? 0 : Math.min(100, Math.round((messagesUsed / messageLimit) * 100));
   const isNearLimit = !isUnlimited && usagePercent >= 80;
+
+  const isChatbotUnlimited = chatbotLimit === -1;
+  const chatbotPercent = isChatbotUnlimited
+    ? 0
+    : Math.min(100, Math.round((chatbotCount / chatbotLimit) * 100));
+  const isChatbotNearLimit = !isChatbotUnlimited && chatbotPercent >= 80;
   
   // Determine current subscription tier limits
   const tier = (user?.subscriptionTier || "free").toLowerCase();
@@ -411,6 +442,48 @@ export default function Billing() {
           {isNearLimit && (
             <span className="text-xs font-black text-brand-orange uppercase tracking-wide">
               Approaching limit — consider upgrading
+            </span>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-zinc-100 my-6" />
+
+        {/* Chatbot Limit */}
+        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-primary/5 text-primary rounded-2xl flex items-center justify-center">
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-black text-lg leading-tight">Chatbots</h3>
+              <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Active projects</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-2xl font-black text-zinc-900">{chatbotCount}</span>
+            <span className="text-sm font-bold text-zinc-400">
+              {isChatbotUnlimited ? " / Unlimited" : ` / ${chatbotLimit}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="w-full bg-zinc-100 h-3 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${isChatbotNearLimit ? "bg-brand-orange" : "bg-primary"}`}
+            style={{ width: isChatbotUnlimited ? "100%" : `${chatbotPercent}%` }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-xs font-bold text-zinc-400">
+            {isChatbotUnlimited
+              ? "Unlimited chatbots on your plan"
+              : `${chatbotPercent}% of chatbot limit used`}
+          </span>
+          {isChatbotNearLimit && (
+            <span className="text-xs font-black text-brand-orange uppercase tracking-wide">
+              At limit — upgrade to add more
             </span>
           )}
         </div>
