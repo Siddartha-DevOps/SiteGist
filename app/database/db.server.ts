@@ -509,9 +509,12 @@ function getClient(useFallback = false): any {
                 continue;
               }
               
-              // Other errors should also set offline to prevent further connection attempt lag
-              setEntirelyOffline(true);
-              return getFallbackMockData(model, operation, args);
+              // Transient/unknown error after retries: do NOT permanently latch
+              // the whole instance into offline mock mode — that makes real data
+              // (e.g. the user's projects) vanish on every subsequent query until
+              // the container restarts. Surface the error so the caller can handle
+              // it and the next request retries the real database.
+              throw err;
             }
           }
           // Fallback return if loop finishes without throwing (TypeScript safety)
