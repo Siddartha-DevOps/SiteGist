@@ -349,7 +349,7 @@ export async function deleteSourceChunks(projectId: string, sourceValue: string)
   }
 }
 
-export async function* streamRAG(projectId: string, query: string, systemPrompt?: string, history: { role: string, content: string }[] = []) {
+export async function* streamRAG(projectId: string, query: string, systemPrompt?: string, history: { role: string, content: string }[] = [], modelPreference?: string) {
   // IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   const normalizedQuery = query.toLowerCase().trim().replace(/[?!.]+$/, "");
   const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?", "pricing plans", "pricing"];
@@ -614,6 +614,12 @@ How it works:
   let fullAnswer = "";
   let lastError: any = null;
 
+  // Per-bot model routing. "auto" (or unset) keeps the original fallback behavior.
+  const wantsOpenAI = !!modelPreference && modelPreference.startsWith("gpt");
+  const wantsGemini = !!modelPreference && modelPreference.startsWith("gemini");
+  const geminiModel = wantsGemini ? modelPreference! : "gemini-3.5-flash";
+  const openaiModelPref = wantsOpenAI ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini");
+
   // Add a safety timeout for the entire generation process
   const generationTimeout = setTimeout(() => {
     if (!fullAnswer && !lastError) {
@@ -623,12 +629,12 @@ How it works:
 
   try {
     yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-    if (gemini) {
+    if (gemini && !(wantsOpenAI && openai)) {
       try {
-        console.log(`[RAG Audit] Stage 6: Calling Gemini gemini-3.5-flash stream...`);
+        console.log(`[RAG Audit] Stage 6: Calling Gemini ${geminiModel} stream...`);
         
         const result = await gemini.models.generateContentStream({
-          model: "gemini-3.5-flash",
+          model: geminiModel,
           contents: prompt
         });
         
@@ -662,7 +668,7 @@ How it works:
 
     if (openai && !fullAnswer) {
       try {
-        const model = process.env.PORTKEY_MODEL || "gpt-4o-mini";
+        const model = openaiModelPref;
         const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "1024", 10);
         
         console.log(`[RAG Audit] Stage 8: Calling OpenAI ${model}...`);

@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, Link, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus } from "lucide-react";
+import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useRef, useState } from "react";
 
@@ -34,6 +34,37 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   const formData = await request.formData();
   const action = formData.get("_action");
+  
+  if (action === "export_transcript") {
+    const session = await (prisma.chatSession as any).findUnique({
+      where: { id: params.sessionId },
+      include: {
+        messages: { orderBy: { createdAt: "asc" } },
+        project: { select: { userId: true, name: true } },
+      },
+    });
+    if (!session || session.project.userId !== userId) {
+      return json({ error: "Not found" }, { status: 404 });
+    }
+
+    const csv = [
+      ["Timestamp", "Sender", "Message"].join(","),
+      ...session.messages.map((m: any) =>
+        [
+          `"${new Date(m.createdAt).toISOString()}"`,
+          `"${m.role === "user" ? "Customer" : "Assistant"}"`,
+          `"${(m.content || "").replace(/"/g, '""')}"`,
+        ].join(",")
+      ),
+    ].join("\n");
+
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv",
+        "Content-Disposition": `attachment; filename="transcript-${params.sessionId}.csv"`,
+      },
+    });
+  }
   
   if (action === "toggle_mode") {
     const session = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
@@ -195,6 +226,16 @@ export default function SessionDetail() {
                 {session.mode === 'human' ? 'Human Mode Active' : 'Enable Live Takeover'}
               </button>
            </Form>
+
+          <Form method="post">
+            <input type="hidden" name="_action" value="export_transcript" />
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 bg-zinc-50 text-zinc-400 border border-zinc-100 hover:bg-zinc-100"
+            >
+              <Download className="w-3.5 h-3.5" /> Transcript
+            </button>
+          </Form>
         </div>
       </div>
 

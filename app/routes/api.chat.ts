@@ -36,6 +36,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     let project = null;
     let systemPrompt = "You are a helpful AI assistant for SiteGist, a platform that builds AI chatbots from website content.";
+    let modelPreference: string | undefined = undefined;
 
     if (projectId !== "demo-project") {
       try {
@@ -49,6 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }
         const settings = project.settings as any;
         systemPrompt = settings?.systemPrompt || systemPrompt;
+        modelPreference = settings?.model || undefined;
 
         // Domain whitelisting check
         if (settings?.allowedDomains && settings.allowedDomains.length > 0 && origin) {
@@ -135,7 +137,7 @@ export async function action({ request }: ActionFunctionArgs) {
           controller.enqueue(encoder.encode(`event: session\ndata: ${initialData}\n\n`));
 
           console.log(`[Chat] Initiating RAG for project: ${projectId}`);
-          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory);
+          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference);
           
           // Check for handoff intent
           const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];

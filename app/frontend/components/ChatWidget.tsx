@@ -52,7 +52,10 @@ const ActionButtons = ({ text, id, reactions, handleCopy, handleReaction, copied
  * ChatWidgetPanel
  * The main chat interface that slides into view.
  */
-function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
+function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
+  onClose: () => void;
+  suggestions?: string[];
+}) {
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -61,11 +64,13 @@ function ChatWidgetPanel({ onClose }: { onClose: () => void }) {
   const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
   const [showSuggestions, setShowSuggestions] = useState(true);
 
-  const suggestedQuestions = [
-    "Can you tell me more about the AI-powered answers feature?",
-    "What kind of tools can I integrate with SiteGist?",
-    "How does the multi-channel deployment work?"
-  ];
+  const suggestedQuestions = (propSuggestions && propSuggestions.length > 0)
+    ? propSuggestions
+    : [
+        "Can you tell me more about the AI-powered answers feature?",
+        "What kind of tools can I integrate with SiteGist?",
+        "How does the multi-channel deployment work?",
+      ];
 
   const handleCopy = (text: string, id: number | string) => {
     navigator.clipboard.writeText(text);
@@ -392,7 +397,7 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
  * ChatWidget
  * The high-level component that manages state and layout.
  */
-export function ChatWidget() {
+export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -409,7 +414,7 @@ export function ChatWidget() {
   return (
     <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
       <AnimatePresence mode="wait">
-        {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} />}
+        {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} suggestions={suggestions} />}
       </AnimatePresence>
       <ChatWidgetLauncher isOpen={isOpen} onClick={() => setIsOpen(!isOpen)} />
     </div>

@@ -4,13 +4,57 @@ import { useLoaderData, Link, useSearchParams, useFetcher } from "@remix-run/rea
 import React from "react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { MessageSquare, ChevronRight, User, Bot, Calendar, Search, Star, Archive, AlertTriangle, Tag } from "lucide-react";
+import { MessageSquare, ChevronRight, User, Bot, Calendar, Search, Star, Archive, AlertTriangle, Tag, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export async function action({ request }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
+
+  // CSV Export — returns file download (respects the active filter)
+  if (_action === "export_csv") {
+    const filter = (formData.get("filter") as string) || "open";
+    const baseWhere: any = { project: { userId } };
+    if (filter === "open")      { baseWhere.isArchived = false; baseWhere.status = "active"; }
+    if (filter === "resolved")  { baseWhere.isArchived = false; baseWhere.status = "resolved"; }
+    if (filter === "starred")   { baseWhere.isStarred = true; baseWhere.isArchived = false; }
+    if (filter === "escalated") { baseWhere.mode = "human"; baseWhere.isArchived = false; }
+    if (filter === "archived")  { baseWhere.isArchived = true; }
+    if (filter === "all")       { baseWhere.isArchived = false; }
+
+    const rowsData = await prisma.chatSession.findMany({
+      where: baseWhere,
+      include: {
+        project: { select: { name: true } },
+        _count: { select: { messages: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const csv = [
+      ["Customer Email", "Chatbot", "Status", "Mode", "Messages", "Started", "Last Activity"].join(","),
+      ...rowsData.map((s) =>
+        [
+          `"${s.customerEmail || "Guest"}"`,
+          `"${s.project?.name || ""}"`,
+          `"${s.status}"`,
+          `"${s.mode}"`,
+          `"${s._count.messages}"`,
+          `"${new Date(s.createdAt).toISOString()}"`,
+          `"${new Date(s.updatedAt).toISOString()}"`,
+        ].join(",")
+      ),
+    ].join("\n");
+
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv",
+        "Content-Disposition": `attachment; filename="conversations-${filter}.csv"`,
+      },
+    });
+  }
+
   const sessionId = formData.get("sessionId") as string;
 
   // Verify this session belongs to this user
@@ -96,11 +140,23 @@ export default function Inbox() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-4xl font-black">Conversations</h1>
-          {unreadCount > 0 && (
-            <span className="px-3 py-1 bg-primary text-white text-xs font-black rounded-full">
-              {unreadCount} unread
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {unreadCount > 0 && (
+              <span className="px-3 py-1 bg-primary text-white text-xs font-black rounded-full">
+                {unreadCount} unread
+              </span>
+            )}
+            <fetcher.Form method="post">
+              <input type="hidden" name="_action" value="export_csv" />
+              <input type="hidden" name="filter" value={activeFilter} />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl bg-brand-light text-brand-gray hover:text-brand-dark border border-brand-border transition-all"
+              >
+                <Download className="w-4 h-4" /> Export CSV
+              </button>
+            </fetcher.Form>
+          </div>
         </div>
         <p className="text-text-muted">Monitor and respond to customer chats.</p>
       </div>

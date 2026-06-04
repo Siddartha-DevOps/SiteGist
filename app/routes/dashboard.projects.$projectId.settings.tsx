@@ -54,6 +54,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const name = formData.get("name") as string;
   const systemPrompt = formData.get("systemPrompt") as string;
+  const model = formData.get("model") as string;
   const primaryColor = formData.get("primaryColor") as string;
   const assistantName = formData.get("assistantName") as string;
   const assistantLogo = formData.get("assistantLogo") as string;
@@ -75,6 +76,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const settings = {
     systemPrompt,
+    model,
     allowedDomains,
     branding: {
       primaryColor,
@@ -157,6 +159,21 @@ export default function ProjectSettings() {
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
                   />
                   <p className="mt-2 text-xs text-zinc-400">This defines how the bot responds and its general persona.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2">AI Model</label>
+                  <select
+                    name="model"
+                    defaultValue={currentSettings.model || "auto"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                  >
+                    <option value="auto">Auto (Recommended — fastest available)</option>
+                    <option value="gpt-4o">GPT-4o (most capable)</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini (fast & economical)</option>
+                    <option value="gemini-3.5-flash">Gemini 3.5 Flash (fast)</option>
+                    <option value="gemini-3.5-pro">Gemini 3.5 Pro (advanced reasoning)</option>
+                  </select>
+                  <p className="mt-2 text-xs text-zinc-400">Choose which AI model generates this bot's answers. Auto picks the best available provider.</p>
                 </div>
               </div>
             </section>

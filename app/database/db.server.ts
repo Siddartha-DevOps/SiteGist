@@ -586,7 +586,6 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
           return await origMethod.apply(target, args);
         } catch (err: any) {
           const errMsg = err.message || "";
-          console.warn(`[Prisma Wrapper] Operation '${modelName}.${operation}' failed. Checking failover... Error:`, errMsg);
           
           const isKeyError = errMsg.includes("P5000") ||
                              errMsg.includes("P6002") || 
@@ -594,8 +593,9 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
                              (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
                              
           if (isKeyError) {
+            console.warn(`[Prisma Failover] Connection issue with Prisma Accelerate (API Key/P6002).`);
             if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-              console.log(`[Prisma Failover] API Key/Accelerate error detected. Activating DIRECT_DATABASE_URL failover.`);
+              console.log(`[Prisma Failover] Activating DIRECT_DATABASE_URL failover.`);
               setUsingFallback(true);
               
               // Get direct client
@@ -607,7 +607,7 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
                   console.log(`[Prisma Failover] Retrying '${modelName}.${operation}' using direct connection...`);
                   return await fallbackDelegate[operation](...args);
                 } catch (fallbackErr: any) {
-                  console.error(`[Prisma Failover] Direct connection retry also failed. Falling back completely offline.`, fallbackErr.message);
+                  console.error(`[Prisma Failover] Direct connection retry also failed. Falling back completely offline.`);
                   setEntirelyOffline(true);
                   return getFallbackMockData(modelName, operation, args[0]);
                 }
@@ -635,13 +635,13 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
             errMsg.toLowerCase().includes("can't reach database");
             
           if (isTransientError) {
-            console.log(`[Prisma Wrapper] Transient fluctuation. Falling back to mock database to keep app responsive.`);
+            console.log(`[Prisma Wrapper] Transient fluctuation. Falling back to mock database.`);
             setEntirelyOffline(true);
             return getFallbackMockData(modelName, operation, args[0]);
           }
           
           // Fallback for generic/other errors: go offline and return mock data to prevent blocking user in current run
-          console.warn(`[Prisma Wrapper] Unknown database error occurred. Operating offline fallback.`, errMsg);
+          console.warn(`[Prisma Wrapper] Operation '${modelName}.${operation}' failed. Operating offline fallback.`);
           setEntirelyOffline(true);
           return getFallbackMockData(modelName, operation, args[0]);
         }
@@ -665,19 +665,23 @@ const prisma = new Proxy({} as ExtendedPrismaClient, {
           return await val.apply(client, args);
         } catch (err: any) {
           const errMsg = err.message || "";
-          console.warn(`[Prisma Wrapper] Client operation '${prop}' failed:`, errMsg);
           const isKeyError = errMsg.includes("P5000") || errMsg.includes("P6002") || errMsg.includes("API key is invalid");
-          if (isKeyError && process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-            setUsingFallback(true);
-            const fallbackClient = getPrisma();
-            const fallbackMethod = fallbackClient[prop];
-            if (typeof fallbackMethod === "function") {
-              try {
-                return await fallbackMethod.apply(fallbackClient, args);
-              } catch (fallbackErr) {
-                return [];
+          if (isKeyError) {
+            console.warn(`[Prisma Failover] Client operation error. Connection issue with Prisma Accelerate (API Key/P6002).`);
+            if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
+              setUsingFallback(true);
+              const fallbackClient = getPrisma();
+              const fallbackMethod = fallbackClient[prop];
+              if (typeof fallbackMethod === "function") {
+                try {
+                  return await fallbackMethod.apply(fallbackClient, args);
+                } catch (fallbackErr) {
+                  return [];
+                }
               }
             }
+          } else {
+            console.warn(`[Prisma Wrapper] Client operation '${prop}' failed.`);
           }
           return [];
         }
