@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
+import { sendEmail } from "~/lib/email.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json();
@@ -38,6 +39,39 @@ export async function action({ request }: ActionFunctionArgs) {
     } catch (e) {
       console.error("Webhook notification failed:", e);
     }
+  }
+
+  // Email the chatbot owner about the new lead (default ON, never blocks lead capture)
+  try {
+    const settings = (lead.project.settings as any) || {};
+    const notifyOnLead = settings?.notifications?.emailOnLead !== false; // default ON
+    if (notifyOnLead) {
+      const owner = await prisma.user.findUnique({
+        where: { id: lead.project.userId },
+        select: { email: true },
+      });
+      if (owner?.email) {
+        await sendEmail({
+          to: owner.email,
+          subject: `New lead captured on ${lead.project.name}`,
+          html: `
+            <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto;">
+              <h2 style="color:#155DEE; margin-bottom:4px;">New lead captured 🎉</h2>
+              <p style="color:#52525b; margin-top:0;">Your chatbot <strong>${lead.project.name}</strong> just captured a new lead.</p>
+              <table style="width:100%; border-collapse:collapse; margin:20px 0;">
+                <tr><td style="padding:8px 0; color:#a1a1aa;">Name</td><td style="padding:8px 0; font-weight:bold;">${name || "—"}</td></tr>
+                <tr><td style="padding:8px 0; color:#a1a1aa;">Email</td><td style="padding:8px 0; font-weight:bold;">${email}</td></tr>
+                <tr><td style="padding:8px 0; color:#a1a1aa;">Phone</td><td style="padding:8px 0; font-weight:bold;">${phone || "—"}</td></tr>
+                <tr><td style="padding:8px 0; color:#a1a1aa;">Company</td><td style="padding:8px 0; font-weight:bold;">${company || "—"}</td></tr>
+              </table>
+              <p style="color:#a1a1aa; font-size:12px;">Sent by SiteGist · You can manage notifications in your chatbot settings.</p>
+            </div>
+          `,
+        });
+      }
+    }
+  } catch (e) {
+    console.error("Lead email notification failed:", e);
   }
 
   return json({ success: true, lead });

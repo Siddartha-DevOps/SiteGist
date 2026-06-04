@@ -21,6 +21,7 @@ model User {
   sessions         ChatSession[]
   usageRecords     UsageRecord[]
   blogPosts        BlogPost[]
+  apiKeys          ApiKey[]
 }
 
 model VerificationToken {
@@ -252,4 +253,20 @@ model BillingPayment {
   paidAt        DateTime
   createdAt     DateTime @default(now())
 }
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  keyHash    String    @unique   // sha256 hash of the full key
+  prefix     String              // first 12 chars, for display (e.g. "sk_live_a1b2")
+  last4      String              // last 4 chars, for display
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+}
+
 

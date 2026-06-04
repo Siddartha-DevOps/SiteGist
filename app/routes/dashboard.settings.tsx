@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { generateApiKey, hashApiKey } from "~/backend/api-auth.server";
 import { 
   Save, 
   User, 
@@ -83,9 +84,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  const apiKeys = await prisma.apiKey.findMany({
+    where: { userId, revokedAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true, prefix: true, last4: true, lastUsedAt: true, createdAt: true },
+  });
+
   return json({ 
     user, 
     projects, 
+    apiKeys,
     diagnostics: { 
       dbStats, 
       pineconeStats 
@@ -170,11 +178,36 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  if (method === "create_api_key") {
+    const name = (formData.get("keyName") as string)?.trim() || "Default key";
+    const fullKey = generateApiKey();
+    await prisma.apiKey.create({
+      data: {
+        userId,
+        name,
+        keyHash: hashApiKey(fullKey),
+        prefix: fullKey.slice(0, 12),
+        last4: fullKey.slice(-4),
+      },
+    });
+    // Return the plaintext key ONCE so the UI can show it
+    return json({ success: true, newApiKey: fullKey, activeTab: "profile" });
+  }
+
+  if (method === "revoke_api_key") {
+    const keyId = formData.get("keyId") as string;
+    await prisma.apiKey.updateMany({
+      where: { id: keyId, userId },
+      data: { revokedAt: new Date() },
+    });
+    return json({ success: true, message: "API key revoked.", activeTab: "profile" });
+  }
+
   return json({ success: true, message: "Settings updated", activeTab: "profile" });
 }
 
 export default function Settings() {
-  const { user, projects, diagnostics } = useLoaderData<typeof loader>();
+  const { user, projects, apiKeys, diagnostics } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const actionData = useActionData<typeof action>() as any;
   
@@ -274,6 +307,76 @@ export default function Settings() {
               Save Changes
             </button>
           </Form>
+
+          {/* API Access */}
+          <div className="mt-12 pt-12 border-t border-zinc-50">
+            <div className="flex items-center gap-3 mb-2">
+              <Key className="w-5 h-5 text-primary" />
+              <h3 className="text-lg font-bold">API Access</h3>
+            </div>
+            <p className="text-sm text-zinc-500 mb-6">
+              Use these keys to access the SiteGist API. Include the key as a
+              <code className="mx-1 px-1.5 py-0.5 bg-zinc-100 rounded text-xs">Authorization: Bearer</code>
+              header. Treat keys like passwords — they are shown only once.
+            </p>
+
+            {/* One-time reveal of a newly created key */}
+            {actionData?.newApiKey && (
+              <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl">
+                <p className="text-xs font-bold text-green-700 mb-2">
+                  Copy your new key now — you won't see it again:
+                </p>
+                <code className="block text-sm font-mono break-all bg-white p-3 rounded-xl border border-green-100 text-zinc-800">
+                  {actionData.newApiKey}
+                </code>
+              </div>
+            )}
+
+            {/* Create a new key */}
+            <Form method="post" className="flex gap-3 mb-6">
+              <input type="hidden" name="_action" value="create_api_key" />
+              <input
+                type="text"
+                name="keyName"
+                placeholder="Key name (e.g. Production)"
+                className="flex-1 px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/15"
+              />
+              <button
+                type="submit"
+                className="px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all font-sans uppercase tracking-wider"
+              >
+                Generate Key
+              </button>
+            </Form>
+
+            {/* Existing keys */}
+            <div className="space-y-3">
+              {apiKeys && apiKeys.length > 0 ? (
+                apiKeys.map((k: any) => (
+                  <div key={k.id} className="flex items-center justify-between p-4 bg-zinc-50/60 border border-zinc-100 rounded-2xl">
+                    <div>
+                      <p className="text-sm font-bold text-zinc-800">{k.name}</p>
+                      <p className="text-xs font-mono text-zinc-400">
+                        {k.prefix}••••{k.last4}
+                        {k.lastUsedAt
+                          ? ` · last used ${new Date(k.lastUsedAt).toLocaleDateString()}`
+                          : " · never used"}
+                      </p>
+                    </div>
+                    <Form method="post" onSubmit={(e) => { if (!confirm("Revoke this API key? Apps using it will stop working.")) e.preventDefault(); }}>
+                      <input type="hidden" name="_action" value="revoke_api_key" />
+                      <input type="hidden" name="keyId" value={k.id} />
+                      <button type="submit" className="text-xs font-black text-red-500 hover:underline uppercase tracking-wide">
+                        Revoke
+                      </button>
+                    </Form>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-zinc-400 italic">No API keys yet. Generate one above.</p>
+              )}
+            </div>
+          </div>
 
           <div className="mt-12 pt-12 border-t border-zinc-50">
             <h3 className="text-lg font-bold text-red-500 mb-4">Danger Zone</h3>
