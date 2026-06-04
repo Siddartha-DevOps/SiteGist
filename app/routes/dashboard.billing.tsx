@@ -46,6 +46,59 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: { project: { userId } }
   });
 
+  const PADDLE_STARTER_PLAN_ID = process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3";
+  const PADDLE_BASIC_PLAN_ID = process.env.VITE_PADDLE_GROWTH_PLAN_ID || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3";
+  const PADDLE_PRO_PLAN_ID = process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
+
+  // Determine the current plan name + monthly message limit (-1 = unlimited)
+  const tier = user?.subscriptionTier;
+  let planName = "Starter";
+  let messageLimit = 1000;
+  if (tier === PADDLE_BASIC_PLAN_ID) {
+    planName = "Growth";
+    messageLimit = 5000;
+  } else if (tier === PADDLE_PRO_PLAN_ID) {
+    planName = "Scale";
+    messageLimit = 25000;
+  } else if (tier === "enterprise_plan") {
+    planName = "Enterprise";
+    messageLimit = -1;
+  }
+
+  // Count messages used in the current calendar month
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  let messagesUsed = 0;
+  try {
+    const usage = await prisma.usageRecord.aggregate({
+      where: { userId, type: "chat_message", createdAt: { gte: startOfMonth } },
+      _sum: { amount: true },
+    });
+    messagesUsed = usage._sum.amount || 0;
+  } catch (e) {
+    console.error("[Billing] Usage query failed:", e);
+  }
+
+  // Query the user's active subscription for next billing date
+  let nextBilledAt: string | null = null;
+  let daysRemaining: number | null = null;
+  try {
+    const subscription = await prisma.billingSubscription.findFirst({
+      where: { userId, status: { in: ["active", "trialing"] } },
+      orderBy: { updatedAt: "desc" },
+      select: { nextBilledAt: true },
+    });
+    if (subscription?.nextBilledAt) {
+      nextBilledAt = subscription.nextBilledAt.toISOString();
+      const diff = subscription.nextBilledAt.getTime() - Date.now();
+      daysRemaining = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+    }
+  } catch (e) {
+    console.error("[Billing] Subscription query failed:", e);
+  }
+
   return json({ 
     user,
     daysLeft,
@@ -55,9 +108,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       knowledge: knowledgeCount,
       leads: leadsCount
     },
-    PADDLE_STARTER_PLAN_ID: process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3",
-    PADDLE_BASIC_PLAN_ID: process.env.VITE_PADDLE_GROWTH_PLAN_ID || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3",
-    PADDLE_PRO_PLAN_ID: process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk"
+    PADDLE_STARTER_PLAN_ID,
+    PADDLE_BASIC_PLAN_ID,
+    PADDLE_PRO_PLAN_ID,
+    planName,
+    messageLimit,
+    messagesUsed,
+    nextBilledAt,
+    daysRemaining,
   });
 }
 
@@ -80,7 +138,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID } = useLoaderData<typeof loader>();
+  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining } = useLoaderData<typeof loader>();
+  
+  const isUnlimited = messageLimit === -1;
+  const usagePercent = isUnlimited ? 0 : Math.min(100, Math.round((messagesUsed / messageLimit) * 100));
+  const isNearLimit = !isUnlimited && usagePercent >= 80;
   
   // Determine current subscription tier limits
   const tier = (user?.subscriptionTier || "free").toLowerCase();
@@ -260,6 +322,67 @@ export default function Billing() {
               Save 40%
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Next Billing Date */}
+      {nextBilledAt && daysRemaining !== null && (
+        <div className="flex justify-center mb-8">
+          <div className="inline-flex items-center gap-3 bg-white border border-zinc-100 rounded-full px-6 py-3 shadow-sm">
+            <CreditCard className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-sm font-bold text-zinc-600">
+              Next billing:{" "}
+              <span className="text-zinc-900 font-black">
+                {new Date(nextBilledAt).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-primary/5 text-primary border border-primary/10">
+              {daysRemaining === 0 ? "Today" : `${daysRemaining} days`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Current Usage Quota */}
+      <div className="max-w-4xl mx-auto mb-16 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-primary/5 text-primary rounded-2xl flex items-center justify-center">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-black text-lg leading-tight">Message Usage</h3>
+              <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">{planName} Plan · This Month</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-2xl font-black text-zinc-900">{messagesUsed.toLocaleString()}</span>
+            <span className="text-sm font-bold text-zinc-400">
+              {isUnlimited ? " / Unlimited" : ` / ${messageLimit.toLocaleString()}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="w-full bg-zinc-100 h-3 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${isNearLimit ? "bg-brand-orange" : "bg-primary"}`}
+            style={{ width: isUnlimited ? "100%" : `${usagePercent}%` }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-xs font-bold text-zinc-400">
+            {isUnlimited ? "Unlimited messages on your plan" : `${usagePercent}% of monthly quota used`}
+          </span>
+          {isNearLimit && (
+            <span className="text-xs font-black text-brand-orange uppercase tracking-wide">
+              Approaching limit — consider upgrading
+            </span>
+          )}
         </div>
       </div>
 

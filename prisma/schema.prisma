@@ -147,6 +147,7 @@ model BillingSubscription {
   provider             String   @default("stripe") // "stripe" or "paddle"
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+  nextBilledAt         DateTime?
 }
 
 model Lead {

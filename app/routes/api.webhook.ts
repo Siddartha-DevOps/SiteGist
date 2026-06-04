@@ -30,6 +30,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const status = subscription.status;
     const externalSubscriptionId = subscription.id;
     const externalCustomerId = subscription.customerId;
+    const nextBilledAt = subscription.nextBilledAt ? new Date(subscription.nextBilledAt) : null;
 
     let user = null;
     if (email) {
@@ -49,6 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
         update: {
           status,
           planId: planId || "pro",
+          nextBilledAt,
           updatedAt: new Date()
         },
         create: {
@@ -57,7 +59,8 @@ export async function action({ request }: ActionFunctionArgs) {
           externalCustomerId,
           status,
           planId: planId || "pro",
-          provider: "paddle"
+          provider: "paddle",
+          nextBilledAt,
         }
       });
     }
