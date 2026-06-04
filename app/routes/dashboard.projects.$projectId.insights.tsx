@@ -17,11 +17,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   if (!project) return redirect("/dashboard");
 
-  // Read range from search param
-  const url = new URL(request.url);
-  const range = parseInt(url.searchParams.get("range") || "7", 10);
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - range);
+  const range = Number(new URL(request.url).searchParams.get("range")) === 30 ? 30 : 7;
 
   // Get messages with feedback
   const messagesWithFeedback = await prisma.message.findMany({
@@ -46,50 +42,48 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Step 1: try AnalyticsSnapshot records first
-  const snapshots = await prisma.analyticsSnapshot.findMany({
-    where: { projectId: params.projectId, date: { gte: startDate } },
-    orderBy: { date: "asc" },
-  });
+  // Real daily volume for the selected range
+  const since = new Date();
+  since.setHours(0, 0, 0, 0);
+  since.setDate(since.getDate() - (range - 1));
 
-  let chartData: { day: string; messages: number; leads: number }[];
-
-  if (snapshots.length > 0) {
-    chartData = snapshots.map((s) => ({
-      day: new Date(s.date).toLocaleDateString("en-US", { weekday: "short" }),
-      messages: s.messagesCount,
-      leads: s.leadsCaptured,
-    }));
-  } else {
-    // Step 2: fall back to aggregating from raw Message + Lead tables by day
-    const rawMessages = await prisma.message.findMany({
-      where: {
-        session: { projectId: params.projectId },
-        createdAt: { gte: startDate },
-        role: "assistant",
-      },
+  const [recentMessages, recentLeads] = await Promise.all([
+    prisma.message.findMany({
+      where: { session: { projectId: params.projectId }, role: "user", createdAt: { gte: since } },
       select: { createdAt: true },
-    });
-    const rawLeads = await prisma.lead.findMany({
-      where: { projectId: params.projectId, createdAt: { gte: startDate } },
+    }),
+    prisma.lead.findMany({
+      where: { projectId: params.projectId, createdAt: { gte: since } },
       select: { createdAt: true },
-    });
+    }),
+  ]);
 
-    chartData = Array.from({ length: range }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (range - 1 - i));
-      const dateKey = date.toDateString();
-      return {
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
-        messages: rawMessages.filter(
-          (m) => new Date(m.createdAt).toDateString() === dateKey
-        ).length,
-        leads: rawLeads.filter(
-          (l) => new Date(l.createdAt).toDateString() === dateKey
-        ).length,
-      };
+  const buckets: { day: string; key: string; messages: number; leads: number }[] = [];
+  for (let i = range - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    buckets.push({
+      key: d.toDateString(),
+      day: range === 7
+        ? d.toLocaleDateString("en-US", { weekday: "short" })
+        : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      messages: 0,
+      leads: 0,
     });
   }
+  const bucketIndex = new Map(buckets.map((b, i) => [b.key, i]));
+  for (const m of recentMessages) {
+    const d = new Date(m.createdAt); d.setHours(0, 0, 0, 0);
+    const i = bucketIndex.get(d.toDateString());
+    if (i != null) buckets[i].messages++;
+  }
+  for (const l of recentLeads) {
+    const d = new Date(l.createdAt); d.setHours(0, 0, 0, 0);
+    const i = bucketIndex.get(d.toDateString());
+    if (i != null) buckets[i].leads++;
+  }
+  const chartData = buckets.map(b => ({ day: b.day, messages: b.messages, leads: b.leads }));
 
   const totalSessions = await prisma.chatSession.count({
     where: { projectId: params.projectId }
@@ -101,91 +95,66 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   const conversionRate = totalSessions > 0 ? ((totalLeads / totalSessions) * 100).toFixed(1) : 0;
 
-  const totalAssistantMessages = await prisma.message.count({
-    where: {
-      session: { projectId: params.projectId },
-      role: "assistant",
-    },
+  // Real response speed from analytics snapshots (em-dash if none yet)
+  const snapshots = await prisma.analyticsSnapshot.findMany({
+    where: { projectId: params.projectId },
+    orderBy: { date: "desc" },
+    take: 30,
+    select: { avgLatency: true },
   });
+  const latencies = snapshots.map(s => s.avgLatency).filter((v): v is number => v != null);
+  const avgLatency = latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : null;
+  const responseSpeed = avgLatency != null ? `${avgLatency.toFixed(1)}s` : "—";
 
-  const csatScore =
-    thumbsUpCount + thumbsDownCount > 0
-      ? Math.round((thumbsUpCount / (thumbsUpCount + thumbsDownCount)) * 100)
-      : null;
+  // Real CSAT from thumbs feedback
+  const ratedTotal = thumbsUpCount + thumbsDownCount;
+  const csatScore = ratedTotal > 0 ? Math.round((thumbsUpCount / ratedTotal) * 100) : 0;
+  const csatLabel = ratedTotal > 0 ? `${csatScore}%` : "—";
 
-  // Real sentiment breakdown based on all assistant messages
-  const positivePct =
-    totalAssistantMessages > 0
-      ? Math.round((thumbsUpCount / totalAssistantMessages) * 100)
-      : 0;
-  const negativePct =
-    totalAssistantMessages > 0
-      ? Math.round((thumbsDownCount / totalAssistantMessages) * 100)
-      : 0;
-  const notRatedPct = Math.max(0, 100 - positivePct - negativePct);
-
-  const latencyResult = await prisma.analyticsSnapshot.aggregate({
-    where: { projectId: params.projectId, avgLatency: { not: null } },
-    _avg: { avgLatency: true },
+  // Real sentiment split across all assistant answers
+  const totalAssistant = await prisma.message.count({
+    where: { session: { projectId: params.projectId }, role: "assistant" },
   });
-  const avgResponseSpeed = latencyResult._avg.avgLatency
-    ? `${latencyResult._avg.avgLatency.toFixed(2)}s`
-    : "N/A";
+  const neutralCount = Math.max(totalAssistant - thumbsUpCount - thumbsDownCount, 0);
+  const sentimentDenom = totalAssistant || 1;
 
-  const totalUserMessages = await prisma.message.count({
-    where: {
-      session: { projectId: params.projectId },
-      role: "user",
-    },
+  // Real knowledge coverage: answered vs unanswered user questions
+  const totalUserQuestions = await prisma.message.count({
+    where: { session: { projectId: params.projectId }, role: "user" },
   });
+  const coverage = totalUserQuestions > 0
+    ? Math.max(0, Math.min(100, Math.round((1 - unanswered.length / totalUserQuestions) * 100)))
+    : 0;
 
-  const unansweredCount = unanswered.length;
-
-  const coveragePercent =
-    totalUserMessages === 0
-      ? 100
-      : Math.max(
-          0,
-          Math.round(
-            ((totalUserMessages - unansweredCount) / totalUserMessages) * 100
-          )
-        );
-
+  // Real conversion funnel (replaces fake source splits)
   const engagedSessions = await prisma.chatSession.count({
-    where: {
-      projectId: params.projectId,
-      messages: { some: { role: "user" } },
-    },
+    where: { projectId: params.projectId, messages: { some: { role: "user" } } },
   });
 
-  return json({ 
-    project, 
-    messagesWithFeedback, 
-    unanswered, 
-    thumbsUpCount, 
-    thumbsDownCount, 
+  return json({
+    project,
+    messagesWithFeedback,
+    unanswered,
+    thumbsUpCount,
+    thumbsDownCount,
     chartData,
     sentimentData: [
-      { name: "Positive", value: positivePct, color: "#22c55e" },
-      { name: "Not Rated", value: notRatedPct, color: "#94a3b8" },
-      { name: "Negative", value: negativePct, color: "#ef4444" },
+      { name: "Positive", value: Math.round((thumbsUpCount / sentimentDenom) * 100), color: "#22c55e" },
+      { name: "Neutral", value: Math.round((neutralCount / sentimentDenom) * 100), color: "#94a3b8" },
+      { name: "Negative", value: Math.round((thumbsDownCount / sentimentDenom) * 100), color: "#ef4444" },
     ],
-    csatScore,
-    positivePct,
-    negativePct,
-    notRatedPct,
     totalSessions,
     totalLeads,
     conversionRate,
-    avgResponseSpeed,
-    coveragePercent,
-    unansweredCount,
-    conversionFunnel: [
+    responseSpeed,
+    csatLabel,
+    coverage,
+    range,
+    sourcePerformance: [
       { name: "Sessions Started", value: totalSessions },
       { name: "Engaged (sent msg)", value: engagedSessions },
       { name: "Leads Captured", value: totalLeads },
     ],
-    range
   });
 }
 
@@ -201,10 +170,11 @@ export default function ProjectInsights() {
     totalSessions,
     totalLeads,
     conversionRate,
-    conversionFunnel,
-    avgResponseSpeed,
-    csatScore,
-    coveragePercent
+    responseSpeed,
+    csatLabel,
+    coverage,
+    range,
+    sourcePerformance
   } = useLoaderData<typeof loader>();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -226,7 +196,7 @@ export default function ProjectInsights() {
           { label: "Total Sessions", value: totalSessions, icon: MessageSquare, color: "text-blue-500", bg: "bg-blue-50" },
           { label: "Leads Captured", value: totalLeads, icon: Users, color: "text-purple-500", bg: "bg-purple-50" },
           { label: "Conversion Rate", value: `${conversionRate}%`, icon: TrendingUp, color: "text-green-500", bg: "bg-green-50" },
-          { label: "Response Speed", value: avgResponseSpeed, icon: Clock, color: "text-brand-orange", bg: "bg-brand-orange/5" },
+          { label: "Response Speed", value: responseSpeed, icon: Clock, color: "text-brand-orange", bg: "bg-brand-orange/5" },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-[32px] border border-zinc-100 shadow-sm">
             <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
@@ -246,8 +216,8 @@ export default function ProjectInsights() {
               <Calendar className="w-5 h-5 text-primary" /> User Engagement Trends
             </h2>
             <select
-              value={searchParams.get("range") || "7"}
-              onChange={(e) => setSearchParams({ range: e.target.value })}
+              value={String(range)}
+              onChange={(e) => setSearchParams((prev) => { prev.set("range", e.target.value); return prev; }, { preventScrollReset: true })}
               className="bg-zinc-50 border-none text-xs font-bold px-3 py-1.5 rounded-lg outline-none cursor-pointer"
             >
               <option value="7">Last 7 Days</option>
@@ -302,7 +272,7 @@ export default function ProjectInsights() {
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                <span className="text-3xl font-black">
-                 {csatScore !== null ? `${csatScore}%` : "N/A"}
+                 {csatLabel}
                </span>
                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">CSAT Score</span>
             </div>
@@ -329,7 +299,7 @@ export default function ProjectInsights() {
            </h2>
            <div className="h-[250px]">
              <ResponsiveContainer width="100%" height="100%">
-               <BarChart data={conversionFunnel} layout="vertical">
+               <BarChart data={sourcePerformance} layout="vertical">
                  <XAxis type="number" hide />
                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 700, fill: '#18181b'}} width={80} />
                  <Tooltip />
@@ -349,27 +319,27 @@ export default function ProjectInsights() {
               Your bot has answered{" "}
               <span
                 className={`font-bold ${
-                  coveragePercent >= 90
+                  coverage >= 90
                     ? "text-green-500"
-                    : coveragePercent >= 70
+                    : coverage >= 70
                     ? "text-amber-500"
                     : "text-red-500"
                 }`}
               >
-                {coveragePercent}%
+                {coverage}%
               </span>{" "}
-              of questions correctly this period based on indexed data.
+              of questions from your indexed knowledge base.
             </p>
             <div className="w-full bg-zinc-100 h-3 rounded-full overflow-hidden mb-8">
                <div
                  className={`h-full transition-all ${
-                   coveragePercent >= 90
+                   coverage >= 90
                      ? "bg-green-500"
-                     : coveragePercent >= 70
+                     : coverage >= 70
                      ? "bg-amber-500"
                      : "bg-red-500"
                  }`}
-                 style={{ width: `${coveragePercent}%` }}
+                 style={{ width: `${coverage}%` }}
                />
             </div>
             <Link to={`/dashboard/projects/${project.id}/train`} className="text-primary font-black uppercase tracking-widest text-[11px] hover:underline">

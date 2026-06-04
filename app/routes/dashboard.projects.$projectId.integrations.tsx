@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink } from "lucide-react";
+import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export async function action({ params, request }: ActionFunctionArgs) {
@@ -118,10 +118,14 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive') return;
+    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger') return;
     setConnecting(provider);
     try {
-      const endpoint = provider === 'notion' ? 'notion' : 'google';
+      const endpoint =
+        provider === 'notion' ? 'notion' :
+        provider === 'messenger' ? 'messenger' :
+        provider === 'crisp' ? 'crisp' :
+        'google';
       const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
       const data = await response.json();
       if (data.url) {
@@ -167,6 +171,20 @@ export default function ProjectIntegrations() {
       description: "Connect triggers and actions to 5,000+ other apps.",
       icon: <ZapIcon className="w-6 h-6 text-orange-600" />,
       connected: project.integrations.some(i => i.provider === 'zapier'),
+    },
+    {
+      id: "crisp",
+      name: "Crisp",
+      description: "Deploy your AI agent inside Crisp live chat to answer visitors automatically.",
+      icon: <MessageSquare className="w-6 h-6 text-blue-500" />,
+      connected: project.integrations.some(i => i.provider === 'crisp'),
+    },
+    {
+      id: "messenger",
+      name: "Facebook Messenger",
+      description: "Deploy your AI agent inside Messenger to auto-reply to your Facebook Page DMs.",
+      icon: <MessengerIcon className="w-6 h-6 text-blue-600" />,
+      connected: project.integrations.some(i => i.provider === 'messenger'),
     }
   ];
 
@@ -338,3 +356,10 @@ const ZapIcon = ({ className }: { className?: string }) => (
     <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
   </svg>
 );
+
+const MessengerIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C6.477 2 2 6.145 2 11.259c0 2.814 1.27 5.33 3.285 7.066V22l3.007-1.652A10.8 10.8 0 0 0 12 20.517c5.523 0 10-4.144 10-9.258C22 6.145 17.523 2 12 2Zm1.018 12.456-2.545-2.714-4.97 2.714 5.467-5.8 2.607 2.714 4.908-2.714-5.467 5.8Z"/>
+  </svg>
+);
+
