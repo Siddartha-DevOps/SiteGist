@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation, Link } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
+import { requireUserId, getUser } from "~/backend/auth.server";
+import { getUsageForUser, getBillingCycleStart } from "~/lib/usage.server";
 import { prisma } from "~/database/db.server";
 import { DashboardIndexPage } from "~/frontend/pages/DashboardIndex";
 import { Layout, AlertCircle } from "lucide-react";
@@ -93,12 +94,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const totalTrendValues = last7Days.reduce((acc, curr) => acc + curr.leads + curr.messages, 0);
     const hasTrendData = totalTrendValues > 0;
 
+    const user = await getUser(request);
+    const usage = await getUsageForUser(userId, user?.subscriptionTier);
+    const cycleStart = getBillingCycleStart();
+
+    const breakdown = await Promise.all(
+      projects.map(async (p) => {
+        const count = await prisma.message.count({
+          where: {
+            session: { projectId: p.id },
+            role: "assistant",
+            createdAt: { gte: cycleStart },
+          },
+        });
+        return {
+          id: p.id,
+          name: p.name,
+          count,
+        };
+      })
+    );
+
     return json({ 
       projects, 
       analyticsData: last7Days, 
       hasTrendData, 
       dbError: null, 
-      errorMessage: null 
+      errorMessage: null,
+      usage,
+      breakdown
     });
   } catch (error: any) {
     console.error("[Dashboard] Database error:", error.message);
@@ -137,7 +161,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function ProjectsIndex() {
-  const { projects, analyticsData, hasTrendData, dbError, errorMessage } = useLoaderData<typeof loader>();
+  const { projects, analyticsData, hasTrendData, dbError, errorMessage, usage, breakdown } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isCreating = navigation.state === "submitting" && !!navigation.formData?.get("name");
 
@@ -165,5 +189,14 @@ export default function ProjectsIndex() {
     );
   }
 
-  return <DashboardIndexPage projects={projects} isCreating={isCreating} analyticsData={(analyticsData || []) as any} hasTrendData={!!hasTrendData} />;
+  return (
+    <DashboardIndexPage
+      projects={projects}
+      isCreating={isCreating}
+      analyticsData={(analyticsData || []) as any}
+      hasTrendData={!!hasTrendData}
+      usage={usage as any}
+      breakdown={breakdown as any}
+    />
+  );
 }

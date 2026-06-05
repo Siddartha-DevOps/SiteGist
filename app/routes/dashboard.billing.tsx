@@ -3,6 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { getPlanForTier } from "~/lib/plans";
 import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus, Info, AlertTriangle, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -51,19 +52,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const PADDLE_PRO_PLAN_ID = process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
 
   // Determine the current plan name + monthly message limit (-1 = unlimited)
-  const tier = user?.subscriptionTier;
-  let planName = "Starter";
-  let messageLimit = 1000;
-  if (tier === PADDLE_BASIC_PLAN_ID) {
-    planName = "Growth";
-    messageLimit = 5000;
-  } else if (tier === PADDLE_PRO_PLAN_ID) {
-    planName = "Scale";
-    messageLimit = 25000;
-  } else if (tier === "enterprise_plan") {
-    planName = "Enterprise";
-    messageLimit = -1;
-  }
+  const planInfo = getPlanForTier(user?.subscriptionTier);
+  const planName = planInfo.name;
+  const messageLimit = planInfo.messageLimit;
 
   // Count messages used in the current calendar month
   const startOfMonth = new Date();
@@ -137,19 +128,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // Chatbot limit based on current plan (-1 = unlimited)
-  const PADDLE_STARTER = process.env.VITE_PADDLE_STARTER_PLAN_ID || "pri_01kqpebd19q7nppxkh53e0cnd3";
-  const PADDLE_BASIC   = process.env.VITE_PADDLE_GROWTH_PLAN_ID   || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3";
-  const PADDLE_PRO     = process.env.VITE_PADDLE_SCALE_PLAN_ID    || process.env.VITE_PADDLE_PRO_PLAN_ID   || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
-
-  const chatbotLimitMap: Record<string, number> = {
-    [PADDLE_STARTER]:  1,
-    "starter_plan":    1,
-    "free":            1,
-    [PADDLE_BASIC]:    3,
-    [PADDLE_PRO]:     -1,
-    "enterprise_plan": -1,
-  };
-  const chatbotLimit = chatbotLimitMap[user?.subscriptionTier ?? "free"] ?? 1;
+  const chatbotLimit = planInfo.chatbotLimit;
 
   return json({ 
     user,
