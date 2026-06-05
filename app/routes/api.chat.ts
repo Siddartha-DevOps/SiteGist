@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
+import { sendWebhook } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Chat Action] Incoming request: ${request.method} ${request.url}`);
@@ -211,17 +212,14 @@ export async function action({ request }: ActionFunctionArgs) {
               });
 
               if (project?.webhookUrl) {
-                fetch(project.webhookUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    event: 'agent_mode_message',
-                    projectId,
-                    sessionId: session.id,
-                    message,
-                    timestamp: new Date().toISOString(),
-                  }),
-                }).catch(() => {});
+                await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+                  id: project.id,
+                  name: project.name,
+                }, {
+                  session: { id: session.id },
+                  trigger: 'visitor_requested',
+                  message,
+                });
               }
             }
 
@@ -239,18 +237,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
           if (isHandoffRequested && project?.webhookUrl) {
             console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhook.`);
-            fetch(project.webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                event: "human_handoff_requested",
-                projectId: project.id,
-                projectName: project.name,
-                sessionId: session?.id,
-                message: message,
-                timestamp: new Date().toISOString(),
-              }),
-            }).catch(e => console.error("[Chat] Webhook error:", e));
+            await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+              id: project.id,
+              name: project.name,
+            }, {
+              session: { id: session?.id },
+              trigger: 'keyword_match',
+              message,
+            });
             
             // Optionally insert a marker in the stream or modify the response
             controller.enqueue(encoder.encode(`event: handoff\ndata: ${JSON.stringify({ requested: true })}\n\n`));

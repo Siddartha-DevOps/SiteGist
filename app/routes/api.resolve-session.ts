@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { sendWebhook } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Resolve Session API] Action triggered`);
@@ -30,6 +31,9 @@ export async function action({ request }: ActionFunctionArgs) {
             userId,
           },
         },
+        include: {
+          project: true,
+        },
       });
 
       if (!session) {
@@ -45,6 +49,15 @@ export async function action({ request }: ActionFunctionArgs) {
           updatedAt: new Date(),
         },
       });
+
+      if (session.project.webhookUrl) {
+        await sendWebhook(session.project.webhookUrl, 'conversation.resolved', {
+          id: session.project.id,
+          name: session.project.name,
+        }, {
+          session: { id: sessionId, resolvedAt: new Date().toISOString() },
+        });
+      }
     }
 
     // Broadcast resolved event via PartyKit

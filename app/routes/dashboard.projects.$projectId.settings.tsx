@@ -141,6 +141,8 @@ export default function ProjectSettings() {
   const [leadFields, setLeadFields] = useState<LeadField[]>(
     currentSettings.leadFields || []
   );
+  const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [testError, setTestError] = useState<string>('');
   const branding = currentSettings.branding || {};
   const removeBranding = branding.removeBranding || false;
   const customDomain = branding.customDomain || "";
@@ -368,15 +370,73 @@ export default function ProjectSettings() {
               </h2>
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-bold mb-2">Webhook URL (Slack/Discord/Custom)</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label htmlFor="webhookUrl" className="block text-sm font-bold">
+                      Zapier / Webhook URL
+                    </label>
+                    <button
+                      type="button"
+                      disabled={testStatus === 'loading'}
+                      onClick={async () => {
+                        setTestStatus('loading');
+                        setTestError('');
+                        try {
+                          const res = await fetch('/api/webhook-test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ projectId: project.id }),
+                          });
+                          const data = await res.json();
+                          if (res.ok && data.ok) {
+                            setTestStatus('success');
+                            setTimeout(() => setTestStatus('idle'), 4000);
+                          } else {
+                            setTestStatus('error');
+                            setTestError(data.error || 'Failed to send test event.');
+                            setTimeout(() => {
+                              setTestStatus('idle');
+                              setTestError('');
+                            }, 5000);
+                          }
+                        } catch (err) {
+                          setTestStatus('error');
+                          setTestError('Network error. Failed to trigger test.');
+                          setTimeout(() => {
+                            setTestStatus('idle');
+                            setTestError('');
+                          }, 5000);
+                        }
+                      }}
+                      className="text-xs font-extrabold text-primary hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {testStatus === 'loading' && 'Sending...'}
+                      {testStatus === 'success' && '✅ Sent Test Event!'}
+                      {testStatus === 'error' && '❌ Failed'}
+                      {testStatus === 'idle' && 'Send Test Event'}
+                    </button>
+                  </div>
                   <input 
+                    id="webhookUrl"
                     type="url" 
                     name="webhookUrl" 
                     defaultValue={project.webhookUrl || ""}
-                    placeholder="https://hooks.slack.com/services/..."
+                    placeholder="https://hooks.zapier.com/hooks/catch/..."
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
                   />
-                  <p className="mt-2 text-xs text-zinc-400">Receive real-time alerts when leads are captured or human help is requested.</p>
+                  {testError && (
+                    <p className="mt-1.5 text-xs text-red-500 font-semibold">{testError}</p>
+                  )}
+                  <div className="mt-3 text-xs text-zinc-400 space-y-1.5 font-medium leading-relaxed">
+                    <p>
+                      Paste a <strong>Zapier webhook URL</strong> to connect SiteGist to 5,000+ apps.
+                      In Zapier, create a new Zap → trigger: <em>Webhooks by Zapier → Catch Hook</em> → paste the URL here.
+                    </p>
+                    <p>
+                      Events sent: <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">lead.captured</code>,{' '}
+                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.escalated</code>,{' '}
+                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.resolved</code>
+                    </p>
+                  </div>
                 </div>
               </div>
             </section>

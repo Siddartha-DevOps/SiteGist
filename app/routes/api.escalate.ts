@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
+import { sendWebhook } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Escalation API] Action triggered`);
@@ -57,19 +58,12 @@ export async function action({ request }: ActionFunctionArgs) {
           // 4. Fire project.webhookUrl if set (same pattern as existing handoff webhook)
           if (project.webhookUrl) {
             console.log(`[Escalation API] Triggering webhook for project: ${project.name}`);
-            fetch(project.webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                event: "human_handoff_requested",
-                projectId: project.id,
-                projectName: project.name,
-                sessionId,
-                message: "A visitor requested custom assistance. Handoff initiated.",
-                timestamp: new Date().toISOString(),
-              }),
-            }).catch((webhookErr) => {
-              console.error("[Escalation API] Error triggering project webhook:", webhookErr);
+            await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+              id: project.id,
+              name: project.name,
+            }, {
+              session: { id: sessionId },
+              trigger: 'visitor_requested',
             });
           }
         }

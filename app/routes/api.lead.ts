@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
+import { sendWebhook } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json();
@@ -56,15 +57,28 @@ export async function action({ request }: ActionFunctionArgs) {
   // Feature 3: Real-Time Notifications
   if (lead.project.webhookUrl) {
     try {
-      await fetch(lead.project.webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "lead.captured",
-          project: { id: projectId, name: lead.project.name },
-          lead: { name, email, phone, company },
-          timestamp: new Date().toISOString(),
-        }),
+      let customFields = {};
+      if (lead.notes) {
+        try {
+          customFields = JSON.parse(lead.notes);
+        } catch (parseError) {
+          console.warn("[api.lead.ts] Failed to parse lead notes as JSON for custom fields:", parseError);
+        }
+      }
+      await sendWebhook(lead.project.webhookUrl, 'lead.captured', {
+        id: lead.project.id,
+        name: lead.project.name,
+      }, {
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          company: lead.company,
+          customFields,
+          createdAt: lead.createdAt,
+        },
+        session: { id: lead.sessionId },
       });
     } catch (e) {
       console.error("Webhook notification failed:", e);
