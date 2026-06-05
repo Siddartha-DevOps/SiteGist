@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle } from "lucide-react";
+import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle, Headphones } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export async function action({ params, request }: ActionFunctionArgs) {
@@ -65,6 +65,43 @@ export async function action({ params, request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // --- FRESHDESK ---
+  if (_action === "connect_freshdesk") {
+    const domain = (formData.get("freshdeskDomain") as string)?.trim().replace(/\/+$/, "");
+    const apiKey = (formData.get("freshdeskApiKey") as string)?.trim();
+    if (!domain || !apiKey) {
+      return json({ error: "Domain and API key are required." }, { status: 400 });
+    }
+
+    await prisma.integration.upsert({
+      where: { projectId_provider: { projectId: project.id, provider: "freshdesk" } },
+      create: {
+        projectId: project.id,
+        provider: "freshdesk",
+        accessToken: apiKey,
+        details: { domain },
+      },
+      update: { accessToken: apiKey, details: { domain } },
+    });
+
+    return json({ success: true });
+  }
+
+  if (_action === "disconnect_freshdesk") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "freshdesk" },
+    });
+    return json({ success: true });
+  }
+
+  // --- ZOHO DESK ---
+  if (_action === "disconnect_zoho") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "zoho" },
+    });
+    return json({ success: true });
+  }
+
   return json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -86,9 +123,13 @@ export default function ProjectIntegrations() {
   const revalidator = useRevalidator();
   const [slackInput, setSlackInput] = useState("");
   const [zapierInput, setZapierInput] = useState("");
+  const [freshdeskDomain, setFreshdeskDomain] = useState("");
+  const [freshdeskApiKey, setFreshdeskApiKey] = useState("");
 
   const slackFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const zapierFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const freshdeskFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const zohoFetcher = useFetcher<{ error?: string; success?: boolean }>();
 
   // Trigger revalidation/refresh when a fetcher finishes successfully
   useEffect(() => {
@@ -106,6 +147,14 @@ export default function ProjectIntegrations() {
   }, [zapierFetcher.data, revalidator]);
 
   useEffect(() => {
+    if (freshdeskFetcher.data?.success) {
+      setFreshdeskDomain("");
+      setFreshdeskApiKey("");
+      revalidator.revalidate();
+    }
+  }, [freshdeskFetcher.data, revalidator]);
+
+  useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         // Refresh data
@@ -118,7 +167,7 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom') return;
+    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom' && provider !== 'zoho') return;
     setConnecting(provider);
     try {
       const endpoint =
@@ -126,6 +175,7 @@ export default function ProjectIntegrations() {
         provider === 'messenger' ? 'messenger' :
         provider === 'crisp' ? 'crisp' :
         provider === 'intercom' ? 'intercom' :
+        provider === 'zoho' ? 'zoho' :
         'google';
       const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
       const data = await response.json();
@@ -193,6 +243,20 @@ export default function ProjectIntegrations() {
       description: "Deploy your AI agent inside Messenger to auto-reply to your Facebook Page DMs.",
       icon: <MessengerIcon className="w-6 h-6 text-blue-600" />,
       connected: project.integrations.some(i => i.provider === 'messenger'),
+    },
+    {
+      id: "freshdesk",
+      name: "Freshdesk",
+      description: "Automatically create a Freshdesk ticket when a conversation is escalated.",
+      icon: <Headphones className="w-6 h-6 text-green-600" />,
+      connected: project.integrations.some(i => i.provider === 'freshdesk'),
+    },
+    {
+      id: "zoho",
+      name: "Zoho Desk",
+      description: "Turn escalated conversations into Zoho Desk tickets automatically.",
+      icon: <Headphones className="w-6 h-6 text-red-600" />,
+      connected: project.integrations.some(i => i.provider === 'zoho'),
     }
   ];
 
@@ -225,7 +289,7 @@ export default function ProjectIntegrations() {
             <h3 className="text-xl font-bold mb-2">{item.name}</h3>
             <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
             
-            {item.id !== 'slack' && item.id !== 'zapier' && (
+            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && (
               <button 
                 onClick={() => !item.connected && handleConnect(item.id)}
                 disabled={item.connected || connecting === item.id}
@@ -338,6 +402,75 @@ export default function ProjectIntegrations() {
                     </button>
                   </zapierFetcher.Form>
                 )}
+              </div>
+            )}
+
+            {item.id === 'freshdesk' && (
+              <div className="mt-0">
+                {!item.connected ? (
+                  <freshdeskFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="connect_freshdesk" />
+                    <input
+                      type="text"
+                      name="freshdeskDomain"
+                      value={freshdeskDomain}
+                      onChange={(e) => setFreshdeskDomain(e.target.value)}
+                      placeholder="Domain (e.g. yourcompany)"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    <input
+                      type="password"
+                      name="freshdeskApiKey"
+                      value={freshdeskApiKey}
+                      onChange={(e) => setFreshdeskApiKey(e.target.value)}
+                      placeholder="Freshdesk API key"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    {freshdeskFetcher.data?.error && (
+                      <p className="text-xs text-red-500 font-bold mb-2">{freshdeskFetcher.data.error}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!freshdeskDomain || !freshdeskApiKey || freshdeskFetcher.state === "submitting"}
+                      className="w-full py-4 rounded-2xl font-black transition-all bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {freshdeskFetcher.state === "submitting" ? "Saving..." : "Connect Freshdesk"}
+                    </button>
+                    <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
+                      Find your API key under Freshdesk &rarr; Profile Settings &rarr; Your API Key.
+                    </p>
+                  </freshdeskFetcher.Form>
+                ) : (
+                  <freshdeskFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="disconnect_freshdesk" />
+                    <button
+                      type="button"
+                      className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
+                    >
+                      Already Integrated
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
+                    >
+                      Disconnect Freshdesk
+                    </button>
+                  </freshdeskFetcher.Form>
+                )}
+              </div>
+            )}
+
+            {item.id === 'zoho' && item.connected && (
+              <div className="mt-2">
+                <zohoFetcher.Form method="post">
+                  <input type="hidden" name="_action" value="disconnect_zoho" />
+                  <button
+                    type="submit"
+                    className="w-full py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
+                  >
+                    Disconnect Zoho Desk
+                  </button>
+                </zohoFetcher.Form>
               </div>
             )}
           </div>

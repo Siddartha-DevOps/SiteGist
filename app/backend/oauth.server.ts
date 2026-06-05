@@ -336,4 +336,84 @@ export async function exchangeMessengerCode(code: string, projectId: string) {
   return { pageId, pageName };
 }
 
+// --- Zoho Desk ---
+export function getZohoAuthUrl(projectId: string): string {
+  const clientId = process.env.ZOHO_CLIENT_ID;
+  if (!clientId) throw new Error("ZOHO_CLIENT_ID is missing");
+  const accountsUrl = process.env.ZOHO_ACCOUNTS_URL || "https://accounts.zoho.com";
+
+  const url = new URL(`${accountsUrl}/oauth/v2/auth`);
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "Desk.tickets.CREATE,Desk.contacts.READ,Desk.contacts.CREATE,Desk.settings.READ");
+  url.searchParams.set("redirect_uri", `${APP_URL}/api/auth/zoho/callback`);
+  url.searchParams.set("access_type", "offline");  // get a refresh token
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("state", projectId);
+  return url.toString();
+}
+
+export async function exchangeZohoCode(code: string, projectId: string): Promise<void> {
+  const accountsUrl = process.env.ZOHO_ACCOUNTS_URL || "https://accounts.zoho.com";
+  const descUrl = process.env.ZOHO_DESK_URL || "https://desk.zoho.com";
+
+  const tokenRes = await fetch(`${accountsUrl}/oauth/v2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: process.env.ZOHO_CLIENT_ID!,
+      client_secret: process.env.ZOHO_CLIENT_SECRET!,
+      redirect_uri: `${APP_URL}/api/auth/zoho/callback`,
+      code,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    throw new Error(`Zoho token exchange failed: ${await tokenRes.text()}`);
+  }
+
+  const data = await tokenRes.json();
+
+  // Fetch the org ID — required for all Desk API calls
+  const orgRes = await fetch(`${descUrl}/api/v1/organizations`, {
+    headers: { Authorization: `Zoho-oauthtoken ${data.access_token}` },
+  });
+  if (!orgRes.ok) {
+    throw new Error(`Zoho organization fetch failed: ${await orgRes.text()}`);
+  }
+  const orgData = await orgRes.json();
+  const orgId: string = orgData.data?.[0]?.id;
+
+  // Fetch the first department — tickets require a departmentId
+  const deptRes = await fetch(`${descUrl}/api/v1/departments`, {
+    headers: {
+      Authorization: `Zoho-oauthtoken ${data.access_token}`,
+      orgId,
+    },
+  });
+  if (!deptRes.ok) {
+    throw new Error(`Zoho departments fetch failed: ${await deptRes.text()}`);
+  }
+  const deptData = await deptRes.json();
+  const departmentId: string = deptData.data?.[0]?.id;
+
+  await prisma.integration.upsert({
+    where: { projectId_provider: { projectId, provider: "zoho" } },
+    create: {
+      projectId,
+      provider: "zoho",
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      details: { orgId, departmentId, expiresAt: Date.now() + (data.expires_in || 3600) * 1000 },
+    },
+    update: {
+      accessToken: data.access_token,
+      ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+      details: { orgId, departmentId, expiresAt: Date.now() + (data.expires_in || 3600) * 1000 },
+    },
+  });
+}
+
+
 

@@ -95,14 +95,18 @@ export async function action({ request }: ActionFunctionArgs) {
             });
           }
 
-          // --- Intercom Handoff ---
+          // --- Help Desk Integrations ---
           const intercomIntegration = await prisma.integration.findUnique({
             where: { projectId_provider: { projectId, provider: "intercom" } },
           });
+          const freshdeskIntegration = await prisma.integration.findUnique({
+            where: { projectId_provider: { projectId, provider: "freshdesk" } },
+          });
+          const zohoIntegration = await prisma.integration.findUnique({
+            where: { projectId_provider: { projectId, provider: "zoho" } },
+          });
 
-          if (intercomIntegration) {
-            const details = intercomIntegration.details as any;
-
+          if (intercomIntegration || freshdeskIntegration || zohoIntegration) {
             // Load chat transcript
             const messages = await prisma.message.findMany({
               where: { sessionId },
@@ -111,6 +115,10 @@ export async function action({ request }: ActionFunctionArgs) {
             });
 
             const transcript = messages
+              .map((m) => `${m.role === "user" ? "Visitor" : "Bot"}: ${m.content}`)
+              .join("\n");
+
+            const intercomTranscript = messages
               .map((m) => `**${m.role === "user" ? "Visitor" : "Bot"}:** ${m.content}`)
               .join("\n\n");
 
@@ -119,65 +127,109 @@ export async function action({ request }: ActionFunctionArgs) {
               select: { customerEmail: true },
             });
 
-            // Find or create an Intercom contact for the visitor
-            let contactId: string | undefined;
-            if (session?.customerEmail) {
+            // --- Intercom Handoff ---
+            if (intercomIntegration) {
               try {
-                const contactRes = await fetch(
-                  `https://api.intercom.io/contacts/search`,
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${intercomIntegration.accessToken}`,
-                      "Intercom-Version": "2.10",
-                    },
-                    body: JSON.stringify({
-                      query: { field: "email", operator: "=", value: session.customerEmail },
-                    }),
+                const details = intercomIntegration.details as any;
+                // Find or create an Intercom contact for the visitor
+                let contactId: string | undefined;
+                if (session?.customerEmail) {
+                  try {
+                    const contactRes = await fetch(
+                      `https://api.intercom.io/contacts/search`,
+                      {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                          "Intercom-Version": "2.10",
+                        },
+                        body: JSON.stringify({
+                          query: { field: "email", operator: "=", value: session.customerEmail },
+                        }),
+                      }
+                    );
+                    if (contactRes.ok) {
+                      const contactData = await contactRes.json();
+                      contactId = contactData.data?.[0]?.id;
+                    }
+
+                    if (!contactId) {
+                      // Create contact if not found
+                      const createRes = await fetch("https://api.intercom.io/contacts", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                          "Intercom-Version": "2.10",
+                        },
+                        body: JSON.stringify({ role: "lead", email: session.customerEmail }),
+                      });
+                      if (createRes.ok) {
+                        const created = await createRes.json();
+                        contactId = created.id;
+                      }
+                    }
+                  } catch (contactErr) {
+                    console.error("[Intercom Escalation] Failed searching/creating contact:", contactErr);
                   }
-                );
-                if (contactRes.ok) {
-                  const contactData = await contactRes.json();
-                  contactId = contactData.data?.[0]?.id;
                 }
 
-                if (!contactId) {
-                  // Create contact if not found
-                  const createRes = await fetch("https://api.intercom.io/contacts", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${intercomIntegration.accessToken}`,
-                      "Intercom-Version": "2.10",
-                    },
-                    body: JSON.stringify({ role: "lead", email: session.customerEmail }),
-                  });
-                  if (createRes.ok) {
-                    const created = await createRes.json();
-                    contactId = created.id;
-                  }
-                }
-              } catch (contactErr) {
-                console.error("[Intercom Escalation] Failed searching/creating contact:", contactErr);
+                // Create a new Intercom conversation with the transcript as the first message
+                await fetch("https://api.intercom.io/conversations", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                    "Intercom-Version": "2.10",
+                  },
+                  body: JSON.stringify({
+                    from: contactId
+                      ? { type: "contact", id: contactId }
+                      : { type: "admin", id: details?.bot_admin_id }, // fallback if no visitor email
+                    body: `🤖 Chat escalated from ${project.name}\n\n${intercomTranscript}`,
+                  }),
+                }).catch((e) => console.error("[Intercom] Failed to create conversation:", e));
+              } catch (intercomErr) {
+                console.error("[Intercom Escalation] Error:", intercomErr);
               }
             }
 
-            // Create a new Intercom conversation with the transcript as the first message
-            await fetch("https://api.intercom.io/conversations", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${intercomIntegration.accessToken}`,
-                "Intercom-Version": "2.10",
-              },
-              body: JSON.stringify({
-                from: contactId
-                  ? { type: "contact", id: contactId }
-                  : { type: "admin", id: details?.bot_admin_id }, // fallback if no visitor email
-                body: `🤖 Chat escalated from ${project.name}\n\n${transcript}`,
-              }),
-            }).catch((e) => console.error("[Intercom] Failed to create conversation:", e));
+            // --- Freshdesk Handoff ---
+            if (freshdeskIntegration) {
+              try {
+                const { createFreshdeskTicket } = await import("~/lib/freshdesk.server");
+                const htmlTranscript = messages
+                  .map((m) => `<strong>${m.role === "user" ? "Visitor" : "Bot"}:</strong> ${m.content}`)
+                  .join("<br>");
+
+                await createFreshdeskTicket({
+                  domain: (freshdeskIntegration.details as any).domain,
+                  apiKey: freshdeskIntegration.accessToken,
+                  subject: `Chat escalation — ${project.name}`,
+                  description: `🤖 Chat escalated from ${project.name}<br><br>${htmlTranscript}`,
+                  requesterEmail: session?.customerEmail || `noreply+${sessionId}@sitegist.co`,
+                  tags: ["escalation"],
+                });
+              } catch (fdErr) {
+                console.error("[Freshdesk Escalation] Failed creating ticket:", fdErr);
+              }
+            }
+
+            // --- Zoho Handoff ---
+            if (zohoIntegration) {
+              try {
+                const { createZohoTicket } = await import("~/lib/zoho.server");
+                await createZohoTicket({
+                  integration: zohoIntegration,
+                  subject: `Chat escalation — ${project.name}`,
+                  description: `🤖 Chat escalated from ${project.name}\n\n${transcript}`,
+                  contactEmail: session?.customerEmail || undefined,
+                });
+              } catch (zohoErr) {
+                console.error("[Zoho Escalation] Failed creating ticket:", zohoErr);
+              }
+            }
           }
         }
       } catch (projErr) {

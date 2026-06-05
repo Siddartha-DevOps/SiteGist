@@ -6,6 +6,39 @@ import { prisma } from "~/database/db.server";
 import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+const PERSONAS = [
+  {
+    id: "friendly-support",
+    label: "Friendly Support Agent",
+    description: "Warm, helpful, solution-focused",
+    prompt: "You are a friendly and empathetic customer support agent. You speak in a warm, conversational tone and always aim to solve the user's problem. Use simple language, be patient, and reassure the user when they're frustrated. End every response with an offer to help further.",
+  },
+  {
+    id: "formal-enterprise",
+    label: "Formal Enterprise Assistant",
+    description: "Professional, precise, corporate tone",
+    prompt: "You are a professional enterprise assistant. Maintain a formal, business-appropriate tone at all times. Provide precise, well-structured answers. Avoid casual language or contractions. Prioritise accuracy and completeness in every response.",
+  },
+  {
+    id: "casual-startup",
+    label: "Casual Startup Helper",
+    description: "Relaxed, direct, uses everyday language",
+    prompt: "You are a casual, helpful assistant for a fast-moving startup. Keep things short and direct. Use everyday language, feel free to use contractions, and don't over-explain. If something's unclear, just ask.",
+  },
+  {
+    id: "sales-focused",
+    label: "Sales-Focused Agent",
+    description: "Highlights value, encourages next step",
+    prompt: "You are a knowledgeable sales assistant. Help visitors understand the product's benefits and guide them toward a decision. Highlight value over features. When appropriate, suggest a demo, free trial, or speaking with the sales team. Be enthusiastic but never pushy.",
+  },
+  {
+    id: "technical-docs",
+    label: "Technical Documentation Bot",
+    description: "Precise, detailed, developer-friendly",
+    prompt: "You are a technical assistant for developers. Provide precise, detailed answers. Use correct terminology. Include code examples when relevant. Be direct and skip pleasantries — developers want answers, not small talk.",
+  },
+] as const;
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const project = await prisma.project.findFirst({
@@ -152,6 +185,14 @@ export default function ProjectSettings() {
   const removeBranding = branding.removeBranding || false;
   const customDomain = branding.customDomain || "";
 
+  const [systemPrompt, setSystemPrompt] = useState<string>(
+    currentSettings.systemPrompt || "You are a helpful customer support assistant for a website. Use the provided context to answer questions accurately and concisely."
+  );
+  const [selectedPersona, setSelectedPersona] = useState<string>(() => {
+    const match = PERSONAS.find(p => p.prompt === (currentSettings.systemPrompt || ""));
+    return match?.id ?? "custom";
+  });
+
   return (
     <div className="max-w-4xl">
       <Link to={`/dashboard/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-6">
@@ -187,10 +228,53 @@ export default function ProjectSettings() {
                     System Instructions (Prompt)
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Core Personality</span>
                   </label>
+
+                  {/* Persona Selector */}
+                  <div className="flex flex-wrap gap-2 mb-3 font-sans">
+                    {PERSONAS.map((persona) => (
+                      <button
+                        key={persona.id}
+                        type="button" // IMPORTANT: prevents form submission
+                        onClick={() => {
+                          setSystemPrompt(persona.prompt);
+                          setSelectedPersona(persona.id);
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
+                          selectedPersona === persona.id
+                            ? "bg-primary text-white border-primary"
+                            : "bg-zinc-50 text-zinc-600 border-zinc-200 hover:border-zinc-400"
+                        }`}
+                      >
+                        {persona.label}
+                      </button>
+                    ))}
+                    {selectedPersona !== "custom" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPersona("custom");
+                        }}
+                        className="px-3 py-1.5 rounded-full text-xs text-zinc-400 border border-zinc-100 hover:border-zinc-300 transition-all font-medium cursor-pointer"
+                      >
+                        Custom ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedPersona !== "custom" && (
+                    <p className="text-xs text-primary font-medium mb-3 font-sans">
+                      {PERSONAS.find(p => p.id === selectedPersona)?.description}
+                    </p>
+                  )}
+
                   <textarea 
                     name="systemPrompt" 
                     rows={6}
-                    defaultValue={currentSettings.systemPrompt || "You are a helpful customer support assistant for a website. Use the provided context to answer questions accurately and concisely."}
+                    value={systemPrompt}
+                    onChange={(e) => {
+                      setSystemPrompt(e.target.value);
+                      setSelectedPersona("custom"); // selecting a persona then editing = custom
+                    }}
                     placeholder="E.g. You are a friendly sales rep..."
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
                   />
