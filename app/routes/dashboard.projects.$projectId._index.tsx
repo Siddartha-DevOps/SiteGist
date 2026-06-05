@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
@@ -47,6 +48,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
 export default function ProjectDetails() {
   const { project, messageCount, unanswered } = useLoaderData<typeof loader>();
+  const [copied, setCopied] = useState(false);
 
   return (
     <div>
@@ -126,6 +128,38 @@ export default function ProjectDetails() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Quick Stats */}
         <div className="lg:col-span-2 space-y-8">
+          <div className="bg-white p-10 rounded-[40px] border border-zinc-100">
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
+              <Share2 className="text-primary w-6 h-6" /> Share Chatbot
+            </h2>
+            <p className="text-text-muted mb-6">
+              Share this single-page URL directly with your customers — no widget embedding or website setup required.
+            </p>
+            
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={typeof window !== "undefined"
+                  ? `${window.location.origin}/chat/${project.id}`
+                  : `https://sitegist.co/chat/${project.id}`
+                }
+                className="flex-1 rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm font-mono text-zinc-600 outline-none"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <button
+                onClick={() => {
+                  const url = typeof window !== "undefined" ? window.location.origin : "https://sitegist.co";
+                  navigator.clipboard.writeText(`${url}/chat/${project.id}`);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="shrink-0 px-6 py-3 bg-zinc-900 border border-zinc-900 hover:bg-zinc-800 text-white font-bold text-sm rounded-2xl transition-all"
+              >
+                {copied ? "Copied!" : "Copy Link"}
+              </button>
+            </div>
+          </div>
+
           <div className="bg-white p-10 rounded-[40px] border border-zinc-100">
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
               <Code className="text-primary w-6 h-6" /> Embed Script

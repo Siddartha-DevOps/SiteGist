@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
@@ -9,14 +9,38 @@ import Markdown from "react-markdown";
 export async function loader({ params }: LoaderFunctionArgs) {
   const project = await prisma.project.findUnique({
     where: { id: params.projectId },
-    select: { name: true, settings: true, id: true }
+    select: { name: true, settings: true, id: true, status: true }
   });
   if (!project) throw new Response("Not Found", { status: 404 });
-  return json({ project });
+
+  if (project.status !== "ACTIVE") {
+    return json({ project, notReady: true });
+  }
+
+  return json({ project, notReady: false });
 }
 
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  const name = data?.project?.name ?? "AI Assistant";
+  const description = `Chat with ${name} — powered by SiteGist`;
+  const url = `https://app.sitegist.co/embed/${data?.project?.id ?? ""}`;
+
+  return [
+    { title: name },
+    { name: "description", content: description },
+    // Open Graph — for Slack/Twitter/iMessage link previews
+    { property: "og:title", content: name },
+    { property: "og:description", content: description },
+    { property: "og:type", content: "website" },
+    { property: "og:url", content: url },
+    // Prevent search indexing — these are customer bots, not SEO content
+    { name: "robots", content: "noindex, nofollow" },
+  ];
+};
+
 export default function EmbedChat() {
-  const { project } = useLoaderData<typeof loader>();
+  const { project, notReady } = useLoaderData<typeof loader>();
+  const [isEmbedded, setIsEmbedded] = useState(true); // default true to avoid flash
   const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
   const [showLeadForm, setShowLeadForm] = useState(false);
@@ -28,6 +52,10 @@ export default function EmbedChat() {
   const chatFetcher = useFetcher();
   const leadFetcher = useFetcher();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsEmbedded(window.self !== window.top);
+  }, []);
 
   const settings = project.settings as any;
   const branding = settings?.branding || {};
@@ -247,6 +275,14 @@ export default function EmbedChat() {
     }
   }, [messages]);
 
+  if (notReady) {
+    return (
+      <div className="flex h-screen items-center justify-center text-zinc-500 text-sm p-4 text-center">
+        This chatbot is still being set up. Check back soon.
+      </div>
+    );
+  }
+
   return (
     <div className={`flex flex-col h-screen relative transition-colors duration-300 ${font === 'serif' ? 'font-serif' : font === 'mono' ? 'font-mono' : 'font-sans'} ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-white text-zinc-900'}`}>
       {/* Lead Form Overlay */}
@@ -353,12 +389,14 @@ export default function EmbedChat() {
           >
             {isDarkMode ? "🌙" : "☀️"}
           </button>
-          <button 
-            onClick={() => window.parent.postMessage('sitegist-close', '*')}
-            className="p-1.5 hover:bg-white/10 rounded-lg text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {isEmbedded && (
+            <button 
+              onClick={() => window.parent.postMessage('sitegist-close', '*')}
+              className="p-1.5 hover:bg-white/10 rounded-lg text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </header>
 
