@@ -112,11 +112,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: { project: { userId }, isRead: false, isArchived: false },
   });
 
-  return json({ sessions, activeFilter, unreadCount });
+  // Count active escalated sessions for badge
+  const escalatedCount = await prisma.chatSession.count({
+    where: { project: { userId }, mode: "human", status: "active", isArchived: false },
+  });
+
+  return json({ sessions, activeFilter, unreadCount, escalatedCount });
 }
 
 export default function Inbox() {
-  const { sessions, activeFilter, unreadCount } = useLoaderData<typeof loader>();
+  const { sessions, activeFilter, unreadCount, escalatedCount } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState("");
   const fetcher = useFetcher();
@@ -179,13 +184,18 @@ export default function Inbox() {
           <button
             key={tab.value}
             onClick={() => setSearchParams({ filter: tab.value })}
-            className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
+            className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2 ${
               activeFilter === tab.value
                 ? "bg-primary text-white shadow-lg shadow-primary/20"
                 : "bg-brand-light text-brand-gray hover:text-brand-dark border border-brand-border"
             }`}
           >
             {tab.label}
+            {tab.value === "escalated" && escalatedCount > 0 && (
+              <span className="px-2 py-0.5 bg-red-500 text-white rounded-full text-[10px] font-black tracking-normal animate-pulse">
+                {escalatedCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -224,11 +234,16 @@ export default function Inbox() {
                   className="flex-1 min-w-0"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <p className={`truncate ${!session.isRead ? "font-black text-brand-dark" : "font-bold text-brand-dark"}`}>
+                    <p className={`truncate ${!session.isRead ? "font-black text-brand-dark" : "font-bold text-brand-dark"} flex items-center gap-2 flex-wrap`}>
                       {session.customerEmail || "Guest User"}
-                      <span className="ml-2 text-xs font-medium px-2 py-0.5 bg-zinc-50 text-zinc-400 rounded-full border border-zinc-100">
+                      <span className="text-xs font-medium px-2 py-0.5 bg-zinc-50 text-zinc-400 rounded-full border border-zinc-100">
                         {session.project.name}
                       </span>
+                      {session.mode === "human" && (
+                        <span className="bg-red-500 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-full border border-red-600 tracking-widest animate-pulse inline-flex items-center gap-1">
+                          ● Live
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-text-muted font-medium whitespace-nowrap ml-4">
                       {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}

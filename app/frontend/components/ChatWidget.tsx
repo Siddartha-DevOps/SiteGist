@@ -4,6 +4,7 @@ import { Logo } from "./Logo";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
+import { createChatSocket } from "../../lib/partykit.client";
 
 /**
  * ActionButtons
@@ -63,6 +64,72 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
   const [showSuggestions, setShowSuggestions] = useState(true);
+
+  const [mode, setMode] = useState<'ai' | 'human'>('ai');
+  const [escalated, setEscalated] = useState(false);
+  const [resolved, setResolved] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId || mode !== 'human') return;
+    const socket = createChatSocket(sessionId);
+    if (!socket) return;
+    
+    const listener = (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.type === 'message' && data.role === 'assistant') {
+          // If agent replies, append to messages and stop the loader/typing indicator
+          setMessages(prev => [...prev, { role: 'assistant', content: data.content, timestamp: new Date() }]);
+          setIsTyping(false);
+        } else if (data.type === 'escalated') {
+          setEscalated(true);
+          setMode('human');
+          setResolved(false);
+        } else if (data.type === 'resolved') {
+          setResolved(true);
+          setMode('ai');
+          setEscalated(false);
+        }
+      } catch (err) {
+        console.warn("[Widget PartyKit] Failed to parse websocket message:", err);
+      }
+    };
+    
+    socket.addEventListener('message', listener as any);
+    return () => {
+      try {
+        socket.close();
+      } catch (err) {}
+    };
+  }, [sessionId, mode]);
+
+  const handleEscalate = async () => {
+    const activeSessionId = sessionId || "demo-session";
+    if (!sessionId) {
+      setSessionId("demo-session");
+    }
+    try {
+      const res = await fetch("/api/escalate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: activeSessionId, projectId: "demo-project" }),
+      });
+      if (res.ok) {
+        setEscalated(true);
+        setMode('human');
+        setResolved(false);
+        
+        // Push a visual message confirming escalation to visitor
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: "You are now connected to a human agent. They will review our history and respond shortly.", 
+          timestamp: new Date() 
+        }]);
+      }
+    } catch (err) {
+      console.error("[Widget] Escalation fetch error:", err);
+    }
+  };
 
   const suggestedQuestions = (propSuggestions && propSuggestions.length > 0)
     ? propSuggestions
@@ -322,6 +389,28 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce"></div>
             </div>
+          </div>
+        )}
+
+        {mode === 'ai' && !escalated && (
+          <button
+            type="button"
+            onClick={handleEscalate}
+            className="text-xs text-zinc-400 hover:text-zinc-600 font-bold underline mx-auto block py-2 transition-colors cursor-pointer"
+          >
+            Talk to a human
+          </button>
+        )}
+        {escalated && !resolved && (
+          <div className="text-center py-2 animate-pulse flex flex-col items-center justify-center gap-1">
+            <span className="text-xs text-amber-500 font-bold">
+              Connected to a live agent • They'll respond shortly
+            </span>
+          </div>
+        )}
+        {resolved && (
+          <div className="bg-emerald-50 text-emerald-800 border border-emerald-100 p-2 text-center text-[11px] font-bold rounded-xl mt-2 animate-in fade-in">
+            Chat resolved. Handed back to system.
           </div>
         )}
       </div>

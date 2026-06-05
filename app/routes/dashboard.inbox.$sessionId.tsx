@@ -6,6 +6,7 @@ import { prisma } from "~/database/db.server";
 import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useRef, useState } from "react";
+import { createChatSocket } from "~/lib/partykit.client";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -144,22 +145,99 @@ export async function action({ request, params }: ActionFunctionArgs) {
 export default function SessionDetail() {
   const { session } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const isSending = navigation.state === "submitting";
-  const scrollRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
   const fetcher = useFetcher();
+  const replyFetcher = useFetcher();
+  const resolveFetcher = useFetcher();
+  
+  const isSending = navigation.state === "submitting" || replyFetcher.state === "submitting";
+
+  const [localMessages, setLocalMessages] = useState<any[]>(session.messages);
+
+  useEffect(() => {
+    setLocalMessages(session.messages);
+  }, [session.messages]);
+
+  // Connect to PartyKit for real-time delivery in the inbox
+  useEffect(() => {
+    const socket = createChatSocket(session.id);
+    if (!socket) return;
+
+    const listener = (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.type === "message") {
+          setLocalMessages((prev) => {
+            // Avoid duplicates
+            if (prev.some((m: any) => m.content === data.content && m.role === data.role)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: Math.random().toString(),
+                role: data.role,
+                content: data.content,
+                createdAt: new Date().toISOString(),
+              },
+            ];
+          });
+        }
+      } catch (err) {
+        console.warn("[Agent Inbox Socket] Error parsing message:", err);
+      }
+    };
+
+    socket.addEventListener("message", listener as any);
+    return () => {
+      socket.close();
+    };
+  }, [session.id]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [session.messages]);
+  }, [localMessages]);
 
   useEffect(() => {
-    if (!isSending) {
+    if (replyFetcher.state === "idle" && !isSending) {
       formRef.current?.reset();
     }
-  }, [isSending]);
+  }, [replyFetcher.state, isSending]);
+
+  const handleAgentReplySubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const content = formData.get("content") as string;
+    if (!content?.trim()) return;
+
+    // Optimistically update
+    setLocalMessages((prev) => [
+      ...prev,
+      {
+        id: "temp-" + Date.now(),
+        role: "assistant",
+        content,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    replyFetcher.submit(
+      JSON.stringify({ sessionId: session.id, content }),
+      { method: "post", action: "/api/agent-reply", encType: "application/json" }
+    );
+    e.currentTarget.reset();
+  };
+
+  const handleResolveSession = () => {
+    resolveFetcher.submit(
+      JSON.stringify({ sessionId: session.id }),
+      { method: "post", action: "/api/resolve-session", encType: "application/json" }
+    );
+  };
 
   return (
     <div className="h-[calc(100vh-theme(spacing.32))] flex flex-col bg-white border border-zinc-100 rounded-[40px] overflow-hidden">
@@ -319,7 +397,7 @@ export default function SessionDetail() {
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-10 space-y-8 bg-zinc-50/30">
-        {session.messages.map((msg: any) => (
+        {localMessages.map((msg: any) => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
             <div className="max-w-[70%] group">
               <div className={`p-4 rounded-3xl text-sm leading-relaxed ${
@@ -339,25 +417,62 @@ export default function SessionDetail() {
 
       {/* Reply Area */}
       <div className="p-6 bg-white border-t border-zinc-50">
-        <Form ref={formRef} method="post" className="relative">
-          <textarea 
-            name="content" 
-            placeholder="Type your response as assistant..." 
-            rows={3}
-            required
-            className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none pr-20"
-          ></textarea>
-          <button 
-            type="submit" 
-            disabled={isSending}
-            className="absolute bottom-4 right-4 p-3 bg-primary text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-110 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {isSending ? <Clock className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
-        </Form>
-        <p className="text-[10px] text-center text-zinc-400 mt-4 font-bold tracking-widest uppercase">
-          {session.mode === 'human' ? 'You are manually responding' : 'AI is currently handling this conversation'}
-        </p>
+        {session.mode === 'human' ? (
+          <div>
+            <form ref={formRef as any} onSubmit={handleAgentReplySubmit} className="relative">
+              <textarea 
+                name="content" 
+                placeholder="Type your live response to the visitor..." 
+                rows={3}
+                required
+                className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none pr-20 text-sm font-medium"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+              ></textarea>
+              <button 
+                type="submit" 
+                disabled={isSending}
+                className="absolute bottom-4 right-4 p-3 bg-primary text-white rounded-xl shadow-lg shadow-primary/30 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isSending ? <Clock className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+              </button>
+            </form>
+            
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase">
+                🔴 You are manually responding • Live chat active
+              </p>
+              
+              <button
+                type="button"
+                onClick={handleResolveSession}
+                disabled={resolveFetcher.state !== "idle"}
+                className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-100 hover:bg-emerald-100 font-black uppercase tracking-wider py-1.5 px-3 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+              >
+                Resolve & Hand Back to AI
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 bg-zinc-50 border border-zinc-100 rounded-2xl text-center">
+            <Bot className="w-8 h-8 text-primary mx-auto mb-3 animate-pulse" />
+            <h3 className="font-bold text-sm text-zinc-800 mb-1">AI Assistant is handling this chat</h3>
+            <p className="text-xs text-text-muted mb-4 max-w-md mx-auto">The chatbot is responding to user questions automatically using your knowledge sources.</p>
+            <Form method="post" className="inline-block">
+              <input type="hidden" name="_action" value="toggle_mode" />
+              <button 
+                type="submit"
+                className="px-5 py-2.5 bg-primary text-white rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-md shadow-primary/10 flex items-center gap-2 cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5" /> Enable Live Takeover
+              </button>
+            </Form>
+          </div>
+        )}
       </div>
     </div>
   );

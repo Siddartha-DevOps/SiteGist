@@ -92,6 +92,25 @@ export async function action({ request }: ActionFunctionArgs) {
               content: message,
             },
           });
+
+          // Broadcast visitor message to PartyKit room live
+          const partykitHost = process.env.PARTYKIT_HOST;
+          if (partykitHost) {
+            const cleanHost = partykitHost.replace(/\/$/, "");
+            const roomUrl = `${cleanHost.startsWith("http") ? "" : "http://"}${cleanHost}/parties/main/${session.id}`;
+            console.log(`[api.chat.ts] Human mode live broadcast visitor message to PartyKit: ${roomUrl}`);
+            fetch(roomUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "message",
+                role: "user",
+                content: message,
+              }),
+            }).catch((err) => {
+              console.error("[api.chat.ts] PartyKit broadcast error:", err);
+            });
+          }
           
           return new Response(new ReadableStream({
              start(controller) {
