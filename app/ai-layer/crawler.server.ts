@@ -18,6 +18,122 @@ export async function getYoutubeTranscript(url: string) {
   }
 }
 
+export type YouTubeUrlType = 'video' | 'playlist' | 'channel';
+export type VideoInfo = { id: string; title: string };
+
+export function detectYouTubeUrlType(url: string): YouTubeUrlType {
+  if (url.includes('/playlist?list=') || (url.includes('list=') && !url.includes('watch'))) return 'playlist';
+  if (url.includes('/@') || url.includes('/c/') || (url.includes('/channel/') && !url.includes('watch'))) return 'channel';
+  return 'video';
+}
+
+export function extractPlaylistId(url: string): string | null {
+  const match = url.match(/[?&]list=([^&]+)/);
+  return match?.[1] ?? null;
+}
+
+export function extractChannelHandle(url: string): string | null {
+  // Handles /@handle, /c/name, /channel/UCxxx
+  const atMatch = url.match(/\/@([^/?]+)/);
+  if (atMatch) return atMatch[1];
+  const cMatch = url.match(/\/c\/([^/?]+)/);
+  if (cMatch) return cMatch[1];
+  const idMatch = url.match(/\/channel\/(UC[^/?]+)/);
+  if (idMatch) return idMatch[1];
+  return null;
+}
+
+export async function getVideoTitle(videoId: string): Promise<string> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return `YouTube Video (${videoId})`;
+  try {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`);
+    if (res.ok) {
+      const data = await res.json();
+      const title = data?.items?.[0]?.snippet?.title;
+      if (title) return title;
+    }
+  } catch (e) {
+    console.warn("[YouTube crawler] Failed to fetch video title:", e);
+  }
+  return `YouTube Video (${videoId})`;
+}
+
+export async function getPlaylistVideos(
+  playlistId: string,
+  maxVideos = 20
+): Promise<VideoInfo[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) throw new Error("YOUTUBE_API_KEY is not set.");
+
+  const videos: VideoInfo[] = [];
+  let pageToken: string | undefined;
+
+  const YT_API_BASE = "https://www.googleapis.com/youtube/v3";
+
+  while (videos.length < maxVideos) {
+    const params = new URLSearchParams({
+      part: "snippet",
+      playlistId,
+      maxResults: String(Math.min(50, maxVideos - videos.length)),
+      key: apiKey,
+      ...(pageToken ? { pageToken } : {}),
+    });
+
+    const res = await fetch(`${YT_API_BASE}/playlistItems?${params}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`YouTube API error ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json();
+    for (const item of data.items ?? []) {
+      const id = item.snippet?.resourceId?.videoId;
+      const title = item.snippet?.title || `YouTube Video (${id})`;
+      if (id) {
+        videos.push({ id, title });
+      }
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  return videos.slice(0, maxVideos);
+}
+
+export async function getChannelVideos(
+  handleOrId: string,
+  maxVideos = 20
+): Promise<VideoInfo[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) throw new Error("YOUTUBE_API_KEY is not set.");
+
+  // Determine whether it's a UC... channel ID or a handle
+  const isChannelId = handleOrId.startsWith("UC");
+  const params = new URLSearchParams({
+    part: "contentDetails",
+    key: apiKey,
+    ...(isChannelId ? { id: handleOrId } : { forHandle: handleOrId }),
+  });
+
+  const YT_API_BASE = "https://www.googleapis.com/youtube/v3";
+  const res = await fetch(`${YT_API_BASE}/channels?${params}`);
+  if (!res.ok) {
+    throw new Error(`YouTube channels API error: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const uploadsPlaylistId: string | undefined =
+    data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+  if (!uploadsPlaylistId) {
+    throw new Error("Could not find uploads playlist for this channel. Custom handles might require entering the full UC... channel ID.");
+  }
+
+  return getPlaylistVideos(uploadsPlaylistId, maxVideos);
+}
+
 export async function parsePdf(buffer: Buffer) {
   try {
     return await parsePdfUtil(buffer).then(data => data.text);

@@ -196,27 +196,98 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (method === "add_youtube") {
     const videoUrl = formData.get("url") as string;
-    const { getYoutubeTranscript } = await import("~/ai-layer/crawler.server");
-    const transcript = await getYoutubeTranscript(videoUrl);
-    
-    if (!transcript) {
-      return json({ error: "Could not fetch transcript for this YouTube video. Make sure it has captions enabled." }, { status: 400 });
+    const {
+      getYoutubeTranscript,
+      detectYouTubeUrlType,
+      extractPlaylistId,
+      extractChannelHandle,
+      getPlaylistVideos,
+      getChannelVideos,
+      getVideoTitle,
+    } = await import("~/ai-layer/crawler.server");
+
+    const urlType = detectYouTubeUrlType(videoUrl);
+    const VIDEO_CAP = 20; // max per request to avoid timeout
+
+    // Resolve to array of { id: string, title: string }
+    let videos: { id: string; title: string }[] = [];
+    try {
+      if (urlType === "playlist") {
+        const playlistId = extractPlaylistId(videoUrl);
+        if (!playlistId) return json({ error: "Could not extract playlist ID from URL." }, { status: 400 });
+        videos = await getPlaylistVideos(playlistId, VIDEO_CAP);
+      } else if (urlType === "channel") {
+        const handle = extractChannelHandle(videoUrl);
+        if (!handle) return json({ error: "Could not extract channel handle from URL." }, { status: 400 });
+        videos = await getChannelVideos(handle, VIDEO_CAP);
+      } else {
+        // Single video — extract ID from URL
+        const match = videoUrl.match(/(?:v=|youtu\.be\/)([^&\s]+)/);
+        const id = match?.[1] ?? videoUrl;
+        const title = await getVideoTitle(id);
+        videos = [{ id, title }];
+      }
+    } catch (e: any) {
+      return json({ error: e.message || "Failed to fetch video list from YouTube API." }, { status: 400 });
     }
 
-    await prisma.knowledgeSource.create({
-      data: {
-        projectId: params.projectId!,
-        type: "youtube",
-        source: videoUrl,
-        title: "YouTube Video",
-        content: transcript,
-      },
+    if (videos.length === 0) {
+      return json({ error: "No videos found. Check the URL and try again." }, { status: 400 });
+    }
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const video of videos) {
+      const canonicalUrl = `https://www.youtube.com/watch?v=${video.id}`;
+
+      // Skip if already imported for this project
+      const existing = await prisma.knowledgeSource.findFirst({
+        where: { projectId: params.projectId!, source: canonicalUrl },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      const transcript = await getYoutubeTranscript(canonicalUrl);
+      if (!transcript) {
+        skipped++;
+        continue; // no captions, skip silently
+      }
+
+      await prisma.knowledgeSource.create({
+        data: {
+          projectId: params.projectId!,
+          type: "youtube",
+          source: canonicalUrl,
+          title: video.title || `YouTube Video (${video.id})`,
+          content: transcript,
+        },
+      });
+
+      const chunks = chunkText(transcript);
+      await upsertChunks(
+        params.projectId!,
+        chunks.map(c => ({ text: c, metadata: { title: video.title || "YouTube Video", source: canonicalUrl } }))
+      );
+
+      imported++;
+    }
+
+    const isMulti = urlType !== "video";
+    const cappedNote = videos.length >= VIDEO_CAP
+      ? ` (first ${VIDEO_CAP} videos — re-submit to import more)`
+      : "";
+
+    return json({
+      success: true,
+      message: isMulti
+        ? `Imported ${imported} video transcript${imported !== 1 ? "s" : ""}, skipped ${skipped}${cappedNote}.`
+        : imported > 0
+          ? "YouTube transcript imported and indexed successfully."
+          : "Could not fetch transcript. Make sure the video has captions enabled.",
     });
-
-    const chunks = chunkText(transcript);
-    await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { title: "YouTube Video", source: videoUrl } })));
-
-    return json({ success: true, message: "YouTube transcript imported and indexed successfully" });
   }
 
   if (method === "upload_file") {
@@ -659,27 +730,35 @@ export default function TrainProject() {
           {activeTab === "youtube" && (
             <>
               <h2 className="text-2xl font-bold mb-8 flex items-center gap-3">
-                <Video className="text-primary w-6 h-6" /> YouTube Video
+                <Video className="text-primary w-6 h-6" /> YouTube Video, Playlist, or Channel
               </h2>
               
               <Form method="post" className="space-y-6">
                 <input type="hidden" name="_action" value="add_youtube" />
                 <div>
-                  <label className="block text-sm font-bold mb-2">Video URL</label>
+                  <label className="block text-sm font-bold mb-2">YouTube URL</label>
                   <input 
                     type="url" 
                     name="url" 
-                    placeholder="https://youtube.com/watch?v=..."
+                    placeholder="E.g., video URL, playlist URL, or channel URL"
                     required
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                   />
+                  <div className="mt-3 text-xs text-zinc-400 space-y-1.5 font-medium leading-relaxed">
+                    <p>
+                      Supports single video URLs, playlists (with <code>?list=</code>), and channel URLs (with <code>/@handle</code>).
+                    </p>
+                    <p className="font-semibold text-zinc-500">
+                      ⚠️ Note: Imports are capped at peak 20 transcript-enabled videos at a time to keep response times fast and stable.
+                    </p>
+                  </div>
                 </div>
                 <button 
                   type="submit" 
                   disabled={isCrawling}
                   className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
-                  {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : "Import Transcript"}
+                  {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : "Import YouTube Data"}
                 </button>
               </Form>
             </>
