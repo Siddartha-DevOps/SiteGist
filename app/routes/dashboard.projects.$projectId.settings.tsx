@@ -73,6 +73,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   
   const chatMode = formData.get("chatMode") as string || "ai-only";
   
+  const rateLimitPerUser = parseInt(formData.get("rateLimitPerUser") as string || "0", 10);
+  const rateLimitWindow = formData.get("rateLimitWindow") as string || "day";
+  
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
@@ -81,6 +84,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     model,
     allowedDomains,
     chatMode,
+    rateLimitPerUser,
+    rateLimitWindow,
     branding: {
       primaryColor,
       assistantName,
@@ -351,6 +356,45 @@ export default function ProjectSettings() {
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
                   />
                   <p className="mt-2 text-xs text-zinc-400">Receive real-time alerts when leads are captured or human help is requested.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Rate Limiting */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Bot className="text-primary w-5 h-5" /> Rate Limiting
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="rateLimitPerUser" className="block text-sm font-bold mb-2">
+                    Max messages per visitor
+                  </label>
+                  <input
+                    id="rateLimitPerUser"
+                    name="rateLimitPerUser"
+                    type="number"
+                    min="0"
+                    defaultValue={currentSettings.rateLimitPerUser || 0}
+                    placeholder="0 = unlimited"
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                  />
+                  <p className="mt-2 text-xs text-zinc-400">Set to 0 to disable rate limiting.</p>
+                </div>
+                <div>
+                  <label htmlFor="rateLimitWindow" className="block text-sm font-bold mb-2">
+                    Per Time Window
+                  </label>
+                  <select
+                    id="rateLimitWindow"
+                    name="rateLimitWindow"
+                    defaultValue={currentSettings.rateLimitWindow || "day"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                  >
+                    <option value="hour">Hour</option>
+                    <option value="day">Day</option>
+                  </select>
+                  <p className="mt-2 text-xs text-zinc-400 font-medium">Reset interval for visitor rate limit count.</p>
                 </div>
               </div>
             </section>

@@ -64,6 +64,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const [rateLimit, setRateLimit] = useState<{ remaining: number; window: string } | null>(null);
 
   const [mode, setMode] = useState<'ai' | 'human'>('ai');
   const [escalated, setEscalated] = useState(false);
@@ -200,6 +201,24 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         }),
       });
 
+      if (response.status === 429) {
+        let limitMsg = "You've reached today's message limit. Please check back later.";
+        try {
+          const errData = await response.json();
+          if (errData?.message) limitMsg = errData.message;
+        } catch {}
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: limitMsg,
+            timestamp: new Date()
+          }
+        ]);
+        setIsTyping(false);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
       }
@@ -238,6 +257,10 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
               if (currentEvent === "session") {
                 if (data.sessionId) setSessionId(data.sessionId);
                 if (data.chatMode) setChatMode(data.chatMode);
+              } else if (currentEvent === "ratelimit") {
+                if (data.remaining !== undefined) {
+                  setRateLimit({ remaining: data.remaining, window: data.window });
+                }
               } else if (currentEvent === "agent-mode") {
                 setIsAgentMode(true);
                 setMode('human');
@@ -495,6 +518,12 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce"></div>
             </div>
           </div>
+        )}
+
+        {rateLimit && rateLimit.remaining <= 5 && (
+          <p className="text-center text-[10px] text-zinc-400 font-bold tracking-wide uppercase py-1 mt-1 select-none">
+            {rateLimit.remaining} message{rateLimit.remaining !== 1 ? 's' : ''} remaining {rateLimit.window === 'hour' ? 'this hour' : 'today'}
+          </p>
         )}
 
         {chatMode === 'hybrid' && !escalated && (

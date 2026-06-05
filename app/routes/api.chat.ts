@@ -67,6 +67,46 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    const settings = project?.settings as any;
+    const rateLimitPerUser = parseInt(settings?.rateLimitPerUser || "0", 10);
+    const rateLimitWindow = settings?.rateLimitWindow || "day";
+    let count = 0;
+
+    if (projectId !== "demo-project" && rateLimitPerUser > 0) {
+      const redis = getRedis();
+      if (redis) {
+        const visitorIp =
+          request.headers.get('cf-connecting-ip') ||
+          request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+          'unknown';
+
+        const windowSeconds = rateLimitWindow === 'hour' ? 3600 : 86400;
+        const redisKey = `ratelimit:${projectId}:${visitorIp}`;
+
+        try {
+          count = await redis.incr(redisKey);
+          if (count === 1) {
+            await redis.expire(redisKey, windowSeconds);
+          }
+
+          if (count > rateLimitPerUser) {
+            const resetLabel = rateLimitWindow === 'hour' ? 'this hour' : 'today';
+            return json(
+              {
+                error: "rate_limited",
+                message: `You've reached the message limit ${resetLabel}. Please check back later.`,
+              },
+              { status: 429 }
+            );
+          }
+        } catch (redisError) {
+          console.warn("[Redis Rate Limit Error] Failed:", redisError);
+        }
+      } else {
+        console.warn("[Redis Rate Limit] Redis client not initialized. Skipping limit.");
+      }
+    }
+
     // 1. Get or create session
     let session: any = null;
     let formattedHistory: { role: string, content: string }[] = [];
@@ -156,6 +196,11 @@ export async function action({ request }: ActionFunctionArgs) {
           // Send initial session event
           const initialData = JSON.stringify({ sessionId: session?.id || "demo-session", chatMode });
           controller.enqueue(encoder.encode(`event: session\ndata: ${initialData}\n\n`));
+
+          if (projectId !== "demo-project" && rateLimitPerUser > 0) {
+            const remaining = Math.max(0, rateLimitPerUser - count);
+            controller.enqueue(encoder.encode(`event: ratelimit\ndata: ${JSON.stringify({ remaining, window: rateLimitWindow })}\n\n`));
+          }
 
           // Agent-only: skip AI entirely, route straight to human queue
           if (chatMode === 'agent-only') {

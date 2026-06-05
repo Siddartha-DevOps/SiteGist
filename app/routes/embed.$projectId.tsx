@@ -24,6 +24,7 @@ export default function EmbedChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [rateLimit, setRateLimit] = useState<{ remaining: number; window: string } | null>(null);
   const chatFetcher = useFetcher();
   const leadFetcher = useFetcher();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -103,6 +104,25 @@ export default function EmbedChat() {
         body: JSON.stringify({ projectId: project.id, message: messageToSend, sessionId }),
       });
 
+      if (response.status === 429) {
+        let limitMsg = "You've reached today's message limit. Please check back later.";
+        try {
+          const errData = await response.json();
+          if (errData?.message) limitMsg = errData.message;
+        } catch {}
+
+        setMessages(prev => {
+          const newMsgs = [...prev];
+          const last = newMsgs[newMsgs.length - 1];
+          if (last && last.role === 'assistant' && !last.content) {
+            newMsgs[newMsgs.length - 1] = { ...last, content: limitMsg };
+          }
+          return newMsgs;
+        });
+        setIsStreaming(false);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}`);
       }
@@ -168,6 +188,8 @@ export default function EmbedChat() {
                 });
               } else if (data.sessionId) {
                 setSessionId(data.sessionId);
+              } else if (data.remaining !== undefined) {
+                setRateLimit({ remaining: data.remaining, window: data.window });
               }
             } catch (e) {}
           }
@@ -406,6 +428,11 @@ export default function EmbedChat() {
             {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
+        {rateLimit && rateLimit.remaining <= 5 && (
+          <p className="text-[10px] text-center text-zinc-400 mt-2 font-bold tracking-wide uppercase select-none">
+            {rateLimit.remaining} message{rateLimit.remaining !== 1 ? 's' : ''} remaining {rateLimit.window === 'hour' ? 'this hour' : 'today'}
+          </p>
+        )}
         {!removeBranding && (
           <p className="text-[9px] text-center text-zinc-400 mt-3 font-medium tracking-wider">POWERED BY SITEGIST</p>
         )}
