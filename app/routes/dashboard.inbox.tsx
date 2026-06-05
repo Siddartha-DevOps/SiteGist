@@ -99,7 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sessions = await prisma.chatSession.findMany({
     where: baseWhere,
     include: {
-      project: { select: { name: true } },
+      project: { select: { name: true, settings: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
       tags: true,
       _count: { select: { messages: true } },
@@ -261,11 +261,15 @@ export default function Inbox() {
                         Resolved
                       </span>
                     )}
-                    {session.mode === "human" && (
+                    {session.mode === "human" && (session.project?.settings as any)?.chatMode === "agent-only" ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase tracking-widest animate-pulse">
+                        ● Agent Queue
+                      </span>
+                    ) : session.mode === "human" ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase tracking-widest">
                         <AlertTriangle className="w-2.5 h-2.5" /> Escalated
                       </span>
-                    )}
+                    ) : null}
                     {session.tags?.map((tag: any) => (
                       <span
                         key={tag.id}

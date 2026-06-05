@@ -71,6 +71,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const position = formData.get("position") as string;
   const font = formData.get("font") as string;
   
+  const chatMode = formData.get("chatMode") as string || "ai-only";
+  
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
@@ -78,6 +80,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     systemPrompt,
     model,
     allowedDomains,
+    chatMode,
     branding: {
       primaryColor,
       assistantName,
@@ -174,6 +177,24 @@ export default function ProjectSettings() {
                     <option value="gemini-3.5-pro">Gemini 3.5 Pro (advanced reasoning)</option>
                   </select>
                   <p className="mt-2 text-xs text-zinc-400">Choose which AI model generates this bot's answers. Auto picks the best available provider.</p>
+                </div>
+                <div>
+                  <label htmlFor="chatMode" className="block text-sm font-bold mb-2">
+                    Chat Mode
+                  </label>
+                  <select
+                    id="chatMode"
+                    name="chatMode"
+                    defaultValue={currentSettings.chatMode || "ai-only"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                  >
+                    <option value="ai-only">AI Only — AI answers everything automatically</option>
+                    <option value="hybrid">Hybrid — AI answers, human can step in anytime</option>
+                    <option value="agent-only">Agent Only — All chats go to human agents</option>
+                  </select>
+                  <p className="mt-2 text-xs text-zinc-400">
+                    Controls how incoming conversations are handled.
+                  </p>
                 </div>
               </div>
             </section>

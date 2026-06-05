@@ -68,9 +68,12 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   const [mode, setMode] = useState<'ai' | 'human'>('ai');
   const [escalated, setEscalated] = useState(false);
   const [resolved, setResolved] = useState(false);
+  const [chatMode, setChatMode] = useState<'ai-only' | 'hybrid' | 'agent-only'>('ai-only');
+  const [isAgentMode, setIsAgentMode] = useState(false);
+  const [agentJoined, setAgentJoined] = useState(false);
 
   useEffect(() => {
-    if (!sessionId || mode !== 'human') return;
+    if (!sessionId || (mode !== 'human' && chatMode !== 'agent-only')) return;
     const socket = createChatSocket(sessionId);
     if (!socket) return;
     
@@ -81,6 +84,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           // If agent replies, append to messages and stop the loader/typing indicator
           setMessages(prev => [...prev, { role: 'assistant', content: data.content, timestamp: new Date() }]);
           setIsTyping(false);
+          setAgentJoined(true);
         } else if (data.type === 'escalated') {
           setEscalated(true);
           setMode('human');
@@ -89,6 +93,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           setResolved(true);
           setMode('ai');
           setEscalated(false);
+          setAgentJoined(false);
         }
       } catch (err) {
         console.warn("[Widget PartyKit] Failed to parse websocket message:", err);
@@ -101,7 +106,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         socket.close();
       } catch (err) {}
     };
-  }, [sessionId, mode]);
+  }, [sessionId, mode, chatMode]);
 
   const handleEscalate = async () => {
     const activeSessionId = sessionId || "demo-session";
@@ -206,6 +211,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       const assistantStartTime = new Date();
       setMessages((prev) => [...prev, { role: "assistant", content: "", timestamp: assistantStartTime }]);
 
+      let currentEvent = "message";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -219,38 +225,45 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           const trimmedLine = line.trim();
           if (!trimmedLine) continue;
           
-          if (trimmedLine.startsWith("data: ")) {
+          if (trimmedLine.startsWith("event: ")) {
+            currentEvent = trimmedLine.slice(7).trim();
+          } else if (trimmedLine.startsWith("data: ")) {
             try {
-              const data = JSON.parse(trimmedLine.slice(6));
-              if (data.content) {
-                const content = data.content;
-                if (content.toLowerCase().includes("[error]")) {
-                  const errorMsg = content.replace(/\[ERROR\]/i, "").trim();
-                  assistantMessage = `❌ Error: ${errorMsg}`;
-                } else {
-                  assistantMessage += content;
-                }
-                
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastIndex = newMessages.length - 1;
-                  if (newMessages[lastIndex].role === "assistant") {
-                    newMessages[lastIndex] = {
-                      ...newMessages[lastIndex],
-                      content: assistantMessage,
-                    };
+              const rawData = trimmedLine.slice(6);
+              const data = JSON.parse(rawData);
+              
+              if (currentEvent === "session") {
+                if (data.sessionId) setSessionId(data.sessionId);
+                if (data.chatMode) setChatMode(data.chatMode);
+              } else if (currentEvent === "agent-mode") {
+                setIsAgentMode(true);
+                setMode('human');
+              } else {
+                if (data.content) {
+                  const content = data.content;
+                  if (content.toLowerCase().includes("[error]")) {
+                    const errorMsg = content.replace(/\[ERROR\]/i, "").trim();
+                    assistantMessage = `❌ Error: ${errorMsg}`;
+                  } else {
+                    assistantMessage += content;
                   }
-                  return newMessages;
-                });
-              }
-              if (data.sessionId) {
-                setSessionId(data.sessionId);
+                  
+                  setMessages((prev) => {
+                    const newMessages = [...prev];
+                    const lastIndex = newMessages.length - 1;
+                    if (newMessages[lastIndex].role === "assistant") {
+                      newMessages[lastIndex] = {
+                        ...newMessages[lastIndex],
+                        content: assistantMessage,
+                      };
+                    }
+                    return newMessages;
+                  });
+                }
               }
             } catch (e) {
               console.warn("Failed to parse SSE data line:", trimmedLine);
             }
-          } else if (trimmedLine.startsWith("event: ")) {
-            // Stream metadata and type indicators are followed by corresponding data lines. Safe to skip here.
           }
         }
       }
@@ -264,6 +277,13 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
     } finally {
       setIsTyping(false);
       setShowSuggestions(true);
+      // Clean up empty assistant bubble if stream returned no assistant text
+      setMessages((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].role === "assistant" && !prev[prev.length - 1].content) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     }
   };
 
@@ -392,7 +412,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           </div>
         )}
 
-        {mode === 'ai' && !escalated && (
+        {chatMode === 'hybrid' && !escalated && (
           <button
             type="button"
             onClick={handleEscalate}
@@ -400,6 +420,13 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           >
             Talk to a human
           </button>
+        )}
+        {chatMode === 'agent-only' && !agentJoined && (
+          <div className="text-center py-2 animate-pulse flex flex-col items-center justify-center gap-1">
+            <span className="text-xs text-zinc-500 font-bold">
+              You're in the queue. A live agent will respond shortly.
+            </span>
+          </div>
         )}
         {escalated && !resolved && (
           <div className="text-center py-2 animate-pulse flex flex-col items-center justify-center gap-1">
@@ -428,13 +455,17 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
             type="text" 
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
-            disabled={isTyping}
-            className="flex-1 bg-transparent px-3 text-sm font-medium outline-none placeholder:text-zinc-400 text-zinc-800"
+            disabled={isTyping || (chatMode === 'agent-only' && !agentJoined)}
+            placeholder={
+              chatMode === 'agent-only' && !agentJoined
+                ? 'Waiting for an agent...'
+                : 'Type your message...'
+            }
+            className="flex-1 bg-transparent px-3 text-sm font-medium outline-none placeholder:text-zinc-400 text-zinc-800 disabled:opacity-50"
           />
           <button 
             type="submit"
-            disabled={!input.trim() || isTyping}
+            disabled={!input.trim() || isTyping || (chatMode === 'agent-only' && !agentJoined)}
             className="p-2.5 bg-white border border-zinc-100 text-zinc-400 rounded-xl shadow-sm hover:bg-zinc-50 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
           >
             <Send className="w-4 h-4" />

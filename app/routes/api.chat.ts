@@ -37,6 +37,7 @@ export async function action({ request }: ActionFunctionArgs) {
     let project = null;
     let systemPrompt = "You are a helpful AI assistant for SiteGist, a platform that builds AI chatbots from website content.";
     let modelPreference: string | undefined = undefined;
+    let chatMode: 'ai-only' | 'hybrid' | 'agent-only' = 'ai-only';
 
     if (projectId !== "demo-project") {
       try {
@@ -51,6 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const settings = project.settings as any;
         systemPrompt = settings?.systemPrompt || systemPrompt;
         modelPreference = settings?.model || undefined;
+        chatMode = settings?.chatMode || 'ai-only';
 
         // Domain whitelisting check
         if (settings?.allowedDomains && settings.allowedDomains.length > 0 && origin) {
@@ -152,8 +154,36 @@ export async function action({ request }: ActionFunctionArgs) {
         
         try {
           // Send initial session event
-          const initialData = JSON.stringify({ sessionId: session?.id || "demo-session" });
+          const initialData = JSON.stringify({ sessionId: session?.id || "demo-session", chatMode });
           controller.enqueue(encoder.encode(`event: session\ndata: ${initialData}\n\n`));
+
+          // Agent-only: skip AI entirely, route straight to human queue
+          if (chatMode === 'agent-only') {
+            if (projectId !== "demo-project" && session) {
+              await prisma.chatSession.update({
+                where: { id: session.id },
+                data: { mode: 'human', isRead: false },
+              });
+
+              if (project?.webhookUrl) {
+                fetch(project.webhookUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    event: 'agent_mode_message',
+                    projectId,
+                    sessionId: session.id,
+                    message,
+                    timestamp: new Date().toISOString(),
+                  }),
+                }).catch(() => {});
+              }
+            }
+
+            controller.enqueue(encoder.encode(`event: agent-mode\ndata: ${JSON.stringify({ sessionId: session?.id || "demo-session" })}\n\n`));
+            controller.close();
+            return;
+          }
 
           console.log(`[Chat] Initiating RAG for project: ${projectId}`);
           const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference);
