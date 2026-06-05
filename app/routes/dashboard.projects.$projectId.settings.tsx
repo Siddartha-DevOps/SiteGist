@@ -84,6 +84,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     leadFields = [];
   }
   
+  const slackWebhookUrl = formData.get("slackWebhookUrl") as string || "";
+  
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
@@ -95,6 +97,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     rateLimitPerUser,
     rateLimitWindow,
     leadFields,
+    slackWebhookUrl,
     branding: {
       primaryColor,
       assistantName,
@@ -143,6 +146,8 @@ export default function ProjectSettings() {
   );
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [testError, setTestError] = useState<string>('');
+  const [slackTestStatus, setSlackTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [slackTestError, setSlackTestError] = useState<string>('');
   const branding = currentSettings.branding || {};
   const removeBranding = branding.removeBranding || false;
   const customDomain = branding.customDomain || "";
@@ -435,6 +440,84 @@ export default function ProjectSettings() {
                       Events sent: <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">lead.captured</code>,{' '}
                       <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.escalated</code>,{' '}
                       <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.resolved</code>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-100 pt-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <label htmlFor="slackWebhookUrl" className="block text-sm font-bold flex items-center gap-2">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523 2.528 2.528 0 0 1-2.522-2.523 2.528 2.528 0 0 1 2.522-2.52h2.52v2.52zm1.261 0a2.528 2.528 0 0 1 2.52-2.52h5.043a2.528 2.528 0 0 1 2.522 2.52v5.042a2.528 2.528 0 0 1-2.522 2.52H8.824a2.528 2.528 0 0 1-2.521-2.52v-5.042zM8.824 5.043a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.824 0a2.528 2.528 0 0 1 2.521 2.523v2.52h-2.521zm0 1.261a2.528 2.528 0 0 1 2.521 2.52v5.043a2.528 2.528 0 0 1-2.521 2.522H3.78a2.528 2.528 0 0 1-2.522-2.522V8.824A2.528 2.528 0 0 1 3.78 6.304h5.043zm10.134 3.78a2.528 2.528 0 0 1 2.522-2.521 2.528 2.528 0 0 1 2.52 2.521 2.528 2.528 0 0 1-2.52 2.52h-2.522v-2.52zm-1.262 0a2.528 2.528 0 0 1-2.52 2.52h-5.043a2.528 2.528 0 0 1-2.522-2.52V5.043a2.528 2.528 0 0 1 2.522-2.52h5.043a2.528 2.528 0 0 1 2.52 2.52v5.042zm-3.78 10.134a2.528 2.528 0 0 1 2.522 2.521 2.528 2.528 0 0 1-2.522 2.52 2.528 2.528 0 0 1-2.52-2.52v-2.521h2.52zm0-1.262a2.528 2.528 0 0 1-2.52-2.52v-5.043c0-1.393 1.13-2.522 2.52-2.522h5.043a2.528 2.528 0 0 1 2.522 2.522v5.043a2.528 2.528 0 0 1-2.522 2.522h-5.043z"/>
+                      </svg>
+                      Slack Incoming Webhook URL
+                    </label>
+                    <button
+                      type="button"
+                      disabled={slackTestStatus === 'loading'}
+                      onClick={async () => {
+                        setSlackTestStatus('loading');
+                        setSlackTestError('');
+                        try {
+                          const res = await fetch('/api/slack-test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ projectId: project.id }),
+                          });
+                          const data = await res.json();
+                          if (res.ok && data.ok) {
+                            setSlackTestStatus('success');
+                            setTimeout(() => setSlackTestStatus('idle'), 4000);
+                          } else {
+                            setSlackTestStatus('error');
+                            setSlackTestError(data.error || 'Failed to send test message.');
+                            setTimeout(() => {
+                              setSlackTestStatus('idle');
+                              setSlackTestError('');
+                            }, 5000);
+                          }
+                        } catch (err) {
+                          setSlackTestStatus('error');
+                          setSlackTestError('Network error. Failed to trigger Slack test.');
+                          setTimeout(() => {
+                            setSlackTestStatus('idle');
+                            setSlackTestError('');
+                          }, 5000);
+                        }
+                      }}
+                      className="text-xs font-extrabold text-primary hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {slackTestStatus === 'loading' && 'Sending...'}
+                      {slackTestStatus === 'success' && '✅ Sent Slack Test!'}
+                      {slackTestStatus === 'error' && '❌ Failed'}
+                      {slackTestStatus === 'idle' && 'Send Test Message'}
+                    </button>
+                  </div>
+                  <input 
+                    id="slackWebhookUrl"
+                    type="url" 
+                    name="slackWebhookUrl" 
+                    defaultValue={currentSettings.slackWebhookUrl || ""}
+                    placeholder="https://hooks.slack.com/services/..."
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
+                  />
+                  {slackTestError && (
+                    <p className="mt-1.5 text-xs text-red-500 font-semibold">{slackTestError}</p>
+                  )}
+                  <div className="mt-3 text-xs text-zinc-400 space-y-1.5 font-medium leading-relaxed">
+                    <p>
+                      Sends interactive notifications directly to a Slack channel when a lead is captured or human assistance is requested.
+                    </p>
+                    <p>
+                      To generate an incoming webhook:{' '}
+                      <a
+                        href="https://api.slack.com/messaging/webhooks"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline hover:text-primary transition-colors font-bold"
+                      >
+                        Create a Slack app → Enable Incoming Webhooks → Copy URL
+                      </a>
                     </p>
                   </div>
                 </div>

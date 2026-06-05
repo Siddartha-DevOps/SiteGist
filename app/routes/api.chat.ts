@@ -4,6 +4,7 @@ import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 import { sendWebhook } from "~/lib/webhook.server";
+import { notifySlackEscalation } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Chat Action] Incoming request: ${request.method} ${request.url}`);
@@ -221,6 +222,17 @@ export async function action({ request }: ActionFunctionArgs) {
                   message,
                 });
               }
+
+              const slackWebhookUrl = (settings as any)?.slackWebhookUrl;
+              if (slackWebhookUrl) {
+                await notifySlackEscalation(slackWebhookUrl, {
+                  projectName: project?.name || "Support Bot",
+                  projectId: project?.id || projectId,
+                  sessionId: session.id,
+                  trigger: 'visitor_requested',
+                  previewMessage: message,
+                }).catch(() => {});
+              }
             }
 
             controller.enqueue(encoder.encode(`event: agent-mode\ndata: ${JSON.stringify({ sessionId: session?.id || "demo-session" })}\n\n`));
@@ -248,6 +260,17 @@ export async function action({ request }: ActionFunctionArgs) {
             
             // Optionally insert a marker in the stream or modify the response
             controller.enqueue(encoder.encode(`event: handoff\ndata: ${JSON.stringify({ requested: true })}\n\n`));
+          }
+
+          const slackWebhookUrl = (settings as any)?.slackWebhookUrl;
+          if (isHandoffRequested && slackWebhookUrl) {
+            notifySlackEscalation(slackWebhookUrl, {
+              projectName: project?.name || "Support Bot",
+              projectId: projectId,
+              sessionId: session?.id ?? '',
+              trigger: 'keyword_match',
+              previewMessage: message,
+            }).catch(() => {});
           }
 
           for await (const chunk of ragStream) {

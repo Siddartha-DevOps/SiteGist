@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
 import { sendWebhook } from "~/lib/webhook.server";
+import { notifySlackLeadCaptured } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json();
@@ -82,6 +83,20 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     } catch (e) {
       console.error("Webhook notification failed:", e);
+    }
+  }
+
+  const slackWebhookUrl = (lead.project.settings as any)?.slackWebhookUrl;
+  if (slackWebhookUrl) {
+    try {
+      await notifySlackLeadCaptured(slackWebhookUrl, {
+        projectName: lead.project.name,
+        projectId: lead.project.id,
+        lead: { name, email, phone, company },
+        sessionId: lead.sessionId ?? undefined,
+      });
+    } catch (e) {
+      console.error("[Slack] Lead notification trigger failed:", e);
     }
   }
 

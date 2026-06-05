@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
 import { sendWebhook } from "~/lib/webhook.server";
+import { notifySlackEscalation } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Escalation API] Action triggered`);
@@ -64,6 +65,33 @@ export async function action({ request }: ActionFunctionArgs) {
             }, {
               session: { id: sessionId },
               trigger: 'visitor_requested',
+            });
+          }
+
+          const slackWebhookUrl = (project.settings as any)?.slackWebhookUrl;
+          if (slackWebhookUrl) {
+            let lastMessage: string | undefined;
+            try {
+              const lastMsgDoc = await prisma.message.findFirst({
+                where: { sessionId },
+                orderBy: { createdAt: "desc" },
+                select: { content: true }
+              });
+              if (lastMsgDoc) {
+                lastMessage = lastMsgDoc.content;
+              }
+            } catch (dbErr) {
+              console.error("[Escalation API] DB error fetching last message for Slack preview:", dbErr);
+            }
+
+            await notifySlackEscalation(slackWebhookUrl, {
+              projectName: project.name,
+              projectId: project.id,
+              sessionId,
+              trigger: 'visitor_requested',
+              previewMessage: lastMessage,
+            }).catch((err) => {
+              console.error("[Escalation API] Slack notification failed:", err);
             });
           }
         }
