@@ -346,6 +346,28 @@ export async function getSitemapUrls(url: string) {
   }
 }
 
+export type DocsSiteType = "gitbook" | "zendesk" | "web";
+
+export function resolveDocsSitemapUrl(input: string): { sitemapUrl: string; type: DocsSiteType } {
+  const base = input.trim().replace(/\/+$/, ""); // strip trailing slashes
+
+  // Gitbook: hosted on gitbook.io or custom domain with gitbook pattern
+  if (base.includes(".gitbook.io")) {
+    return { sitemapUrl: `${base}/sitemap.xml`, type: "gitbook" };
+  }
+
+  // Zendesk Help Center: subdomain.zendesk.com/hc or custom domain with /hc path
+  if (base.includes(".zendesk.com") || base.match(/\/hc($|\/)/)) {
+    // Sitemap lives at /hc/sitemap.xml — strip anything after /hc
+    const hcIndex = base.indexOf("/hc");
+    const hcBase = hcIndex !== -1 ? base.substring(0, hcIndex + 3) : base;
+    return { sitemapUrl: `${hcBase}/sitemap.xml`, type: "zendesk" };
+  }
+
+  // Generic docs site — try /sitemap.xml as the standard location
+  return { sitemapUrl: `${base}/sitemap.xml`, type: "web" };
+}
+
 export function chunkText(text: string, size = 1000, overlap = 200) {
   const chunks = [];
   for (let i = 0; i < text.length; i += size - overlap) {

@@ -5,7 +5,7 @@ import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { chunkText, getSitemapUrls, crawlUrl } from "~/ai-layer/crawler.server";
 import { upsertChunks } from "~/ai-layer/ai.server";
-import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
+import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { 
@@ -384,6 +384,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (method === "get_sitemap") {
     const urls = await getSitemapUrls(url);
     return json({ sitemapUrls: urls });
+  }
+
+  if (method === "get_docs_sitemap") {
+    const docsUrl = formData.get("docsUrl") as string;
+    if (!docsUrl) return json({ error: "Enter a docs URL." }, { status: 400 });
+
+    const { resolveDocsSitemapUrl, getSitemapUrls } = await import("~/ai-layer/crawler.server");
+    const { sitemapUrl, type } = resolveDocsSitemapUrl(docsUrl);
+
+    let urls: string[] = [];
+    try {
+      urls = await getSitemapUrls(sitemapUrl);
+    } catch {
+      return json({
+        error: `Could not find a sitemap at ${sitemapUrl}. Make sure the URL is correct and the site has a sitemap.xml.`,
+      }, { status: 400 });
+    }
+
+    if (urls.length === 0 && type === "gitbook") {
+      try {
+        const altSitemap = sitemapUrl.replace("sitemap.xml", "sitemap-0.xml");
+        urls = await getSitemapUrls(altSitemap);
+      } catch {
+        // ignore, return the empty error below
+      }
+    }
+
+    if (type === "zendesk") {
+      const enUs = urls.filter(u => u.includes("/en-us/") || u.includes("/en/"));
+      urls = enUs.length > 0 ? enUs : urls;
+    }
+
+    if (urls.length === 0) {
+      return json({ error: `No pages found in the sitemap at ${sitemapUrl}.` }, { status: 400 });
+    }
+
+    return json({ sitemapUrls: urls, detectedType: type, sitemapUrl });
   }
 
   if (method === "crawl_sitemap_urls") {
@@ -1005,61 +1042,135 @@ export default function TrainProject() {
         )}
 
         {activeTab === "web" && (
-          <div className="bg-white p-10 rounded-[40px] border border-zinc-100 h-fit">
-            <h2 className="text-2xl font-bold mb-8 flex items-center gap-3">
-              <List className="text-primary w-6 h-6" /> Batch Crawl (Sitemap)
-            </h2>
-            
-            <Form method="post" className="space-y-6">
-              <input type="hidden" name="_action" value="get_sitemap" />
-              <div>
-                <label className="block text-sm font-bold mb-2">Sitemap URL</label>
-                <input 
-                  type="url" 
-                  name="url" 
-                  placeholder="https://example.com/sitemap.xml"
-                  required
-                  className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                />
-              </div>
-              <button 
-                type="submit" 
-                disabled={isCrawling}
-                className="w-full py-5 bg-zinc-900 text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2"
-              >
-                {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : "Fetch Sitemap URLs"}
-              </button>
-            </Form>
+          <div className="space-y-8">
+            <div className="bg-white p-10 rounded-[40px] border border-zinc-100 h-fit">
+              <h2 className="text-2xl font-bold mb-8 flex items-center gap-3">
+                <List className="text-primary w-6 h-6" /> Batch Crawl (Sitemap)
+              </h2>
+              
+              <Form method="post" className="space-y-6">
+                <input type="hidden" name="_action" value="get_sitemap" />
+                <div>
+                  <label className="block text-sm font-bold mb-2">Sitemap URL</label>
+                  <input 
+                    type="url" 
+                    name="url" 
+                    placeholder="https://example.com/sitemap.xml"
+                    required
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  />
+                </div>
+                <button 
+                  type="submit" 
+                  disabled={isCrawling}
+                  className="w-full py-5 bg-zinc-900 text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2"
+                >
+                  {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : "Fetch Sitemap URLs"}
+                </button>
+              </Form>
 
-            {actionData?.sitemapUrls && (
-              <div className="mt-8 space-y-4 border-t border-zinc-100 pt-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-bold text-sm text-zinc-800">Found {actionData.sitemapUrls.length} URLs</h3>
-                    <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
-                  </div>
-                  <Form method="post" className="shrink-0">
-                    <input type="hidden" name="_action" value="crawl_sitemap_urls" />
-                    <input type="hidden" name="urls" value={JSON.stringify(actionData.sitemapUrls)} />
-                    <button 
-                      type="submit" 
-                      disabled={isCrawling}
-                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer"
-                    >
-                      {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Index All Sitemap URLs"}
-                    </button>
-                  </Form>
-                </div>
-                <div className="max-h-60 overflow-y-auto space-y-2 pr-2 border border-zinc-50 rounded-xl p-2 bg-zinc-50/20">
-                  {actionData.sitemapUrls.map((url: string) => (
-                    <div key={url} className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center justify-between gap-2 shadow-sm">
-                      <span className="truncate text-zinc-600">{url}</span>
-                      <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded">Pending</span>
+              {actionData?.sitemapUrls && actionData?.detectedType === undefined && (
+                <div className="mt-8 space-y-4 border-t border-zinc-100 pt-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-sm text-zinc-800">Found {actionData.sitemapUrls.length} URLs</h3>
+                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
                     </div>
-                  ))}
+                    <Form method="post" className="shrink-0">
+                      <input type="hidden" name="_action" value="crawl_sitemap_urls" />
+                      <input type="hidden" name="urls" value={JSON.stringify(actionData.sitemapUrls)} />
+                      <button 
+                        type="submit" 
+                        disabled={isCrawling}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer"
+                      >
+                        {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Index All Sitemap URLs"}
+                      </button>
+                    </Form>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-2 border border-zinc-50 rounded-xl p-2 bg-zinc-50/20">
+                    {actionData.sitemapUrls.map((url: string) => (
+                      <div key={url} className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center justify-between gap-2 shadow-sm">
+                        <span className="truncate text-zinc-600">{url}</span>
+                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded">Pending</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Docs Site Import — Gitbook, Zendesk Help Center, or any docs site */}
+            <div className="bg-white p-10 rounded-[40px] border border-zinc-100 h-fit">
+              <Form method="post" className="space-y-6">
+                <input type="hidden" name="_action" value="get_docs_sitemap" />
+
+                <div className="flex items-center gap-3">
+                  <BookOpen className="w-6 h-6 text-primary" />
+                  <h2 className="text-2xl font-bold">Import Documentation Site</h2>
+                </div>
+                <p className="text-xs text-zinc-400">
+                  Paste a Gitbook, Zendesk Help Center, or any docs URL — SiteGist auto-detects and imports all pages.
+                </p>
+
+                <div>
+                  <label className="block text-sm font-bold mb-2">Docs Site URL</label>
+                  <input
+                    type="url"
+                    name="docsUrl"
+                    required
+                    placeholder="https://docs.myapp.gitbook.io or https://support.myapp.com/hc"
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
+                  />
+                </div>
+
+                <button type="submit" disabled={isCrawling}
+                  className="w-full py-5 bg-zinc-900 text-white rounded-2xl font-black transition-all flex items-center justify-center gap-2">
+                  {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : "Fetch Documentation Pages"}
+                </button>
+              </Form>
+
+              {actionData?.sitemapUrls && actionData?.detectedType !== undefined && (
+                <div className="mt-8 space-y-4 border-t border-zinc-100 pt-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-sm text-zinc-800 flex items-center gap-2 flex-wrap">
+                        Found {actionData.sitemapUrls.length} URLs
+                        {actionData.detectedType && actionData.detectedType !== "web" && (
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                            actionData.detectedType === "gitbook"
+                              ? "bg-blue-50 text-blue-700 border-blue-100"
+                              : "bg-green-50 text-green-700 border-green-100"
+                          }`}>
+                            {actionData.detectedType === "gitbook" ? "Gitbook detected" : "Zendesk Help Center detected"}
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
+                    </div>
+                    <Form method="post" className="shrink-0">
+                      <input type="hidden" name="_action" value="crawl_sitemap_urls" />
+                      <input type="hidden" name="urls" value={JSON.stringify(actionData.sitemapUrls)} />
+                      <button 
+                        type="submit" 
+                        disabled={isCrawling}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer"
+                      >
+                        {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Index All Sitemap URLs"}
+                      </button>
+                    </Form>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-2 border border-zinc-50 rounded-xl p-2 bg-zinc-50/20">
+                    {actionData.sitemapUrls.map((url: string) => (
+                      <div key={url} className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center justify-between gap-2 shadow-sm">
+                        <span className="truncate text-zinc-600">{url}</span>
+                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded">Pending</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
