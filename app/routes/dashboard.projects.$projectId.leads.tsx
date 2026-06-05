@@ -386,6 +386,31 @@ export default function ProjectLeads() {
                           ))}
                         </div>
                       )}
+
+                      {/* Custom Answers */}
+                      {lead.notes && (() => {
+                        try {
+                          const custom = JSON.parse(lead.notes);
+                          const entries = Object.entries(custom);
+                          if (entries.length === 0) return null;
+                          return (
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 py-1.5 px-3 bg-zinc-50 border border-zinc-100/80 rounded-xl max-w-2xl">
+                              {entries.map(([label, value]) => (
+                                <div key={label} className="text-xs text-zinc-500 font-medium">
+                                  <span className="font-extrabold text-zinc-600 mr-1">{label}:</span>
+                                  <span>{String(value)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        } catch {
+                          return (
+                            <div className="text-xs text-zinc-400 font-medium mt-2 py-1.5 px-3 bg-zinc-50 border border-zinc-100/80 rounded-xl">
+                              <span className="font-bold text-zinc-600 mr-1">Notes:</span> {lead.notes}
+                            </div>
+                          );
+                        }
+                      })()}
                     </div>
 
                     {/* Status dropdown */}

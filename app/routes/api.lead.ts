@@ -11,6 +11,35 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: "Project ID and Email are required" }, { status: 400 });
   }
 
+  const project = await prisma.project.findUnique({
+    where: { id: projectId }
+  });
+
+  if (!project) {
+    return json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // Collect custom field answers — keys prefixed with "custom_"
+  const customAnswers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (key.startsWith('custom_') && value) {
+      customAnswers[key] = value as string;
+    }
+  }
+
+  // Resolve custom_<id> → human-readable label using project.settings.leadFields
+  const leadFields = (project.settings as any)?.leadFields || [];
+  const labelledAnswers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(customAnswers)) {
+    const fieldId = key.replace('custom_', '');
+    const field = leadFields.find((f: any) => f.id === fieldId);
+    labelledAnswers[field?.label || fieldId] = value;
+  }
+
+  const notes = Object.keys(labelledAnswers).length
+    ? JSON.stringify(labelledAnswers)
+    : undefined;
+
   const lead = await prisma.lead.create({
     include: { project: true },
     data: {
@@ -19,6 +48,7 @@ export async function action({ request }: ActionFunctionArgs) {
       email,
       phone,
       company,
+      notes,
       ...(sessionId ? { sessionId } : {}),
     },
   });

@@ -254,6 +254,32 @@ export default function LeadDetail() {
             )}
           </div>
 
+          {/* Custom Answers card */}
+          {lead.notes && (() => {
+            try {
+              const custom = JSON.parse(lead.notes);
+              const entries = Object.entries(custom);
+              if (entries.length === 0) return null;
+              return (
+                <div className="bg-white border border-zinc-100 rounded-[32px] p-6 space-y-4">
+                  <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest">
+                    Form Submissions
+                  </h3>
+                  <div className="space-y-3.5 divide-y divide-zinc-50">
+                    {entries.map(([label, value], i) => (
+                      <div key={label} className={`text-sm ${i > 0 ? "pt-3" : ""}`}>
+                        <span className="block text-xs font-extrabold text-zinc-400 uppercase tracking-wide mb-0.5">{label}</span>
+                        <span className="font-bold text-brand-dark">{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            } catch {
+              return null;
+            }
+          })()}
+
           {/* Notes card */}
           <div className="bg-white border border-zinc-100 rounded-[32px] p-6">
             <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-4">

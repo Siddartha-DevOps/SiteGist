@@ -40,6 +40,7 @@ export default function EmbedChat() {
   const bubbleShape = branding.bubbleShape || "rounded-2xl";
   const font = branding.font || "sans";
   const leadPolicy = branding.leadPolicy || "keywords";
+  const leadFields = (settings?.leadFields as any[]) || [];
 
   const storageKey = `sitegist_session_${project.id}`;
 
@@ -262,14 +263,58 @@ export default function EmbedChat() {
             <h2 className="text-2xl font-black mb-2">Get in touch</h2>
             <p className={`text-sm mb-8 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>Leave your details and we'll get back to you shortly.</p>
             
-            <form onSubmit={handleLeadSubmit} className="space-y-4 text-left">
-              <div>
-                <label className="block text-xs font-bold mb-1.5 ml-1">Name</label>
-                <input name="name" required className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-zinc-50 border-zinc-100'}`} placeholder="John Doe" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold mb-1.5 ml-1">Email</label>
-                <input type="email" name="email" required className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-zinc-50 border-zinc-100'}`} placeholder="john@example.com" />
+            <form onSubmit={handleLeadSubmit} className="space-y-4 text-left w-full">
+              <div className="space-y-4 max-h-[280px] overflow-y-auto pr-1 py-1">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5 ml-1">Name</label>
+                  <input name="name" required className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-zinc-50 border-zinc-100'}`} placeholder="John Doe" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1.5 ml-1">Email</label>
+                  <input type="email" name="email" required className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-zinc-50 border-zinc-100'}`} placeholder="john@example.com" />
+                </div>
+
+                {leadFields.map(field => (
+                  <div key={field.id} className="space-y-1.5">
+                    <label className="block text-xs font-bold mb-1.5 ml-1">
+                      {field.label}{field.required && <span className="text-red-500 ml-0.5">*</span>}
+                    </label>
+
+                     {field.type === 'text' && (
+                       <input
+                         name={`custom_${field.id}`}
+                         required={field.required}
+                         className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100' : 'bg-zinc-50 border-zinc-100 text-zinc-900'}`}
+                         placeholder={field.label}
+                       />
+                     )}
+
+                     {field.type === 'dropdown' && (
+                       <select
+                         name={`custom_${field.id}`}
+                         required={field.required}
+                         className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100' : 'bg-zinc-50 border-zinc-100 text-zinc-900'}`}
+                       >
+                         <option value="">Select…</option>
+                         {(field.options || []).map((opt: string) => (
+                           <option key={opt} value={opt}>{opt}</option>
+                         ))}
+                       </select>
+                     )}
+
+                     {field.type === 'checkbox' && (
+                       <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                         <input
+                           type="checkbox"
+                           name={`custom_${field.id}`}
+                           value="yes"
+                           className="w-4 h-4 rounded border-zinc-300 text-primary focus:ring-primary/10 cursor-pointer"
+                         />
+                         <span className="text-sm font-semibold">{field.label}</span>
+                       </label>
+                     )}
+                  </div>
+                ))}
               </div>
               <button 
                 type="submit" 

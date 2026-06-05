@@ -75,6 +75,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   
   const rateLimitPerUser = parseInt(formData.get("rateLimitPerUser") as string || "0", 10);
   const rateLimitWindow = formData.get("rateLimitWindow") as string || "day";
+
+  const leadFieldsRaw = formData.get("leadFields") as string;
+  let leadFields: any[] = [];
+  try {
+    leadFields = JSON.parse(leadFieldsRaw || "[]");
+  } catch {
+    leadFields = [];
+  }
   
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
@@ -86,6 +94,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     chatMode,
     rateLimitPerUser,
     rateLimitWindow,
+    leadFields,
     branding: {
       primaryColor,
       assistantName,
@@ -113,6 +122,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return json({ success: true, message: "Bot settings updated successfully" });
 }
 
+interface LeadField {
+  id: string;
+  label: string;
+  type: 'text' | 'dropdown' | 'checkbox';
+  required: boolean;
+  options?: string[];
+  placeholder?: string;
+}
+
 export default function ProjectSettings() {
   const { project } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -120,6 +138,9 @@ export default function ProjectSettings() {
   const isSaving = navigation.state === "submitting";
   
   const currentSettings = (project.settings as any) || {};
+  const [leadFields, setLeadFields] = useState<LeadField[]>(
+    currentSettings.leadFields || []
+  );
   const branding = currentSettings.branding || {};
   const removeBranding = branding.removeBranding || false;
   const customDomain = branding.customDomain || "";
@@ -431,6 +452,95 @@ export default function ProjectSettings() {
                      ))}
                    </div>
                    <p className="mt-2 text-xs text-zinc-400 font-medium">Capture these details automatically when users request human help or special access.</p>
+                </div>
+
+                <div className="border-t border-zinc-100 pt-6 space-y-4">
+                  <input type="hidden" name="leadFields" value={JSON.stringify(leadFields)} />
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-bold text-brand-dark">Custom Lead Fields</label>
+                    <button
+                      type="button"
+                      onClick={() => setLeadFields(prev => [...prev, {
+                        id: Math.random().toString(36).substring(2, 9),
+                        label: '',
+                        type: 'text',
+                        required: false,
+                        options: [],
+                      }])}
+                      className="text-xs font-bold text-primary hover:underline hover:brightness-110 flex items-center gap-1 cursor-pointer"
+                    >
+                      + Add Custom Field
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-400 font-medium">Configure extra answers you'd like to collect, such as Company size, Role, or Budget.</p>
+
+                  <div className="space-y-4">
+                    {leadFields.map((field, i) => (
+                      <div key={field.id} className="border border-zinc-150 rounded-2xl p-4 space-y-3 bg-zinc-50/50">
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            placeholder="Field label (e.g. Budget size)"
+                            value={field.label}
+                            onChange={e => setLeadFields(prev =>
+                              prev.map((f, idx) => idx === i ? { ...f, label: e.target.value } : f)
+                            )}
+                            required
+                            className="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-xl focus:ring-2 focus:ring-primary/10 outline-none text-sm font-medium transition-all"
+                          />
+                          <select
+                            value={field.type}
+                            onChange={e => setLeadFields(prev =>
+                              prev.map((f, idx) => idx === i ? { ...f, type: e.target.value as LeadField['type'] } : f)
+                            )}
+                            className="px-3 py-2 bg-white border border-zinc-200 rounded-xl focus:ring-2 focus:ring-primary/10 outline-none text-sm font-medium transition-all"
+                          >
+                            <option value="text">Text Input</option>
+                            <option value="dropdown">Dropdown (Select)</option>
+                            <option value="checkbox">Checkbox (Yes/No)</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setLeadFields(prev => prev.filter((_, idx) => idx !== i))}
+                            className="text-zinc-400 hover:text-red-500 font-bold text-sm p-1 transition-colors cursor-pointer"
+                            title="Remove Field"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        {field.type === 'dropdown' && (
+                          <div>
+                            <label className="block text-xs font-semibold text-zinc-500 mb-1">Dropdown Options (one per line)</label>
+                            <textarea
+                              placeholder={"Small (1–10)\nMedium (11–50)\nLarge (50+)"}
+                              value={(field.options || []).join('\n')}
+                              onChange={e => setLeadFields(prev =>
+                                prev.map((f, idx) => idx === i
+                                  ? { ...f, options: e.target.value.split('\n').filter(line => line.trim() !== "") }
+                                  : f)
+                              )}
+                              rows={3}
+                              required
+                              className="w-full px-3 py-2 bg-white border border-zinc-200 rounded-xl focus:ring-2 focus:ring-primary/10 outline-none text-sm font-medium transition-all"
+                            />
+                          </div>
+                        )}
+
+                        <label className="flex items-center gap-2 text-xs font-bold text-zinc-500 select-none cursor-pointer w-fit">
+                          <input
+                            type="checkbox"
+                            checked={field.required}
+                            onChange={e => setLeadFields(prev =>
+                              prev.map((f, idx) => idx === i ? { ...f, required: e.target.checked } : f)
+                            )}
+                            className="w-4 h-4 rounded border-zinc-300 text-primary focus:ring-primary/10 cursor-pointer"
+                          />
+                          This field is required
+                        </label>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </section>
