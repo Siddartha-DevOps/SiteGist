@@ -33,7 +33,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   
   // Use upload handler for potential file uploads
   const uploadHandler = unstable_createMemoryUploadHandler({
-    maxPartSize: 5 * 1024 * 1024, // 5MB
+    maxPartSize: 10 * 1024 * 1024, // 10MB
   });
   
   const formData = await unstable_parseMultipartFormData(request, uploadHandler);
@@ -303,8 +303,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
       content = await parseDocx(buffer);
     } else if (file.type === "text/plain") {
       content = buffer.toString();
+    } else if (file.type === "text/csv" || file.name.endsWith(".csv")) {
+      const { parseCsv } = await import("~/ai-layer/document-parsers.server");
+      content = parseCsv(buffer);
+    } else if (
+      file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+      file.name.endsWith(".pptx")
+    ) {
+      const { parsePptx } = await import("~/ai-layer/document-parsers.server");
+      content = await parsePptx(buffer);
+    } else if (
+      file.type === "text/markdown" ||
+      file.name.endsWith(".md") ||
+      file.name.endsWith(".markdown")
+    ) {
+      const { parseMarkdown } = await import("~/ai-layer/document-parsers.server");
+      content = parseMarkdown(buffer);
     } else {
-      return json({ error: "Unsupported file type. Use PDF, DOCX or TXT." }, { status: 400 });
+      return json({ error: "Unsupported file type. Use PDF, DOCX, TXT, CSV, PPTX or MD." }, { status: 400 });
     }
 
     if (!content.trim()) return json({ error: "Failed to extract text from file" }, { status: 400 });
@@ -667,7 +683,7 @@ export default function TrainProject() {
                   <input 
                     type="file" 
                     name="file" 
-                    accept=".pdf,.docx,.txt"
+                    accept=".pdf,.docx,.txt,.csv,.pptx,.md,.markdown"
                     required
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
@@ -675,7 +691,7 @@ export default function TrainProject() {
                     <Upload className="w-8 h-8 text-zinc-400 group-hover:text-primary" />
                   </div>
                   <h3 className="font-bold mb-1">Click or drag a file here</h3>
-                  <p className="text-xs text-text-muted">Supports PDF, DOCX, and TXT (Max 5MB)</p>
+                  <p className="text-xs text-text-muted">Supports PDF, DOCX, TXT, CSV, PPTX, and Markdown (Max 10MB)</p>
                 </div>
                 <button 
                   type="submit" 
