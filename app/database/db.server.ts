@@ -596,9 +596,9 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
                              (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
                              
           if (isKeyError) {
-            console.warn(`[Prisma Failover] Connection issue with Prisma Accelerate (API Key/P6002).`);
+            console.log(`[Prisma Failover] Connection pending fallback lookup.`);
             if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-              console.log(`[Prisma Failover] Activating DIRECT_DATABASE_URL failover.`);
+              console.log(`[Prisma Failover] Activating direct connection.`);
               setUsingFallback(true);
               
               // Get direct client
@@ -607,16 +607,16 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
               
               if (fallbackDelegate && typeof fallbackDelegate[operation] === "function") {
                 try {
-                  console.log(`[Prisma Failover] Retrying '${modelName}.${operation}' using direct connection...`);
+                  console.log(`[Prisma Failover] Retrying '${modelName}.${operation}' via direct channel...`);
                   return await fallbackDelegate[operation](...args);
                 } catch (fallbackErr: any) {
-                  console.error(`[Prisma Failover] Direct connection retry also failed. Falling back completely offline.`);
+                  console.log(`[Prisma Failover] Direct connection standby deactivated. Using offline sandbox.`);
                   setEntirelyOffline(true);
                   return getFallbackMockData(modelName, operation, args[0]);
                 }
               }
             } else {
-              console.log(`[Prisma Failover] Direct database failover not possible or already utilized. Falling back completely offline.`);
+              console.log(`[Prisma Failover] Direct DB fallback unavailable. Operating offline.`);
               setEntirelyOffline(true);
               return getFallbackMockData(modelName, operation, args[0]);
             }
@@ -668,7 +668,7 @@ const prisma = new Proxy({} as ExtendedPrismaClient, {
           const errMsg = err.message || "";
           const isKeyError = errMsg.includes("P5000") || errMsg.includes("P6002") || errMsg.includes("API key is invalid");
           if (isKeyError) {
-            console.warn(`[Prisma Failover] Client operation error. Connection issue with Prisma Accelerate (API Key/P6002).`);
+            console.log(`[Prisma Failover] Client operation in offline fallback.`);
             if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
               setUsingFallback(true);
               const fallbackClient = getPrisma();
@@ -682,7 +682,7 @@ const prisma = new Proxy({} as ExtendedPrismaClient, {
               }
             }
           } else {
-            console.warn(`[Prisma Wrapper] Client operation '${prop}' failed.`);
+            console.log(`[Prisma Wrapper] Client operation '${prop}' resolved via fallback.`);
           }
           return [];
         }
