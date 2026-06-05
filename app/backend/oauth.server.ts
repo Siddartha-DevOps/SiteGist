@@ -188,6 +188,78 @@ export async function exchangeCrispCode(code: string, projectId: string) {
   return data;
 }
 
+// --- Intercom ---
+export function getIntercomAuthUrl(projectId: string): string {
+  const clientId = process.env.INTERCOM_CLIENT_ID;
+  if (!clientId) throw new Error("INTERCOM_CLIENT_ID is missing");
+
+  const authUrl = new URL("https://app.intercom.com/oauth");
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("state", projectId);
+  return authUrl.toString();
+}
+
+export async function exchangeIntercomCode(code: string, projectId: string): Promise<void> {
+  const tokenRes = await fetch("https://api.intercom.io/auth/eagle/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code,
+      client_id: process.env.INTERCOM_CLIENT_ID,
+      client_secret: process.env.INTERCOM_CLIENT_SECRET,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    throw new Error(`Intercom token exchange failed: ${await tokenRes.text()}`);
+  }
+
+  const data = await tokenRes.json();
+  const accessToken: string = data.token || data.access_token;
+
+  // Fetch workspace info using the token
+  const meRes = await fetch("https://api.intercom.io/me", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Intercom-Version": "2.10",
+    },
+  });
+  if (!meRes.ok) {
+    throw new Error(`Intercom /me request failed: ${await meRes.text()}`);
+  }
+  const me = await meRes.json();
+  const workspaceId: string = me.app?.id_code || me.app?.id || "";
+
+  // Fetch the first admin in the workspace and cache their bot_admin_id
+  const adminsRes = await fetch("https://api.intercom.io/admins", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Intercom-Version": "2.10",
+    },
+  });
+  let botAdminId = "";
+  if (adminsRes.ok) {
+    const adminsData = await adminsRes.json();
+    botAdminId = adminsData.admins?.[0]?.id || adminsData.id || "";
+  } else {
+    console.warn(`[Intercom] Failed to fetch admins: ${await adminsRes.text()}`);
+  }
+
+  await prisma.integration.upsert({
+    where: { projectId_provider: { projectId, provider: "intercom" } },
+    create: {
+      projectId,
+      provider: "intercom",
+      accessToken,
+      details: { workspace_id: workspaceId, bot_admin_id: botAdminId },
+    },
+    update: {
+      accessToken,
+      details: { workspace_id: workspaceId, bot_admin_id: botAdminId },
+    },
+  });
+}
+
 // --- Facebook Messenger ---
 const GRAPH_API = "https://graph.facebook.com/v18.0";
 

@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare } from "lucide-react";
+import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export async function action({ params, request }: ActionFunctionArgs) {
@@ -118,13 +118,14 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger') return;
+    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom') return;
     setConnecting(provider);
     try {
       const endpoint =
         provider === 'notion' ? 'notion' :
         provider === 'messenger' ? 'messenger' :
         provider === 'crisp' ? 'crisp' :
+        provider === 'intercom' ? 'intercom' :
         'google';
       const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
       const data = await response.json();
@@ -178,6 +179,13 @@ export default function ProjectIntegrations() {
       description: "Deploy your AI agent inside Crisp live chat to answer visitors automatically.",
       icon: <MessageSquare className="w-6 h-6 text-blue-500" />,
       connected: project.integrations.some(i => i.provider === 'crisp'),
+    },
+    {
+      id: "intercom",
+      name: "Intercom",
+      description: "Deploy your AI agent inside Intercom Messenger and hand off escalated chats to human agents.",
+      icon: <MessageCircle className="w-6 h-6 text-blue-500" />,
+      connected: project.integrations.some(i => i.provider === 'intercom'),
     },
     {
       id: "messenger",

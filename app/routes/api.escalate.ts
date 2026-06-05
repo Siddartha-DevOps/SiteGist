@@ -94,6 +94,91 @@ export async function action({ request }: ActionFunctionArgs) {
               console.error("[Escalation API] Slack notification failed:", err);
             });
           }
+
+          // --- Intercom Handoff ---
+          const intercomIntegration = await prisma.integration.findUnique({
+            where: { projectId_provider: { projectId, provider: "intercom" } },
+          });
+
+          if (intercomIntegration) {
+            const details = intercomIntegration.details as any;
+
+            // Load chat transcript
+            const messages = await prisma.message.findMany({
+              where: { sessionId },
+              orderBy: { createdAt: "asc" },
+              take: 20,
+            });
+
+            const transcript = messages
+              .map((m) => `**${m.role === "user" ? "Visitor" : "Bot"}:** ${m.content}`)
+              .join("\n\n");
+
+            const session = await prisma.chatSession.findUnique({
+              where: { id: sessionId },
+              select: { customerEmail: true },
+            });
+
+            // Find or create an Intercom contact for the visitor
+            let contactId: string | undefined;
+            if (session?.customerEmail) {
+              try {
+                const contactRes = await fetch(
+                  `https://api.intercom.io/contacts/search`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                      "Intercom-Version": "2.10",
+                    },
+                    body: JSON.stringify({
+                      query: { field: "email", operator: "=", value: session.customerEmail },
+                    }),
+                  }
+                );
+                if (contactRes.ok) {
+                  const contactData = await contactRes.json();
+                  contactId = contactData.data?.[0]?.id;
+                }
+
+                if (!contactId) {
+                  // Create contact if not found
+                  const createRes = await fetch("https://api.intercom.io/contacts", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                      "Intercom-Version": "2.10",
+                    },
+                    body: JSON.stringify({ role: "lead", email: session.customerEmail }),
+                  });
+                  if (createRes.ok) {
+                    const created = await createRes.json();
+                    contactId = created.id;
+                  }
+                }
+              } catch (contactErr) {
+                console.error("[Intercom Escalation] Failed searching/creating contact:", contactErr);
+              }
+            }
+
+            // Create a new Intercom conversation with the transcript as the first message
+            await fetch("https://api.intercom.io/conversations", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${intercomIntegration.accessToken}`,
+                "Intercom-Version": "2.10",
+              },
+              body: JSON.stringify({
+                from: contactId
+                  ? { type: "contact", id: contactId }
+                  : { type: "admin", id: details?.bot_admin_id }, // fallback if no visitor email
+                body: `🤖 Chat escalated from ${project.name}\n\n${transcript}`,
+              }),
+            }).catch((e) => console.error("[Intercom] Failed to create conversation:", e));
+          }
         }
       } catch (projErr) {
         console.error("[Escalation API] DB error fetching project & user details:", projErr);
