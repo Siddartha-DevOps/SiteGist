@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
-import { streamRAG } from "~/ai-layer/ai.server";
+import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -222,6 +222,17 @@ export async function action({ request }: ActionFunctionArgs) {
           }
           
           console.log(`[Chat] RAG finished, total length: ${fullAnswer.length}`);
+
+          if (fullAnswer) {
+            try {
+              const suggestions = await generateFollowUpSuggestions(message, fullAnswer);
+              if (suggestions && suggestions.length > 0) {
+                controller.enqueue(encoder.encode(`event: suggestions\ndata: ${JSON.stringify(suggestions)}\n\n`));
+              }
+            } catch (e) {
+              console.error("[Chat] Failed to generate follow up suggestions:", e);
+            }
+          }
 
           if (projectId !== "demo-project" && session && project) {
             try {

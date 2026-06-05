@@ -57,7 +57,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   onClose: () => void;
   suggestions?: string[];
 }) {
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp?: Date }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp?: Date; suggestions?: string[] }[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -179,6 +179,9 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
     const textToSend = overrideInput || input;
     if (!textToSend.trim() || isTyping) return;
 
+    // Clear suggestions from all previous messages on send
+    setMessages((prev) => prev.map(m => m.suggestions ? { ...m, suggestions: undefined } : m));
+
     const userMessage = textToSend.trim();
     const now = new Date();
     setInput("");
@@ -238,6 +241,18 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
               } else if (currentEvent === "agent-mode") {
                 setIsAgentMode(true);
                 setMode('human');
+              } else if (currentEvent === "suggestions") {
+                const chips = data as string[];
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  for (let i = updated.length - 1; i >= 0; i--) {
+                    if (updated[i].role === "assistant") {
+                      updated[i] = { ...updated[i], suggestions: chips };
+                      break;
+                    }
+                  }
+                  return updated;
+                });
               } else {
                 if (data.content) {
                   const content = data.content;
@@ -381,6 +396,20 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
               <span className={`text-[9px] mt-1.5 opacity-40 font-bold uppercase tracking-wider ${msg.role === "user" ? "text-right mr-1" : "ml-1"}`}>
                 {getRelativeTime(msg.timestamp)}
               </span>
+
+              {msg.role === 'assistant' && msg.suggestions && msg.suggestions.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {msg.suggestions.map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSend(suggestion)}
+                      className="text-[12px] text-zinc-600 font-medium bg-zinc-50 hover:bg-[#155DEE]/5 hover:text-[#155DEE] border border-zinc-100 hover:border-[#155DEE]/20 px-3 py-1.5 rounded-xl transition-all text-left w-fit shadow-sm cursor-pointer"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}

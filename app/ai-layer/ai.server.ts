@@ -848,3 +848,60 @@ export async function* generateSimpleAIStream(prompt: string) {
   }
 }
 
+/**
+ * Generates smart follow-up questions based on the query and AI response.
+ */
+export async function generateFollowUpSuggestions(query: string, answer: string): Promise<string[]> {
+  const prompt = `Based on this question and answer, suggest exactly 3 short follow-up questions the user might ask next. Return ONLY a JSON array of 3 strings, no explanation.
+
+Question: ${query}
+Answer: ${answer}
+
+Example output: ["Is there a free trial?", "Can I cancel anytime?", "Do you offer annual billing?"]`;
+
+  const gemini = getGemini();
+  const openai = getOpenAI();
+  let rawText = "";
+
+  try {
+    if (gemini) {
+      console.log("[AI] Generating suggestions using Gemini...");
+      const resp = await gemini.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          maxOutputTokens: 120,
+        }
+      });
+      rawText = resp.text || "";
+    } else if (openai) {
+      console.log("[AI] Generating suggestions using OpenAI...");
+      const resp = await (openai as any).chat.completions.create({
+        model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 120,
+      });
+      rawText = resp.choices[0]?.message?.content || "";
+    }
+
+    if (!rawText) return [];
+
+    let cleanJson = rawText.trim();
+    // Strip markdown code blocks if any
+    if (cleanJson.startsWith("```")) {
+      cleanJson = cleanJson.replace(/^```[a-zA-Z]*\r?\n?/, "");
+      cleanJson = cleanJson.replace(/```$/, "");
+      cleanJson = cleanJson.trim();
+    }
+
+    const parsed = JSON.parse(cleanJson);
+    if (Array.isArray(parsed)) {
+      return parsed.slice(0, 3).map(item => String(item).trim());
+    }
+  } catch (err) {
+    console.warn("[Suggestions Generation Error] Failed:", err);
+  }
+  return [];
+}
+
+
