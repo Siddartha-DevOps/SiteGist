@@ -638,15 +638,13 @@ function wrapModelDelegate(modelName: string, delegate: any): any {
             errMsg.toLowerCase().includes("can't reach database");
             
           if (isTransientError) {
-            console.log(`[Prisma Wrapper] Transient fluctuation. Falling back to mock database.`);
-            setEntirelyOffline(true);
-            return getFallbackMockData(modelName, operation, args[0]);
+            console.log(`[Prisma Wrapper] Transient fluctuation encountered.`);
+            throw err;
           }
-          
-          // Fallback for generic/other errors: go offline and return mock data to prevent blocking user in current run
-          console.warn(`[Prisma Wrapper] Operation '${modelName}.${operation}' failed. Operating offline fallback.`);
-          setEntirelyOffline(true);
-          return getFallbackMockData(modelName, operation, args[0]);
+
+          // Do NOT permanently latch offline for unknown/generic errors — surface them
+          // so the caller can handle and the next request retries the real database.
+          throw err;
         }
       };
     }
