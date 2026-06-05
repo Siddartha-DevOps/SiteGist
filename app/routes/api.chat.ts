@@ -213,8 +213,65 @@ export async function action({ request }: ActionFunctionArgs) {
 
           for await (const chunk of ragStream) {
             if (chunk.startsWith("METADATA:")) {
-              const metadata = chunk.slice(9);
-              controller.enqueue(encoder.encode(`event: metadata\ndata: ${metadata}\n\n`));
+              const raw = chunk.slice(9).trim();
+              let sources: { source: string; title?: string; type?: string }[] = [];
+
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed && Array.isArray(parsed.citations)) {
+                  sources = parsed.citations.map((c: any) => ({
+                    source: c.url || c.source || "",
+                    title: c.title || "",
+                    type: c.type || (c.url?.startsWith("http") ? "web" : "file"),
+                  }));
+                } else if (Array.isArray(parsed)) {
+                  sources = parsed.map((c: any) => {
+                    if (typeof c === "string") return { source: c };
+                    return {
+                      source: c.source || c.url || "",
+                      title: c.title || "",
+                      type: c.type || (c.source?.startsWith("http") || c.url?.startsWith("http") ? "web" : "file")
+                    };
+                  });
+                } else if (parsed && typeof parsed === "object") {
+                  if (parsed.source) {
+                    sources = [{
+                      source: parsed.source,
+                      title: parsed.title,
+                      type: parsed.type || (parsed.source.startsWith("http") ? "web" : "file")
+                    }];
+                  } else if (parsed.url) {
+                    sources = [{
+                      source: parsed.url,
+                      title: parsed.title,
+                      type: parsed.type || (parsed.url.startsWith("http") ? "web" : "file")
+                    }];
+                  }
+                } else if (typeof parsed === "string") {
+                  sources = [{ source: parsed }];
+                }
+              } catch {
+                sources = raw ? [{ source: raw }] : [];
+              }
+
+              // Deduplicate by source URL and filter out placeholder values
+              const seen = new Set<string>();
+              const cleanedSources = sources.filter(s => {
+                if (!s.source) return false;
+                const src = s.source.trim();
+                if (src === "knowledge" || src === "qa" || src === "internal") return false;
+                if (seen.has(src)) return false;
+                seen.add(src);
+                return true;
+              });
+
+              if (cleanedSources.length > 0) {
+                controller.enqueue(
+                  encoder.encode(
+                    `event: metadata\ndata: ${JSON.stringify({ sources: cleanedSources })}\n\n`
+                  )
+                );
+              }
               continue;
             }
             fullAnswer += chunk;

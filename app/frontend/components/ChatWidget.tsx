@@ -57,7 +57,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   onClose: () => void;
   suggestions?: string[];
 }) {
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp?: Date; suggestions?: string[] }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp?: Date; suggestions?: string[]; sources?: { source: string; title?: string; type?: string }[] }[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -253,6 +253,20 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
                   }
                   return updated;
                 });
+              } else if (currentEvent === "metadata") {
+                const { sources } = data;
+                if (sources && Array.isArray(sources)) {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    for (let i = updated.length - 1; i >= 0; i--) {
+                      if (updated[i].role === "assistant") {
+                        updated[i] = { ...updated[i], sources };
+                        break;
+                      }
+                    }
+                    return updated;
+                  });
+                }
               } else {
                 if (data.content) {
                   const content = data.content;
@@ -392,6 +406,48 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
                   <ActionButtons text={msg.content} id={i} reactions={reactions} handleCopy={handleCopy} handleReaction={handleReaction} copiedId={copiedId} />
                 )}
               </div>
+
+              {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                <div className="mt-1.5 ml-2 flex flex-wrap gap-x-3 gap-y-1 items-center">
+                  {msg.sources.map((s, idx) => {
+                    const isUrl = s.source.startsWith('http');
+                    let label = s.title || "";
+                    if (!label) {
+                      if (isUrl) {
+                        try {
+                          const urlObj = new URL(s.source);
+                          label = urlObj.pathname && urlObj.pathname !== "/" ? urlObj.pathname : urlObj.hostname;
+                        } catch {
+                          label = s.source;
+                        }
+                      } else {
+                        label = s.source.split('/').pop() || s.source;
+                      }
+                    }
+
+                    return isUrl ? (
+                      <a
+                        key={idx}
+                        href={s.source}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-zinc-500 hover:text-[#155DEE] hover:underline flex items-center gap-1 transition-all"
+                      >
+                        <span className="text-zinc-400">↗</span>
+                        <span className="truncate max-w-[150px]">{label}</span>
+                      </a>
+                    ) : (
+                      <span
+                        key={idx}
+                        className="text-[11px] text-zinc-500 flex items-center gap-1 select-none"
+                      >
+                        <span className="text-zinc-400">📄</span>
+                        <span className="truncate max-w-[150px]">{label}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
 
               <span className={`text-[9px] mt-1.5 opacity-40 font-bold uppercase tracking-wider ${msg.role === "user" ? "text-right mr-1" : "ml-1"}`}>
                 {getRelativeTime(msg.timestamp)}
