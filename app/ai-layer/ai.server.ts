@@ -806,7 +806,7 @@ How it works:
 
     if (verificationResult.status === "UNVERIFIED") {
        console.warn(`[Verification Alert] Answer was marked as UNVERIFIED: ${verificationResult.explanation}`);
-       // We keep it in logs but don't clutter the UI with stars and emojis
+       yield "\n\n⚠ This answer may need verification.";
     }
   } catch (vError) {
     console.error("[Verification] Error during verification step:", vError);
