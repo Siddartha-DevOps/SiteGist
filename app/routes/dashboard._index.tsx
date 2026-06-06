@@ -132,7 +132,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       analyticsData: [],
       hasTrendData: false,
       dbError: isP6002 ? "PRISMA_AUTH_ERROR" : "GENERAL_ERROR",
-      errorMessage: error.message 
+      errorMessage: error.message,
+      usage: null,
+      breakdown: null
     });
   }
 }

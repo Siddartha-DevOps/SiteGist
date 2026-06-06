@@ -19,6 +19,19 @@ interface DashboardIndexPageProps {
   isCreating: boolean;
   analyticsData: Array<{ name: string; leads: number; messages: number }>;
   hasTrendData: boolean;
+  usage?: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+    percent: number;
+    planName: string;
+    cycleStart: string;
+  };
+  breakdown?: Array<{
+    id: string;
+    name: string;
+    count: number;
+  }>;
 }
 
 const AreaChartAny = AreaChart as any;
@@ -32,7 +45,7 @@ const BarChartAny = BarChart as any;
 const BarAny = Bar as any;
 const CellAny = Cell as any;
 
-export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTrendData }: DashboardIndexPageProps) {
+export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTrendData, usage, breakdown }: DashboardIndexPageProps) {
   const [mounted, setMounted] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [sort, setSort] = React.useState<"newest"|"oldest"|"most_sessions"|"name_az">("newest");
@@ -196,6 +209,85 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {projects.length > 0 && usage && (
+        <div className="rounded-[40px] border border-brand-border bg-white p-8 mb-12 shadow-sm animate-in fade-in duration-300">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-lg text-brand-dark">Message Usage</h3>
+              <p className="text-xs text-brand-gray">{usage.planName} Plan &middot; This Month</p>
+            </div>
+            <Link to="/dashboard/billing" className="text-xs font-bold text-primary hover:underline">
+              Manage Plan &rarr;
+            </Link>
+          </div>
+
+          {usage.unlimited ? (
+            <div className="mb-6">
+              <p className="text-3xl font-black text-brand-dark">
+                {usage.used.toLocaleString()}{" "}
+                <span className="text-sm font-normal text-brand-gray">messages (unlimited)</span>
+              </p>
+            </div>
+          ) : (
+            <div className="mb-6">
+              <p className="text-sm text-brand-gray mb-2">
+                You've used <strong className="text-brand-dark font-black">{usage.used.toLocaleString()}</strong> of{" "}
+                <strong className="text-brand-dark font-black">{usage.limit.toLocaleString()}</strong> messages this month
+              </p>
+              <div className="w-full h-3 bg-zinc-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    usage.percent >= 100 ? "bg-red-500"
+                    : usage.percent >= 80 ? "bg-orange-500"
+                    : "bg-primary"
+                  }`}
+                  style={{ width: `${usage.percent}%` }}
+                />
+              </div>
+              {usage.percent >= 80 && usage.percent < 100 && (
+                <p className="text-xs text-orange-600 mt-2 font-semibold">
+                  You're at {usage.percent}% of your limit.{" "}
+                  <Link to="/dashboard/billing" className="underline font-bold">Upgrade</Link>
+                </p>
+              )}
+              {usage.percent >= 100 && (
+                <p className="text-xs text-red-600 mt-2 font-black">
+                  You've hit your monthly limit.{" "}
+                  <Link to="/dashboard/billing" className="underline font-bold">Upgrade to keep responding</Link>
+                </p>
+              )}
+            </div>
+          )}
+
+          {breakdown && breakdown.length > 0 && (
+            <div className="pt-6 border-t border-brand-border">
+              <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-brand-gray mb-4">Breakdown by Chatbot</h4>
+              <div className="space-y-4">
+                {breakdown.map((item) => {
+                  const itemPercent = usage.unlimited || usage.limit === 0
+                    ? 0 
+                    : Math.min(100, Math.round((item.count / usage.limit) * 100));
+                  return (
+                    <div key={item.id} className="space-y-1">
+                      <div className="flex justify-between text-xs font-bold text-brand-dark">
+                        <span className="truncate max-w-[200px]">{item.name}</span>
+                        <span className="text-brand-gray font-semibold">{item.count.toLocaleString()} messages</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-zinc-50 rounded-full overflow-hidden border border-brand-border/30">
+                        <div
+                          className="h-full bg-primary/70 rounded-full transition-all duration-500"
+                          style={{ width: `${usage.unlimited ? Math.min(100, (item.count / Math.max(1, usage.used)) * 100) : itemPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
