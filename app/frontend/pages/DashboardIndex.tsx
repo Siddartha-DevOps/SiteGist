@@ -88,7 +88,7 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
         </div>
         
         <Link 
-          to="/create-chatbot" 
+          to="/dashboard/projects/new" 
           className="inline-flex items-center justify-center gap-2 bg-primary text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all duration-150 rounded-xl px-4 py-3 hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           <Plus className="h-4 w-4" />
@@ -336,7 +336,7 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
           </div>
           <h2 className="text-2xl font-bold text-brand-dark mb-3">No agents yet</h2>
           <Link 
-            to="/create-chatbot"
+            to="/dashboard/projects/new"
             className="text-brand-gray font-medium text-lg leading-relaxed underline underline-offset-8 decoration-brand-gray/30 hover:decoration-primary hover:text-transparent hover:bg-clip-text hover:bg-gradient-to-r hover:from-primary hover:to-purple-500 transition-all duration-300"
           >
             Create your first chatbot

@@ -98,7 +98,7 @@ export default function DocsIndex() {
         <div className="p-8 bg-brand-dark rounded-[32px] text-white">
           <h3 className="text-2xl font-black mb-6">Next steps</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <NextStepLink to="/create-chatbot" title="Create your first chatbot" description="Get started by creating and customizing your first chatbot" />
+            <NextStepLink to="/dashboard/projects/new" title="Create your first chatbot" description="Get started by creating and customizing your first chatbot" />
             <NextStepLink to="/#live-demo" title="Try the live demo" description="Experience SiteGist in action with our interactive demo" />
             <NextStepLink to="/integrations" title="View integrations" description="Connect SiteGist with your existing tools and platforms" />
             <NextStepLink to="/features" title="Explore use cases" description="See how businesses use SiteGist to solve real problems" />
