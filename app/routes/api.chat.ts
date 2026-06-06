@@ -6,6 +6,8 @@ import { getRedis } from "~/lib/redis.server";
 import { sendWebhook } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 
+const HISTORY_CHAR_BUDGET = 6000;
+
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Chat Action] Incoming request: ${request.method} ${request.url}`);
   
@@ -169,9 +171,21 @@ export async function action({ request }: ActionFunctionArgs) {
         const history = await prisma.message.findMany({
           where: { sessionId: session.id },
           orderBy: { createdAt: 'desc' },
-          take: 5,
+          take: 20,
         });
-        formattedHistory = history.reverse().map(m => ({ role: m.role, content: m.content }));
+
+        const selectedMessages = [];
+        let runningTotal = 0;
+        for (const m of history) {
+          const length = m.content ? m.content.length : 0;
+          if (runningTotal + length > HISTORY_CHAR_BUDGET && selectedMessages.length > 0) {
+            break;
+          }
+          runningTotal += length;
+          selectedMessages.push(m);
+        }
+
+        formattedHistory = selectedMessages.reverse().map(m => ({ role: m.role, content: m.content }));
 
         // 3. Log user message
         await prisma.message.create({
