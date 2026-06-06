@@ -4,6 +4,8 @@ import { getPortkey } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
 
+const VECTOR_SCORE_THRESHOLD = 0.30;
+
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
@@ -506,6 +508,7 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
 
       // Add vector results
       vectorResults.matches?.forEach((match: any) => {
+        if ((match.score || 0) < VECTOR_SCORE_THRESHOLD) return;
         const text = (match.metadata as any)?.text;
         if (!text) return;
         const key = text.substring(0, 100);
