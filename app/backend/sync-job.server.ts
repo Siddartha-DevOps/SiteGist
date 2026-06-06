@@ -87,15 +87,30 @@ export async function syncProjectSources(projectId: string) {
 export async function syncAllProjects() {
   console.log("[Sync Job] Starting global synchronization...");
   const projects = await prisma.project.findMany({
-    select: { id: true, name: true, settings: true }
+    select: { id: true, name: true, settings: true, updatedAt: true }
   });
 
+  const now = Date.now();
   for (const project of projects) {
-    console.log(`[Sync Job] Evaluating sync frequency for project: ${project.name} (${project.id})`);
-    
-    // In a production app, we would verify here if the sync frequency threshold is met 
-    // based on settings.syncFrequency (e.g. daily, weekly). For safety and continuous updates,
-    // we process the project's automatic sync here.
+    const settings = (project.settings as any) || {};
+    const frequency: string = settings.syncFrequency || "Daily";
+    if (frequency === "Manual") {
+      console.log(`[Sync Job] Skipping ${project.name} — Manual Only`);
+      continue;
+    }
+    const thresholds: Record<string, number> = {
+      Daily:   24 * 60 * 60 * 1000,
+      Weekly:   7 * 24 * 60 * 60 * 1000,
+      Monthly: 30 * 24 * 60 * 60 * 1000,
+    };
+    const threshold = thresholds[frequency] ?? thresholds.Daily;
+    const lastSync = project.updatedAt.getTime();
+    if (now - lastSync < threshold) {
+      console.log(`[Sync Job] Skipping ${project.name} — synced ${Math.round((now - lastSync) / 3600000)}h ago, threshold is ${frequency}`);
+      continue;
+    }
+
+    console.log(`[Sync Job] Syncing ${project.name} (${frequency})`);
     try {
       await syncProjectSources(project.id);
     } catch (error) {

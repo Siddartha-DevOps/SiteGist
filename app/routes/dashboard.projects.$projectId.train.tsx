@@ -1183,10 +1183,22 @@ export default function TrainProject() {
             <p className="text-xs text-zinc-400 mt-1">Manage the data your AI uses to answer questions.</p>
           </div>
           <div className="flex items-center gap-3">
-             <button className="px-4 py-2 bg-zinc-50 hover:bg-zinc-100 border border-zinc-100 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5" /> Sync All
-             </button>
-             <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest bg-zinc-50 px-3 py-1 rounded-lg border border-zinc-100">
+            <Form method="post">
+              <input type="hidden" name="_action" value="trigger_sync_now" />
+              <button
+                type="submit"
+                disabled={isCrawling}
+                className="px-4 py-2 bg-zinc-50 hover:bg-zinc-100 border border-zinc-100 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {isCrawling ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                Sync All
+              </button>
+            </Form>
+            <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest bg-zinc-50 px-3 py-1 rounded-lg border border-zinc-100">
               {(project as any).knowledgeSources.length} Sources
             </div>
           </div>

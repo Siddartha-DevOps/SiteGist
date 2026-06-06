@@ -476,18 +476,6 @@ export default function ProjectIntegrations() {
           </div>
         ))}
       </div>
-
-      <div className="mt-12 p-8 bg-brand-orange/5 border border-brand-orange/10 rounded-[32px]">
-        <div className="flex items-start gap-4">
-          <AlertCircle className="w-6 h-6 text-brand-orange flex-shrink-0" />
-          <div>
-            <h4 className="font-bold text-brand-dark mb-1">Coming Soon: Auto-Sync</h4>
-            <p className="text-sm text-zinc-600 leading-relaxed">
-              We are currently finalizing the auto-sync engine. Once connected, your bot will automatically re-train itself every time you edit a file in Google Drive or a page in Notion.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
