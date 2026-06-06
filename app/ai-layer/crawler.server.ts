@@ -2,6 +2,7 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import Sitemapper from "sitemapper";
 import mammoth from "mammoth";
+import { getEncoding } from "js-tiktoken";
 import { getFirecrawl } from "./firecrawl.server";
 import { parsePdf as parsePdfUtil } from "~/lib/pdf.server";
 import { YoutubeTranscript } from "youtube-transcript";
@@ -368,10 +369,52 @@ export function resolveDocsSitemapUrl(input: string): { sitemapUrl: string; type
   return { sitemapUrl: `${base}/sitemap.xml`, type: "web" };
 }
 
-export function chunkText(text: string, size = 1000, overlap = 200) {
+let encoder: any = null;
+function getEncoder() {
+  if (!encoder) {
+    try {
+      encoder = getEncoding("cl100k_base");
+    } catch (e) {
+      console.error("Failed to load cl100k_base encoding:", e);
+    }
+  }
+  return encoder;
+}
+
+export function chunkText(text: string, size = 300, overlap = 50) {
+  if (!text) return [];
+  const enc = getEncoder();
+  if (!enc) {
+    // Fallback if encoder fails to initialize
+    const chunks = [];
+    // Approximate 300 tokens ~ 1200 characters, overlap 50 tokens ~ 200 characters
+    const fallbackSize = size * 4;
+    const fallbackOverlap = overlap * 4;
+    for (let i = 0; i < text.length; i += fallbackSize - fallbackOverlap) {
+      chunks.push(text.slice(i, i + fallbackSize));
+    }
+    return chunks;
+  }
+
+  const tokens = enc.encode(text);
   const chunks = [];
-  for (let i = 0; i < text.length; i += size - overlap) {
-    chunks.push(text.slice(i, i + size));
+  
+  if (tokens.length <= size) {
+    return [text];
+  }
+  
+  let start = 0;
+  while (start < tokens.length) {
+    const end = Math.min(start + size, tokens.length);
+    const chunkTokens = tokens.slice(start, end);
+    chunks.push(enc.decode(chunkTokens));
+    
+    const step = size - overlap;
+    if (step <= 0) {
+      // Avoid infinite loops
+      break;
+    }
+    start += step;
   }
   return chunks;
 }
