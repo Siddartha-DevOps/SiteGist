@@ -672,7 +672,7 @@ How it works:
     if (openai && !fullAnswer) {
       try {
         const model = openaiModelPref;
-        const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "1024", 10);
+        const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "2048", 10);
         
         console.log(`[RAG Audit] Stage 8: Calling OpenAI ${model}...`);
         const stream = await (openai as any).chat.completions.create({
@@ -824,7 +824,7 @@ export async function* generateSimpleAIStream(prompt: string) {
           model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
           stream: true,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 1024,
+          max_tokens: 2048,
         });
 
         for await (const chunk of stream) {
