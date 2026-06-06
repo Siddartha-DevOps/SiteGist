@@ -355,7 +355,14 @@ export async function deleteSourceChunks(projectId: string, sourceValue: string)
   }
 }
 
-export async function* streamRAG(projectId: string, query: string, systemPrompt?: string, history: { role: string, content: string }[] = [], modelPreference?: string) {
+export async function* streamRAG(
+  projectId: string,
+  query: string,
+  systemPrompt?: string,
+  history: { role: string, content: string }[] = [],
+  modelPreference?: string,
+  sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] }
+) {
   // IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   const normalizedQuery = query.toLowerCase().trim().replace(/[?!.]+$/, "");
   const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?", "pricing plans", "pricing"];
@@ -456,10 +463,19 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
       let vectorTask = Promise.resolve({ matches: [] });
       try {
         const embedding = await embedText(searchTerms);
+        const pineconeFilter: Record<string, any> = {
+          projectId: { $eq: projectId },
+        };
+
+        if (sourceFilter?.urls && sourceFilter.urls.length > 0) {
+          pineconeFilter.source = { $in: sourceFilter.urls };
+        }
+
         vectorTask = index.namespace(projectId).query({
           vector: embedding,
           topK: 20,
           includeMetadata: true,
+          filter: pineconeFilter,
         }).catch((err: any) => {
           console.warn("[Hybrid Search] Pinecone vector search failed inside promise:", err);
           return { matches: [] };
