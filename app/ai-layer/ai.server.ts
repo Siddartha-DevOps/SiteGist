@@ -617,7 +617,7 @@ How it works:
   // Per-bot model routing. "auto" (or unset) keeps the original fallback behavior.
   const wantsOpenAI = !!modelPreference && modelPreference.startsWith("gpt");
   const wantsGemini = !!modelPreference && modelPreference.startsWith("gemini");
-  const geminiModel = wantsGemini ? modelPreference! : "gemini-3.5-flash";
+  const geminiModel = wantsGemini ? modelPreference! : "gemini-2.0-flash";
   const openaiModelPref = wantsOpenAI ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini");
 
   // Add a safety timeout for the entire generation process
@@ -767,7 +767,7 @@ How it works:
     
     if (gemini) {
       const vResp = await gemini.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: verificationPrompt
       });
       const vText = vResp.text || "";
@@ -799,7 +799,7 @@ export async function* generateSimpleAIStream(prompt: string) {
     if (gemini) {
       try {
         const result = await gemini.models.generateContentStream({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.0-flash",
           contents: prompt
         });
         for await (const chunk of result) {
@@ -867,7 +867,7 @@ Example output: ["Is there a free trial?", "Can I cancel anytime?", "Do you offe
     if (gemini) {
       console.log("[AI] Generating suggestions using Gemini...");
       const resp = await gemini.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: {
           maxOutputTokens: 120,

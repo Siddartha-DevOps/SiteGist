@@ -290,8 +290,8 @@ export default function ProjectSettings() {
                     <option value="auto">Auto (Recommended — fastest available)</option>
                     <option value="gpt-4o">GPT-4o (most capable)</option>
                     <option value="gpt-4o-mini">GPT-4o Mini (fast & economical)</option>
-                    <option value="gemini-3.5-flash">Gemini 3.5 Flash (fast)</option>
-                    <option value="gemini-3.5-pro">Gemini 3.5 Pro (advanced reasoning)</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (fast)</option>
+                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (advanced reasoning)</option>
                   </select>
                   <p className="mt-2 text-xs text-zinc-400">Choose which AI model generates this bot's answers. Auto picks the best available provider.</p>
                 </div>

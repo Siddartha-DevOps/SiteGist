@@ -43,7 +43,7 @@ export async function loader() {
     if (key) {
       const ai = new GoogleGenAI({ apiKey: key });
       await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: "hello"
       });
       diagnostic.services.gemini = "OK";
