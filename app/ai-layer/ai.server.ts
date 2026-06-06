@@ -6,6 +6,10 @@ import crypto from "crypto";
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
+const GEMINI_CHAT_MAX_TOKENS     = 2048;
+const GEMINI_VERIFY_MAX_TOKENS   = 256;
+const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
+
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
@@ -637,7 +641,10 @@ How it works:
         
         const result = await gemini.models.generateContentStream({
           model: geminiModel,
-          contents: prompt
+          contents: prompt,
+          config: {
+            maxOutputTokens: GEMINI_CHAT_MAX_TOKENS
+          }
         });
         
         for await (const chunk of result) {
@@ -770,7 +777,10 @@ How it works:
     if (gemini) {
       const vResp = await gemini.models.generateContent({
         model: "gemini-2.0-flash",
-        contents: verificationPrompt
+        contents: verificationPrompt,
+        config: {
+          maxOutputTokens: GEMINI_VERIFY_MAX_TOKENS
+        }
       });
       const vText = vResp.text || "";
       // Simple JSON extraction
@@ -802,7 +812,10 @@ export async function* generateSimpleAIStream(prompt: string) {
       try {
         const result = await gemini.models.generateContentStream({
           model: "gemini-2.0-flash",
-          contents: prompt
+          contents: prompt,
+          config: {
+            maxOutputTokens: GEMINI_SIMPLE_MAX_TOKENS
+          }
         });
         for await (const chunk of result) {
           const text = chunk.text;
