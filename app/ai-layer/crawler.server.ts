@@ -2,7 +2,6 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import Sitemapper from "sitemapper";
 import mammoth from "mammoth";
-import { getEncoding } from "js-tiktoken";
 import { getFirecrawl } from "./firecrawl.server";
 import { parsePdf as parsePdfUtil } from "~/lib/pdf.server";
 import { YoutubeTranscript } from "youtube-transcript";
@@ -369,52 +368,99 @@ export function resolveDocsSitemapUrl(input: string): { sitemapUrl: string; type
   return { sitemapUrl: `${base}/sitemap.xml`, type: "web" };
 }
 
-let encoder: any = null;
-function getEncoder() {
-  if (!encoder) {
-    try {
-      encoder = getEncoding("cl100k_base");
-    } catch (e) {
-      console.error("Failed to load cl100k_base encoding:", e);
-    }
-  }
-  return encoder;
-}
+export function chunkText(text: string, size = 1200, overlap = 200): string[] {
+  if (!text || !text.trim()) return [];
 
-export function chunkText(text: string, size = 300, overlap = 50) {
-  if (!text) return [];
-  const enc = getEncoder();
-  if (!enc) {
-    // Fallback if encoder fails to initialize
-    const chunks = [];
-    // Approximate 300 tokens ~ 1200 characters, overlap 50 tokens ~ 200 characters
-    const fallbackSize = size * 4;
-    const fallbackOverlap = overlap * 4;
-    for (let i = 0; i < text.length; i += fallbackSize - fallbackOverlap) {
-      chunks.push(text.slice(i, i + fallbackSize));
+  // Helper to split a long sentence at the nearest word boundary
+  function splitLongSentence(sentence: string, maxSize: number): string[] {
+    const parts: string[] = [];
+    let remaining = sentence;
+    while (remaining.length > maxSize) {
+      let splitIdx = remaining.lastIndexOf(" ", maxSize);
+      if (splitIdx === -1 || splitIdx === 0) {
+        splitIdx = maxSize;
+      }
+      parts.push(remaining.slice(0, splitIdx));
+      remaining = remaining.slice(splitIdx);
     }
-    return chunks;
+    if (remaining.trim()) {
+      parts.push(remaining);
+    }
+    return parts;
   }
 
-  const tokens = enc.encode(text);
-  const chunks = [];
-  
-  if (tokens.length <= size) {
-    return [text];
-  }
-  
-  let start = 0;
-  while (start < tokens.length) {
-    const end = Math.min(start + size, tokens.length);
-    const chunkTokens = tokens.slice(start, end);
-    chunks.push(enc.decode(chunkTokens));
-    
-    const step = size - overlap;
-    if (step <= 0) {
-      // Avoid infinite loops
-      break;
+  // Phase 1: Sentence splitting without using lookbehind regex for maximum compatibility.
+  // Split on sentence endings preserving the punctuation/separator.
+  const rawParts = text.split(/([.!?]+(?:\s+|\n+)|\n{2,})/g);
+  const sentences: string[] = [];
+  let currentSentence = "";
+
+  for (let i = 0; i < rawParts.length; i++) {
+    const part = rawParts[i];
+    if (!part) continue;
+    if (/^[.!?\s\n]+$/.test(part)) {
+      currentSentence += part;
+      if (currentSentence.trim()) {
+        sentences.push(currentSentence);
+      }
+      currentSentence = "";
+    } else {
+      if (currentSentence.trim()) {
+        sentences.push(currentSentence);
+      }
+      currentSentence = part;
     }
-    start += step;
   }
+  if (currentSentence.trim()) {
+    sentences.push(currentSentence);
+  }
+
+  // Handle single sentences longer than size
+  const processedSentences: string[] = [];
+  for (const s of sentences) {
+    if (s.length > size) {
+      processedSentences.push(...splitLongSentence(s, size));
+    } else {
+      processedSentences.push(s);
+    }
+  }
+
+  // Phase 2: Accumulating sentences into chunks respecting size and carrying overlap
+  const chunks: string[] = [];
+  let currentBuffer = "";
+
+  for (let i = 0; i < processedSentences.length; i++) {
+    const s = processedSentences[i];
+    const sTrimmed = s.trim();
+    if (!sTrimmed) continue;
+
+    if (!currentBuffer) {
+      currentBuffer = s;
+    } else {
+      if (currentBuffer.length + s.length > size) {
+        chunks.push(currentBuffer.trim());
+
+        // Seed with tail of previous buffer matching the overlap length
+        let seed = "";
+        if (overlap > 0 && currentBuffer.length > overlap) {
+          const rawTail = currentBuffer.slice(-overlap);
+          const firstSpaceIdx = rawTail.indexOf(" ");
+          if (firstSpaceIdx !== -1 && firstSpaceIdx < rawTail.length - 1) {
+            seed = rawTail.slice(firstSpaceIdx).trim() + " ";
+          } else {
+            seed = rawTail.trim() + " ";
+          }
+        }
+        currentBuffer = seed + s;
+      } else {
+        currentBuffer += (currentBuffer.endsWith(" ") ? "" : " ") + s;
+      }
+    }
+  }
+
+  if (currentBuffer.trim()) {
+    chunks.push(currentBuffer.trim());
+  }
+
   return chunks;
 }

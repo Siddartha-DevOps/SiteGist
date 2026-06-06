@@ -464,22 +464,21 @@ export async function* streamRAG(projectId: string, query: string, systemPrompt?
         console.warn("[Hybrid Search] Pinecone initialization/embedding failed during search:", err);
       }
 
-      // 2. Keyword Search (BM25 Surrogate via Prisma)
-      // We extract key nouns/terms from the query for better matching
-      const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-      const keywordTask = prisma.knowledgeSource.findMany({
-        where: {
-          projectId,
-          OR: [
-            { content: { contains: query, mode: "insensitive" as any } },
-            ...keywords.map(kw => ({ content: { contains: kw, mode: "insensitive" as any } }))
-          ]
-        },
-        take: 5
-      }).catch((err: any) => {
-        console.error("[Hybrid Search] Keyword search task failed inside promise:", err);
-        return [];
-      });
+      // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery)
+      const keywordTask = (!query || !query.trim())
+        ? Promise.resolve([])
+        : prisma.$queryRaw<any[]>`
+            SELECT "content", "source", "title",
+                   ts_rank(to_tsvector('english', COALESCE("content", '')), websearch_to_tsquery('english', ${query})) AS "rank"
+            FROM "KnowledgeSource"
+            WHERE "projectId" = ${projectId}
+              AND to_tsvector('english', COALESCE("content", '')) @@ websearch_to_tsquery('english', ${query})
+            ORDER BY "rank" DESC
+            LIMIT 5
+          `.catch((err: any) => {
+            console.error("[Hybrid Search] PostgreSQL Full-Text Search failed inside promise:", err);
+            return [];
+          });
 
       const [resolvedVectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
       vectorResults = resolvedVectorResults || { matches: [] };
