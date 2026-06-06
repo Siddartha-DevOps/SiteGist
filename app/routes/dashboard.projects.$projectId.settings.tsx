@@ -605,6 +605,23 @@ export default function ProjectSettings() {
                     </p>
                   </div>
                 </div>
+
+                <div className="border-t border-zinc-100 pt-6">
+                  <label htmlFor="allowedDomains" className="block text-sm font-bold mb-2 text-brand-dark">
+                    Allowed Domains (Whitelist)
+                  </label>
+                  <input 
+                    id="allowedDomains"
+                    type="text" 
+                    name="allowedDomains" 
+                    defaultValue={currentSettings.allowedDomains?.join(", ") || ""}
+                    placeholder="example.com, app.example.com"
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
+                  />
+                  <p className="mt-3 text-xs text-zinc-400 font-medium leading-relaxed">
+                    Comma-separated list of domains allowed to embed this chatbot. Example: mysite.com, app.mysite.com — leave blank to allow all domains.
+                  </p>
+                </div>
               </div>
             </section>
 
