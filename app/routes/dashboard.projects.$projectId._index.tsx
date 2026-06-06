@@ -43,11 +43,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     take: 5
   });
 
-  return json({ project, messageCount, unanswered });
+  const host =
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    "app.sitegist.co";
+  const baseUrl = `https://${host}`;
+
+  return json({ project, messageCount, unanswered, baseUrl });
 }
 
 export default function ProjectDetails() {
-  const { project, messageCount, unanswered } = useLoaderData<typeof loader>();
+  const { project, messageCount, unanswered, baseUrl } = useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
 
   return (
@@ -139,17 +145,13 @@ export default function ProjectDetails() {
             <div className="flex items-center gap-2">
               <input
                 readOnly
-                value={typeof window !== "undefined"
-                  ? `${window.location.origin}/chat/${project.id}`
-                  : `https://sitegist.co/chat/${project.id}`
-                }
+                value={`${baseUrl}/chat/${project.id}`}
                 className="flex-1 rounded-2xl border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm font-mono text-zinc-600 outline-none"
                 onClick={(e) => (e.target as HTMLInputElement).select()}
               />
               <button
                 onClick={() => {
-                  const url = typeof window !== "undefined" ? window.location.origin : "https://sitegist.co";
-                  navigator.clipboard.writeText(`${url}/chat/${project.id}`);
+                  navigator.clipboard.writeText(`${baseUrl}/chat/${project.id}`);
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
@@ -168,15 +170,11 @@ export default function ProjectDetails() {
             
             <div className="relative">
               <pre className="p-6 bg-zinc-900 text-zinc-300 rounded-2xl font-mono text-sm overflow-x-auto">
-                {typeof window !== "undefined" 
-                  ? `<script src="${window.location.origin}/widget.js" data-project-id="${project.id}"></script>`
-                  : `<script src="https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app/widget.js" data-project-id="${project.id}"></script>`
-                }
+                {`<script src="${baseUrl}/widget.js" data-project-id="${project.id}"></script>`}
               </pre>
               <button 
                 onClick={() => {
-                  const url = typeof window !== "undefined" ? window.location.origin : "https://ais-pre-qbay4p7eaak6juns2gztaa-767982023487.asia-southeast1.run.app";
-                  navigator.clipboard.writeText(`<script src="${url}/widget.js" data-project-id="${project.id}"></script>`);
+                  navigator.clipboard.writeText(`<script src="${baseUrl}/widget.js" data-project-id="${project.id}"></script>`);
                 }}
                 className="absolute top-4 right-4 bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
               >

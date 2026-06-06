@@ -18,7 +18,7 @@ export async function comparePassword(password: string, hash: string) {
 
 const sessionSecret = env.SESSION_SECRET || "DEFAULT_SECRET_CHANGE_ME";
 
-const storage = createCookieSessionStorage({
+export const storage = createCookieSessionStorage({
   cookie: {
     name: "sitegist_session",
     secure: env.NODE_ENV === "production",
@@ -107,6 +107,10 @@ export async function requireOwner(request: Request) {
     throw redirect("/dashboard");
   }
   return user;
+}
+
+export async function destroySession(session: any) {
+  return storage.destroySession(session);
 }
 
 export async function logout(request: Request) {

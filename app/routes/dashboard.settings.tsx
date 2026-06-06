@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
-import { requireUserId, getUser } from "~/backend/auth.server";
+import { requireUserId, getUser, getUserSession, destroySession } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { generateApiKey, hashApiKey } from "~/backend/api-auth.server";
 import { 
@@ -203,6 +203,80 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, message: "API key revoked.", activeTab: "profile" });
   }
 
+  if (method === "delete_account") {
+    try {
+      const userProjects = await prisma.project.findMany({
+        where: { userId },
+        select: { id: true },
+      });
+      const projectIds = userProjects.map((p) => p.id);
+
+      if (projectIds.length > 0) {
+        // Cascade delete child project properties
+        await prisma.unansweredQuestion.deleteMany({ where: { projectId: { in: projectIds } } });
+        await prisma.knowledgeSource.deleteMany({ where: { projectId: { in: projectIds } } });
+        await prisma.knowledgeQA.deleteMany({ where: { projectId: { in: projectIds } } });
+        await prisma.integration.deleteMany({ where: { projectId: { in: projectIds } } });
+        await prisma.analyticsSnapshot.deleteMany({ where: { projectId: { in: projectIds } } });
+        await prisma.projectMember.deleteMany({ where: { projectId: { in: projectIds } } });
+
+        // Retrieve chat sessions related to the projects
+        const chatSessions = await prisma.chatSession.findMany({
+          where: { projectId: { in: projectIds } },
+          select: { id: true },
+        });
+        const sessionIds = chatSessions.map((s) => s.id);
+
+        if (sessionIds.length > 0) {
+          await prisma.conversationTag.deleteMany({ where: { sessionId: { in: sessionIds } } });
+          await prisma.message.deleteMany({ where: { sessionId: { in: sessionIds } } });
+        }
+
+        // Delete leads and tags
+        const leadsList = await prisma.lead.findMany({
+          where: { projectId: { in: projectIds } },
+          select: { id: true },
+        });
+        const leadIds = leadsList.map((l) => l.id);
+        if (leadIds.length > 0) {
+          await prisma.leadTag.deleteMany({ where: { leadId: { in: leadIds } } });
+        }
+        await prisma.lead.deleteMany({ where: { projectId: { in: projectIds } } });
+
+        // Delete chat sessions
+        await prisma.chatSession.deleteMany({ where: { projectId: { in: projectIds } } });
+
+        // Delete projects
+        await prisma.project.deleteMany({ where: { id: { in: projectIds } } });
+      }
+
+      // Delete user-level records
+      await prisma.apiKey.deleteMany({ where: { userId } });
+      await prisma.usageRecord.deleteMany({ where: { userId } });
+      await prisma.billingSubscription.deleteMany({ where: { userId } });
+      try {
+        await prisma.billingPayment.deleteMany({ where: { userId } });
+      } catch (e) {
+        console.warn("billingPayment is not defined or could not be cleared:", e);
+      }
+      await prisma.blogPost.deleteMany({ where: { authorId: userId } });
+
+      // Delete the user record
+      await prisma.user.delete({ where: { id: userId } });
+
+      // Retrieve session, destroy, and redirect
+      const session = await getUserSession(request);
+      return redirect("/", {
+        headers: {
+          "Set-Cookie": await destroySession(session),
+        },
+      });
+    } catch (err: any) {
+      console.error("[Settings Delete Account] Error deleting account:", err);
+      return json({ error: `Account deletion failed: ${err.message || err}`, activeTab: "profile" });
+    }
+  }
+
   return json({ success: true, message: "Settings updated", activeTab: "profile" });
 }
 
@@ -213,9 +287,11 @@ export default function Settings() {
   
   const defaultTab = actionData?.activeTab || "profile";
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const isSavingProfile = navigation.state === "submitting" && navigation.formData?.get("_action") === "save_profile";
   const isTestingRetrieval = navigation.state === "submitting" && navigation.formData?.get("_action") === "test_retrieval";
+  const isDeletingAccount = navigation.state === "submitting" && navigation.formData?.get("_action") === "delete_account";
 
   const dbConnected = diagnostics?.dbStats?.connected;
   const dbCounts = diagnostics?.dbStats?.counts;
@@ -380,10 +456,44 @@ export default function Settings() {
 
           <div className="mt-12 pt-12 border-t border-zinc-50">
             <h3 className="text-lg font-bold text-red-500 mb-4">Danger Zone</h3>
-            <p className="text-sm text-zinc-500 mb-6">Once you delete your account, there is no going back. Please be certain.</p>
-            <button className="px-6 py-3 border border-red-200 text-red-500 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
-              Delete Account
-            </button>
+            <p className="text-sm text-zinc-500 mb-4">
+              Type <strong className="text-brand-dark select-all font-bold">DELETE</strong> to confirm. This will permanently erase your account, all chatbots, training data, leads, and conversation history. There is no going back.
+            </p>
+            
+            <Form method="post" className="space-y-4">
+              <input type="hidden" name="_action" value="delete_account" />
+              <div>
+                <input
+                  type="text"
+                  placeholder="Type DELETE to confirm"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  disabled={isDeletingAccount}
+                  className="w-full max-w-md px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl outline-none focus:ring-2 focus:ring-red-500/15 disabled:opacity-60 transition-all text-sm font-semibold text-zinc-800 placeholder:text-zinc-400"
+                />
+              </div>
+
+              {actionData?.error && (
+                <p className="text-red-500 font-bold text-xs mt-2">
+                  {actionData.error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={deleteConfirmText !== "DELETE" || isDeletingAccount}
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-red-600 font-sans text-xs font-black uppercase tracking-wider text-white hover:bg-red-700 transition-all rounded-2xl border-none disabled:opacity-40 disabled:cursor-not-allowed shadow-xl shadow-red-200"
+              >
+                {isDeletingAccount ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    Deleting Account...
+                  </>
+                ) : (
+                  "Permanently Delete Account"
+                )}
+              </button>
+            </Form>
           </div>
         </div>
       )}

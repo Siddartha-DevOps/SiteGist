@@ -155,6 +155,8 @@ export default function SessionDetail() {
   const isSending = navigation.state === "submitting" || replyFetcher.state === "submitting";
 
   const [localMessages, setLocalMessages] = useState<any[]>(session.messages);
+  const [showTagInput, setShowTagInput] = useState(false);
+  const [tagInput, setTagInput] = useState("");
 
   useEffect(() => {
     setLocalMessages(session.messages);
@@ -340,40 +342,36 @@ export default function SessionDetail() {
             </span>
           ))}
           {/* Add tag form */}
-          {(() => {
-            const [showTagInput, setShowTagInput] = useState(false);
-            const [tagInput, setTagInput] = useState("");
-            return showTagInput ? (
-              <fetcher.Form
-                method="post"
-                onSubmit={() => { setShowTagInput(false); setTagInput(""); }}
-                className="flex items-center gap-1"
-              >
-                <input type="hidden" name="_action" value="add_tag" />
-                <input
-                  name="label"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  placeholder="tag name"
-                  autoFocus
-                  className="w-24 px-2 py-0.5 text-xs border border-brand-border rounded-lg outline-none focus:border-primary"
-                />
-                <button type="submit" className="text-[10px] font-black text-primary px-2 py-1 hover:underline">
-                  Add
-                </button>
-                <button type="button" onClick={() => setShowTagInput(false)} className="text-[10px] text-zinc-400 px-1">
-                  ✕
-                </button>
-              </fetcher.Form>
-            ) : (
-              <button
-                onClick={() => setShowTagInput(true)}
-                className="text-[10px] font-black text-zinc-400 hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-brand-light"
-              >
-                + Add tag
+          {showTagInput ? (
+            <fetcher.Form
+              method="post"
+              onSubmit={() => { setShowTagInput(false); setTagInput(""); }}
+              className="flex items-center gap-1"
+            >
+              <input type="hidden" name="_action" value="add_tag" />
+              <input
+                name="label"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                placeholder="tag name"
+                autoFocus
+                className="w-24 px-2 py-0.5 text-xs border border-brand-border rounded-lg outline-none focus:border-primary"
+              />
+              <button type="submit" className="text-[10px] font-black text-primary px-2 py-1 hover:underline">
+                Add
               </button>
-            );
-          })()}
+              <button type="button" onClick={() => setShowTagInput(false)} className="text-[10px] text-zinc-400 px-1">
+                ✕
+              </button>
+            </fetcher.Form>
+          ) : (
+            <button
+              onClick={() => setShowTagInput(true)}
+              className="text-[10px] font-black text-zinc-400 hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-brand-light"
+            >
+              + Add tag
+            </button>
+          )}
         </div>
 
         {/* Assign to */}
