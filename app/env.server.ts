@@ -17,7 +17,11 @@ export interface EnvSchema {
   PADDLE_API_KEY: string | undefined;
   UPSTASH_REDIS_REST_URL: string | undefined;
   UPSTASH_REDIS_REST_TOKEN: string | undefined;
+  EMBEDDING_PROVIDER: "openai" | "gemini";
 }
+
+export const EMBEDDING_PROVIDER = (typeof process !== "undefined" && process.env.EMBEDDING_PROVIDER === "gemini" ? "gemini" : "openai") as "openai" | "gemini";
+export const EMBEDDING_DIMENSION = EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
 
 // Keep a clean list of required variables
 const REQUIRED_VARS: (keyof EnvSchema)[] = [
@@ -61,6 +65,7 @@ export function getCleanEnv(): EnvSchema {
     PADDLE_API_KEY: cleanValue(process.env.PADDLE_API_KEY),
     UPSTASH_REDIS_REST_URL: cleanValue(process.env.UPSTASH_REDIS_REST_URL),
     UPSTASH_REDIS_REST_TOKEN: cleanValue(process.env.UPSTASH_REDIS_REST_TOKEN),
+    EMBEDDING_PROVIDER: EMBEDDING_PROVIDER,
   };
 }
 

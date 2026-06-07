@@ -3,6 +3,7 @@ import { pineconeIndex } from "~/lib/pinecone.server";
 import { getPortkey } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
+import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -269,29 +270,51 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 }
 
 export async function embedText(text: string) {
-  const openai = getOpenAI();
-  if (openai) {
+  const maxAttempts = 3;
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const response = await (openai as any).embeddings.create({
-        model: "text-embedding-3-small",
-        input: text,
-      });
-      return response.data[0].embedding as number[];
-    } catch (e) {
-      console.warn("[AI] OpenAI Embedding failed, attempting Gemini fallback...", e);
+      if (EMBEDDING_PROVIDER === "openai") {
+        const openai = getOpenAI();
+        if (!openai) {
+          throw new Error("OpenAI is configured as the EMBEDDING_PROVIDER, but OpenAI API key is not available or invalid.");
+        }
+        const response = await (openai as any).embeddings.create({
+          model: "text-embedding-3-small",
+          input: text,
+        });
+        const embedding = response.data[0].embedding as number[];
+        if (!embedding || embedding.length === 0) {
+          throw new Error("OpenAI returned an empty embedding.");
+        }
+        return embedding;
+      } else {
+        const gemini = getGemini();
+        if (!gemini) {
+          throw new Error("Gemini is configured as the EMBEDDING_PROVIDER, but Gemini API client is not available.");
+        }
+        const response = await gemini.models.embedContent({ 
+          model: "text-embedding-004", 
+          contents: [text] 
+        });
+        const values = response.embeddings?.[0]?.values;
+        if (!values || values.length === 0) {
+          throw new Error("Gemini returned an empty embedding.");
+        }
+        return values;
+      }
+    } catch (e: any) {
+      lastError = e;
+      console.warn(`[AI] Embedding attempt ${attempt}/${maxAttempts} failed using ${EMBEDDING_PROVIDER}:`, e.message || e);
+      if (attempt < maxAttempts) {
+        // Sleep 200ms before retry
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
     }
   }
 
-  // Fallback to Gemini embedding if possible
-  const gemini = getGemini();
-  if (gemini) {
-    const response = await gemini.models.embedContent({ 
-      model: "text-embedding-004", 
-      contents: [text] 
-    });
-    return response.embeddings?.[0]?.values || [];
-  }
-  throw new Error("No embedding provider available (OpenAI key failed and Gemini not configured)");
+  throw new Error(`Failed to generate embedding after ${maxAttempts} attempts using provider '${EMBEDDING_PROVIDER}'. Original error: ${lastError?.message || String(lastError)}`);
 }
 
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
@@ -325,13 +348,23 @@ export async function upsertChunks(projectId: string, chunks: { text: string; me
       })
     );
 
-    // Only upload if we actually got valid non-empty vectors with embedding values (Pinecone requires values of the dimensions matching index)
-    const validVectors = vectors.filter(v => v.values && v.values.length > 0);
+    // Filter, validate, and only upload if dimension matches EMBEDDING_DIMENSION
+    const validVectors = vectors.filter(v => {
+      if (!v.values || v.values.length === 0) {
+        return false;
+      }
+      if (v.values.length !== EMBEDDING_DIMENSION) {
+        console.error(`[AI] DIMENSION_MISMATCH: Generated vector ${v.id} has dimension ${v.values.length}, but expected ${EMBEDDING_DIMENSION}. Skipping.`);
+        return false;
+      }
+      return true;
+    });
+
     if (validVectors.length > 0) {
       await index.namespace(projectId).upsert({ records: validVectors });
       console.log(`[AI] Successfully upserted ${validVectors.length} chunks to Pinecone vector database.`);
     } else {
-      console.warn("[AI] No valid vector embedding could be created for chunks. Stored content in main database only.");
+      console.warn("[AI] No valid vector embedding with matching dimension could be created for chunks. Stored content in main database only.");
     }
   } catch (error) {
     console.error("[AI] Error upserting chunks to Pinecone vector store (falling back gracefully to Prisma DB storage):", error);

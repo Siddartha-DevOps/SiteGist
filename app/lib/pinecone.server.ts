@@ -1,5 +1,5 @@
 import { Pinecone } from "@pinecone-database/pinecone";
-import { env } from "~/env.server";
+import { env, EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
 
 /**
  * Shared Pinecone client instance, lazily initialized.
@@ -52,6 +52,21 @@ setTimeout(async () => {
     try {
       const stats = await pineconeIndex.describeIndexStats();
       console.log(`[Pinecone Audit] SUCCESS: Connected to index "${indexName}". Stats:`, JSON.stringify(stats));
+      
+      const actualDimension = stats.dimension;
+      if (actualDimension !== undefined && actualDimension !== EMBEDDING_DIMENSION) {
+        console.error(`
+================================================================================
+🚨 CRITICAL PINECONE CONFIGURATION ERROR!
+The Pinecone index "${indexName}" has dimension ${actualDimension}.
+But the application is configured to use EMBEDDING_PROVIDER="${EMBEDDING_PROVIDER}" (expected dimension: ${EMBEDDING_DIMENSION}).
+This will result in data corruption, query mismatch, or indexing failures!
+Please create a Pinecone index with ${EMBEDDING_DIMENSION} dimensions, or update your EMBEDDING_PROVIDER!
+================================================================================
+`);
+      } else {
+        console.log(`[Pinecone Audit] Dimension check PASSED. Index dimension is ${actualDimension || "unknown"}, expected is ${EMBEDDING_DIMENSION}.`);
+      }
     } catch (err) {
       console.error(`[Pinecone Audit] ERROR: Failed to connect to index "${indexName}".`, err);
     }
