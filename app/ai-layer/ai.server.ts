@@ -4,6 +4,9 @@ import { getPortkey } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
 import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
+import { maskSecret } from "~/lib/maskSecret";
+import { isPlainGreeting } from "~/lib/chat-intents";
+import { captureException } from "~/lib/monitoring.server";
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -12,13 +15,6 @@ const GEMINI_VERIFY_MAX_TOKENS   = 256;
 const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
 
 const USER_FACING_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
-
-function maskSecret(s: string | null | undefined): string {
-  if (!s) return "empty";
-  const str = String(s).trim();
-  if (str.length <= 8) return `(len ${str.length})`;
-  return `${str.slice(0, 4)}…${str.slice(-4)} (len ${str.length})`;
-}
 
 if (process.env.AI_DEBUG === "1") {
   console.log("AI Server Startup Diagnostic:", {
@@ -41,7 +37,7 @@ function cleanKey(val: any): string | null {
   // CRITICAL: Block masked keys early. 
   // Dashboards often show "sk-proj-****" or "AIZa...••••"
   if (raw.includes("*") || raw.includes("•") || (raw.includes("...") && raw.length < 50) || raw.includes("****")) {
-     console.error(`[AI] MASKED_KEY_DETECTED: Your key looks like a placeholder (contains stars, dots, or hidden chars). Length: ${raw.length}. Value Masked: ${maskSecret(raw)}`);
+     console.error(`[AI] MASKED_KEY_DETECTED: Your key looks like a placeholder (contains stars, dots, or hidden chars). Value: ${maskSecret(raw)}`);
      return null; 
   }
 
@@ -487,17 +483,7 @@ export async function* streamRAG(
   modelPreference?: string,
   sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] }
 ) {
-  // IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
-  const normalizedQuery = query.toLowerCase().trim().replace(/[?!.]+$/, "");
-  
-  // Hardcoded pricing only acceptable for demo-project
-  if (projectId === "demo-project" && (normalizedQuery === "pricing" || normalizedQuery === "pricing plans" || normalizedQuery.includes("pricing"))) {
-    yield "SiteGist offers three plans: \n- Free: 1 project, 50 queries.\n- Pro ($19/mo): 5 projects, 1,000 queries.\n- Enterprise: Custom volume.\n\nHow can I help you with these today?";
-    return;
-  }
-
-  const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?"];
-  if ((greetings.includes(normalizedQuery) || /^(hi|hello|hey)\b/i.test(normalizedQuery)) && normalizedQuery.length < 12) {
+  if (isPlainGreeting(query)) {
     yield "Hi! How can I help you today?";
     return;
   }
@@ -746,35 +732,34 @@ How it works:
 
   const promptHistory = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
 
-  const identity = isDemo 
-    ? `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform.
-  
-  YOUR MISSION:
-  Answer user questions accurately and professionally about SiteGist features, pricing, refund policy, and general platform usage.
-  
-  SYSTEM INSTRUCTIONS:
-  ${systemPrompt || "Provide helpful, accurate answers based on the knowledge provided."}`
-    : `SYSTEM INSTRUCTIONS / PERSONALITY:
-  ${systemPrompt || "Provide helpful, accurate answers based on the knowledge context provided."}`;
+  const personaPreamble = isDemo
+    ? `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform. Answer questions accurately and professionally about SiteGist features, pricing, refund policy, and general platform usage.`
+    : `You are an AI assistant for this website. Your identity, scope, and tone are defined entirely by the SYSTEM INSTRUCTIONS below. Do not claim to be any other company or product.`;
+  const fallbackLine = isDemo
+    ? `I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team.`
+    : `I don't have information about that in my knowledge base. Please contact our support team for more help.`;
+  const prompt = `${personaPreamble}
 
-  const prompt = `${identity}
-  
+  SYSTEM INSTRUCTIONS:
+  ${systemPrompt || "Provide helpful, accurate answers based only on the knowledge provided."}
+
   KNOWLEDGE CONTEXT:
   ${context}
-  
+
   CONVERSATION HISTORY:
   ${promptHistory}
 
-  STRICT GROUNDING & FORMATTING RULES:
-  1. BASE YOUR ANSWER ONLY ON THE PROVIDED "KNOWLEDGE CONTEXT" ABOVE. Do not use external or pre-trained knowledge.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER (e.g. if the facts/documents are missing or completely insufficient to answer the question), say EXACTLY: "${fallbackMessage}". Do not attempt to elaborate, guess, or extrapolate.
-  3. STRICTLY NO HALLUCINATIONS: You are forbidden from drawing on outside facts, assumptions, details, or logic not explicitly stated in the context. If a detail is not in the context, treat it as entirely unknown and use the fallback.
-  4. Use clean, well-structured Markdown formatting. We encourage using short paragraphs, bolding (**) for key terms, bulleted lists using "-", and proper Markdown links when referring to context URLs.
-  5. Keep answers highly concise, professional, and readable.
-  6. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
-  
+  STRICT RULES:
+  1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE AND THE SYSTEM INSTRUCTIONS.
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "${fallbackLine}"
+  3. DO NOT HALLUCINATE OR INVENT FACTS THAT ARE NOT PRESENT IN THE CONTEXT.
+  4. Use professional, concise PLAIN TEXT.
+  5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
+  6. Use clean paragraphs or simple dashes (-) for lists.
+  7. If the user only greets you, reply briefly and warmly and invite their question.
+
   USER QUERY: ${query}
-  
+
   RESPONSE:`;
 
   console.log(`[RAG Audit] Stage 6: Sending prompt to LLM (Length: ${prompt.length} chars)...`);
@@ -917,7 +902,7 @@ How it works:
     // Route detailed operator diagnostics to server-side logs only
     console.error(`[RAG ERROR DIAGNOSTICS] Stream failed: ${errorMsg}`);
     
-    // Yield neutral, user-facing error message to the stream/visitor
+    captureException(new Error("AI generation failed"), { where: "streamRAG.generation", projectId });
     yield `[ERROR] ${USER_FACING_ERROR}`;
     return;
   }

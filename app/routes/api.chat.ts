@@ -5,6 +5,8 @@ import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 import { sendWebhook } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
+import { getUsageForUser } from "~/lib/usage.server";
+import { captureException } from "~/lib/monitoring.server";
 
 const HISTORY_CHAR_BUDGET = 6000;
 
@@ -68,6 +70,19 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       } catch (dbError) {
         console.error("[Chat] Database error fetching project:", dbError);
+      }
+    }
+
+    if (projectId !== "demo-project" && project) {
+      try {
+        const owner = await prisma.user.findUnique({ where: { id: project.userId } });
+        const usage = await getUsageForUser(project.userId, owner?.subscriptionTier);
+        if (!usage.unlimited && usage.used >= usage.limit) {
+          return json({ error: "quota_exceeded", message: "This chatbot has reached its monthly message limit. Please try again later." }, { status: 429 });
+        }
+      } catch (quotaErr) {
+        console.error("[Chat] Quota check failed (allowing request):", quotaErr);
+        captureException(quotaErr, { where: "api.chat.quota", projectId });
       }
     }
 
@@ -411,6 +426,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (fatalError) {
     console.error("[Chat Action] Fatal Error:", fatalError);
+    captureException(fatalError, { where: "api.chat.action" });
     return json({ 
       error: "Internal Server Error", 
       details: fatalError instanceof Error ? fatalError.message : String(fatalError) 
