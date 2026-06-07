@@ -556,12 +556,17 @@ export async function* streamRAG(
     }
   }
 
+  const isDemo = projectId === "demo-project";
+  const fallbackMessage = isDemo
+    ? "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
+    : "I don't have information about that. Please contact our support team for more help.";
+
   let context = "";
   let citationMetadata: { url?: string; title?: string }[] = [];
   
   console.log(`[RAG Audit] Stage 1: Starting RAG for project: ${projectId}`);
   
-  if (projectId !== "demo-project") {
+  if (!isDemo) {
     try {
       const index = pineconeIndex;
       const { prisma } = await import("~/database/db.server");
@@ -659,12 +664,23 @@ export async function* streamRAG(
 
       if (initialMatches.length === 0) {
         console.warn(`[Hybrid Search] Stage 3 WARNING: Zero matches found for project ${projectId}.`);
+        console.log(`[Zero Context Guard] No knowledge sources found for projectId: ${projectId}. Short-circuiting with fallback message.`);
+        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
+        yield fallbackMessage;
+        return;
       }
 
       // Advanced Reranking Layer (Cohere v3)
       console.log(`[Hybrid Search] Stage 4: Reranking ${initialMatches.length} documents...`);
       const rankedSources = await rerankDocuments(query, initialMatches);
       
+      if (rankedSources.length === 0) {
+        console.log(`[Zero Context Guard] Reranked sources are empty for projectId: ${projectId}. Short-circuiting with fallback message.`);
+        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
+        yield fallbackMessage;
+        return;
+      }
+
       citationMetadata = rankedSources
         .filter((s: any) => s.url)
         .map((s: any) => ({ url: s.url, title: s.title }))
@@ -676,8 +692,10 @@ export async function* streamRAG(
         
       console.log(`[Hybrid Search] Stage 5: Hybrid Retrieval complete.`);
     } catch (e) {
-      console.error("[Hybrid Search] Retrieval failed:", e);
-      context = "No specific context available due to a retrieval error.";
+      console.error("[Hybrid Search] Retrieval failed, short-circuiting with fallback message:", e);
+      yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
+      yield fallbackMessage;
+      return;
     }
   } else {
     console.log(`[RAG Audit] Stage 1: Operating in Demo Mode. Providing SiteGist System Knowledge.`);
@@ -716,7 +734,6 @@ How it works:
 
   const promptHistory = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
 
-  const isDemo = projectId === "demo-project";
   const identity = isDemo 
     ? `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform.
   
@@ -728,10 +745,6 @@ How it works:
     : `SYSTEM INSTRUCTIONS / PERSONALITY:
   ${systemPrompt || "Provide helpful, accurate answers based on the knowledge context provided."}`;
 
-  const fallbackMessage = isDemo
-    ? "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
-    : "I don't have information about that. Please contact our support team for more help.";
-
   const prompt = `${identity}
   
   KNOWLEDGE CONTEXT:
@@ -740,12 +753,12 @@ How it works:
   CONVERSATION HISTORY:
   ${promptHistory}
 
-  STRICT FORMATTING RULES:
-  1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "${fallbackMessage}" (or use a custom politely phrased "I don't know" or fallback response if specified/requested in your SYSTEM INSTRUCTIONS).
-  3. DO NOT HALLUCINATE.
+  STRICT GROUNDING & FORMATTING RULES:
+  1. BASE YOUR ANSWER ONLY ON THE PROVIDED "KNOWLEDGE CONTEXT" ABOVE. Do not use external or pre-trained knowledge.
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER (e.g. if the facts/documents are missing or completely insufficient to answer the question), say EXACTLY: "${fallbackMessage}". Do not attempt to elaborate, guess, or extrapolate.
+  3. STRICTLY NO HALLUCINATIONS: You are forbidden from drawing on outside facts, assumptions, details, or logic not explicitly stated in the context. If a detail is not in the context, treat it as entirely unknown and use the fallback.
   4. Use professional, concise PLAIN TEXT. 
-  5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
+  5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights under any circumstances.
   6. Use clean paragraphs or simple dashes (-) for lists.
   7. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   
@@ -897,49 +910,6 @@ How it works:
     yield `[ERROR] ${USER_FACING_ERROR}`;
     return;
   }
-
-  // --- Answer Verification Layer ---
-  console.log(`[Verification] Checking answer against context...`);
-  const verificationPrompt = `Verify if the following answer is strictly supported by the provided context.
-  
-  CONTEXT:
-  ${context}
-  
-  ANSWER:
-  ${fullAnswer}
-  
-  Rules:
-  - If the answer contains information NOT in the context, mark it as "UNVERIFIED".
-  - If the answer is purely based on context, mark it as "VERIFIED".
-  - Provide a short explanation.
-  
-  Output Format: JSON { "status": "VERIFIED" | "UNVERIFIED", "explanation": "..." }`;
-
-  try {
-    let verificationResult: any = { status: "VERIFIED", explanation: "Verified during generation." };
-    
-    if (gemini) {
-      const vResp = await gemini.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: verificationPrompt,
-        config: {
-          maxOutputTokens: GEMINI_VERIFY_MAX_TOKENS
-        }
-      });
-      const vText = vResp.text || "";
-      // Simple JSON extraction
-      const jsonMatch = vText.match(/\{.*\}/s);
-      if (jsonMatch) verificationResult = JSON.parse(jsonMatch[0]);
-    }
-
-    if (verificationResult.status === "UNVERIFIED") {
-       console.warn(`[Verification Alert] Answer was marked as UNVERIFIED: ${verificationResult.explanation}`);
-       yield "\n\n⚠ This answer may need verification.";
-    }
-  } catch (vError) {
-    console.error("[Verification] Error during verification step:", vError);
-  }
-  // ---------------------------------
 }
 
 /**
