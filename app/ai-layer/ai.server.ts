@@ -365,13 +365,16 @@ export async function* streamRAG(
 ) {
   // IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   const normalizedQuery = query.toLowerCase().trim().replace(/[?!.]+$/, "");
-  const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?", "pricing plans", "pricing"];
-  if (greetings.includes(normalizedQuery) || /^(hi|hello|hey)\b/i.test(normalizedQuery) && normalizedQuery.length < 12) {
-    if (normalizedQuery.includes("pricing")) {
-      yield "SiteGist offers three plans: \n- Free: 1 project, 50 queries.\n- Pro ($19/mo): 5 projects, 1,000 queries.\n- Enterprise: Custom volume.\n\nHow can I help you with these today?";
-    } else {
-      yield "Hi! How can I help you today?";
-    }
+  
+  // Hardcoded pricing only acceptable for demo-project
+  if (projectId === "demo-project" && (normalizedQuery === "pricing" || normalizedQuery === "pricing plans" || normalizedQuery.includes("pricing"))) {
+    yield "SiteGist offers three plans: \n- Free: 1 project, 50 queries.\n- Pro ($19/mo): 5 projects, 1,000 queries.\n- Enterprise: Custom volume.\n\nHow can I help you with these today?";
+    return;
+  }
+
+  const greetings = ["hi", "hello", "hey", "hola", "greetings", "hi there", "hello there", "hi!", "hi.", "hi?"];
+  if ((greetings.includes(normalizedQuery) || /^(hi|hello|hey)\b/i.test(normalizedQuery)) && normalizedQuery.length < 12) {
+    yield "Hi! How can I help you today?";
     return;
   }
 
