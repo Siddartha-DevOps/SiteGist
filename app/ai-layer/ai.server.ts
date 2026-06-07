@@ -13,12 +13,20 @@ const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
 
 const USER_FACING_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
 
+function maskSecret(s: string | null | undefined): string {
+  if (!s) return "empty";
+  const str = String(s).trim();
+  if (str.length <= 8) return `(len ${str.length})`;
+  return `${str.slice(0, 4)}…${str.slice(-4)} (len ${str.length})`;
+}
+
+if (process.env.AI_DEBUG === "1") {
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
     hasPortkey: !!(process.env.PORTKEY_API_KEY),
-    allKeys: Object.keys(process.env).filter(k => k.includes("KEY") || k.includes("API")).sort()
   });
+}
 
 function cleanKey(val: any): string | null {
   if (!val || typeof val !== "string") return null;
@@ -33,7 +41,7 @@ function cleanKey(val: any): string | null {
   // CRITICAL: Block masked keys early. 
   // Dashboards often show "sk-proj-****" or "AIZa...••••"
   if (raw.includes("*") || raw.includes("•") || (raw.includes("...") && raw.length < 50) || raw.includes("****")) {
-     console.error(`[AI] MASKED_KEY_DETECTED: Your key looks like a placeholder (contains stars, dots, or hidden chars). Length: ${raw.length}. Value: ${raw}`);
+     console.error(`[AI] MASKED_KEY_DETECTED: Your key looks like a placeholder (contains stars, dots, or hidden chars). Length: ${raw.length}. Value Masked: ${maskSecret(raw)}`);
      return null; 
   }
 
@@ -70,7 +78,7 @@ function cleanKey(val: any): string | null {
   // CRITICAL: Block masked keys. 
   // Dashboards often show "sk-proj-****" or "AIZa...••••"
   if (cleaned.includes("*") || cleaned.includes("•") || cleaned.includes("...") || cleaned.includes("****")) {
-     console.error(`[AI] MASKED_KEY_REJECTED: Found asterisks or dots in key. Length: ${cleaned.length}`);
+     console.error(`[AI] MASKED_KEY_REJECTED: Found asterisks or dots in key. Value Masked: ${maskSecret(cleaned)}`);
      return null; 
   }
 
@@ -86,8 +94,8 @@ function cleanKey(val: any): string | null {
 function getDiagnosticInfo(key: string | null | undefined): string {
   if (!key) return "NOT_FOUND";
   const length = key.length;
-  // Show more characters to verify prefixes like sk-proj-
-  const start = key.substring(0, 12);
+  // Show only first 4 characters and last 4 characters
+  const start = key.substring(0, 4);
   const end = key.slice(-4);
   
   // Check for common masking patterns
@@ -104,7 +112,7 @@ function getDiagnosticInfo(key: string | null | undefined): string {
     }
   }
   
-  let info = `Length: ${length}, Start: "${start}"... End: "${end}"`;
+  let info = `Length: ${length}, Masked: "${start}...${end}"`;
   if (isMasked) {
     info += ` | ❌ CRITICAL: KEY IS MASKED. You cannot copy the masked version (sk-proj-****) from the list. You MUST click 'Create new secret key' and immediately copy the code from the popup before it disappears.`;
   }
@@ -208,7 +216,11 @@ function getGemini(): GoogleGenAI | null {
     // List models for diagnostic purposes asynchronously
     (async () => {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${currentKey}`);
+        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+          headers: {
+            "x-goog-api-key": currentKey,
+          },
+        });
         if (response.ok) {
           const data = await response.json();
           const modelList = data.models?.map((m: any) => m.name.replace("models/", "")).join(", ");
@@ -757,10 +769,9 @@ How it works:
   1. BASE YOUR ANSWER ONLY ON THE PROVIDED "KNOWLEDGE CONTEXT" ABOVE. Do not use external or pre-trained knowledge.
   2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER (e.g. if the facts/documents are missing or completely insufficient to answer the question), say EXACTLY: "${fallbackMessage}". Do not attempt to elaborate, guess, or extrapolate.
   3. STRICTLY NO HALLUCINATIONS: You are forbidden from drawing on outside facts, assumptions, details, or logic not explicitly stated in the context. If a detail is not in the context, treat it as entirely unknown and use the fallback.
-  4. Use professional, concise PLAIN TEXT. 
-  5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights under any circumstances.
-  6. Use clean paragraphs or simple dashes (-) for lists.
-  7. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
+  4. Use clean, well-structured Markdown formatting. We encourage using short paragraphs, bolding (**) for key terms, bulleted lists using "-", and proper Markdown links when referring to context URLs.
+  5. Keep answers highly concise, professional, and readable.
+  6. IF THE USER SAYS "hi" OR GREETS YOU, REPLY EXACTLY WITH: "Hi! How can I help you today?"
   
   USER QUERY: ${query}
   

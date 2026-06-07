@@ -418,8 +418,29 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
                   : "bg-white text-zinc-900 border border-zinc-200/50 rounded-tl-none rounded-bl-none"
               }`}>
                 {msg.content ? (
-                  <div>
-                    {msg.content}
+                  <div className="prose prose-sm max-w-none text-[13px] font-medium leading-relaxed">
+                    {msg.role === "assistant" ? (
+                      <ReactMarkdown
+                        components={{
+                          a: ({ node, ...props }) => (
+                            <a
+                              {...props}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#155DEE] hover:underline font-semibold"
+                            />
+                          ),
+                          ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-4 my-1 space-y-0.5" />,
+                          ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-4 my-1 space-y-0.5" />,
+                          li: ({ node, ...props }) => <li {...props} className="my-0" />,
+                          p: ({ node, ...props }) => <p {...props} className="my-1 last:mb-0 first:mt-0" />,
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    )}
                   </div>
                 ) : (
                   <span className="flex gap-1 animate-pulse"><span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>.</span>
