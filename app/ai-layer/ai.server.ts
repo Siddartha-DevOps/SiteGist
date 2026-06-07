@@ -390,6 +390,83 @@ export async function deleteSourceChunks(projectId: string, sourceValue: string)
   }
 }
 
+export async function rewriteStandaloneQuery(
+  query: string,
+  history: { role: string, content: string }[]
+): Promise<string> {
+  if (!history || history.length === 0) {
+    return query;
+  }
+
+  const lastTurns = history.slice(-6); // last ~4-6 turns of recent context
+  const historyText = lastTurns.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
+
+  const prompt = `Given the conversation history and the latest user query, rewrite the latest query to be a self-contained, standalone question (in the same language as the query). This rewritten question should be suitable for a vector database and keyword search.
+
+CONVERSATION HISTORY:
+${historyText}
+
+LATEST QUERY:
+${query}
+
+Rules:
+1. Output ONLY the rewritten standalone question. Do NOT include any preamble, introduction, markdown, or explanation.
+2. If the latest query is already self-contained, or cannot be refined or does not refer to history, output the original query exactly.
+3. Keep it highly concise.
+
+REWRITTEN STANDALONE QUESTION:`;
+
+  try {
+    const gemini = getGemini();
+    const openai = getOpenAI();
+
+    const task = (async () => {
+      if (gemini) {
+        try {
+          const response = await gemini.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: prompt,
+            config: {
+              maxOutputTokens: 80,
+            }
+          });
+          const text = response.text?.trim();
+          if (text) return text;
+        } catch (err: any) {
+          console.error("[Query Rewrite] Gemini generation failed, trying OpenAI:", err.message || err);
+        }
+      }
+
+      if (openai) {
+        try {
+          const response = await (openai as any).chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 80,
+            temperature: 0.1,
+          });
+          const text = response.choices?.[0]?.message?.content?.trim();
+          if (text) return text;
+        } catch (err: any) {
+          console.error("[Query Rewrite] OpenAI generation failed:", err.message || err);
+        }
+      }
+
+      return query;
+    })();
+
+    // 4-second timeout to return the original query if LLM is slow or stalls
+    const timeoutPromise = new Promise<string>((resolve) =>
+      setTimeout(() => resolve(query), 4000)
+    );
+
+    return await Promise.race([task, timeoutPromise]);
+  } catch (error: any) {
+    console.error("[Query Rewrite] Error in query rewriting, returning original query:", error.message || error);
+    return query;
+  }
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
@@ -490,9 +567,8 @@ export async function* streamRAG(
       const { prisma } = await import("~/database/db.server");
       
       // Advanced Query Rewriting for conversation
-      const searchTerms = history.length > 0 
-        ? `${history.map(m => m.content).join(" ")} ${query}`.slice(-600)
-        : query;
+      const searchTerms = await rewriteStandaloneQuery(query, history);
+      console.log(`[Query Rewrite] Orig: "${query}" -> Rewritten standalone query: "${searchTerms}"`);
 
       console.log(`[Hybrid Search] Stage 2: Parallel Search (Vector + Keyword)`);
       
@@ -523,14 +599,14 @@ export async function* streamRAG(
       }
 
       // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery)
-      const keywordTask = (!query || !query.trim())
+      const keywordTask = (!searchTerms || !searchTerms.trim())
         ? Promise.resolve([])
         : prisma.$queryRaw<any[]>`
             SELECT "content", "source", "title",
-                   ts_rank(to_tsvector('english', COALESCE("content", '')), websearch_to_tsquery('english', ${query})) AS "rank"
+                   ts_rank(to_tsvector('english', COALESCE("content", '')), websearch_to_tsquery('english', ${searchTerms})) AS "rank"
             FROM "KnowledgeSource"
             WHERE "projectId" = ${projectId}
-              AND to_tsvector('english', COALESCE("content", '')) @@ websearch_to_tsquery('english', ${query})
+              AND to_tsvector('english', COALESCE("content", '')) @@ websearch_to_tsquery('english', ${searchTerms})
             ORDER BY "rank" DESC
             LIMIT 5
           `.catch((err: any) => {
