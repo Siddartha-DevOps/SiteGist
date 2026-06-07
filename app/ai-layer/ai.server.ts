@@ -10,6 +10,8 @@ const GEMINI_CHAT_MAX_TOKENS     = 2048;
 const GEMINI_VERIFY_MAX_TOKENS   = 256;
 const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
 
+const USER_FACING_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
+
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     hasOpenAI: !!(process.env.OPENAI_KEY || process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.VITE_OPENAI_API_KEY),
@@ -779,7 +781,11 @@ How it works:
       errorMsg += " (Hint: Your OpenAI API Key starts with 'AIza', which looks like a Gemini key. Please swap them in Settings.)";
     }
 
-    yield `[ERROR] ${errorMsg}`;
+    // Route detailed operator diagnostics to server-side logs only
+    console.error(`[RAG ERROR DIAGNOSTICS] Stream failed: ${errorMsg}`);
+    
+    // Yield neutral, user-facing error message to the stream/visitor
+    yield `[ERROR] ${USER_FACING_ERROR}`;
     return;
   }
 
