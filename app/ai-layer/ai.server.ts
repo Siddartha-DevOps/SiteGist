@@ -603,10 +603,10 @@ export async function* streamRAG(
         ? Promise.resolve([])
         : prisma.$queryRaw<any[]>`
             SELECT "content", "source", "title",
-                   ts_rank(to_tsvector('english', COALESCE("content", '')), websearch_to_tsquery('english', ${searchTerms})) AS "rank"
+                   ts_rank("search_vector", websearch_to_tsquery('english', ${searchTerms})) AS "rank"
             FROM "KnowledgeSource"
             WHERE "projectId" = ${projectId}
-              AND to_tsvector('english', COALESCE("content", '')) @@ websearch_to_tsquery('english', ${searchTerms})
+              AND "search_vector" @@ websearch_to_tsquery('english', ${searchTerms})
             ORDER BY "rank" DESC
             LIMIT 5
           `.catch((err: any) => {
