@@ -602,13 +602,23 @@ How it works:
 
   const promptHistory = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
 
-  const prompt = `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform.
+  const isDemo = projectId === "demo-project";
+  const identity = isDemo 
+    ? `You are "Ask SiteGist", the official AI Support Specialist for the SiteGist platform.
   
   YOUR MISSION:
   Answer user questions accurately and professionally about SiteGist features, pricing, refund policy, and general platform usage.
   
   SYSTEM INSTRUCTIONS:
-  ${systemPrompt || "Provide helpful, accurate answers based on the knowledge provided."}
+  ${systemPrompt || "Provide helpful, accurate answers based on the knowledge provided."}`
+    : `SYSTEM INSTRUCTIONS / PERSONALITY:
+  ${systemPrompt || "Provide helpful, accurate answers based on the knowledge context provided."}`;
+
+  const fallbackMessage = isDemo
+    ? "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
+    : "I don't have information about that. Please contact our support team for more help.";
+
+  const prompt = `${identity}
   
   KNOWLEDGE CONTEXT:
   ${context}
@@ -618,7 +628,7 @@ How it works:
 
   STRICT FORMATTING RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "${fallbackMessage}" (or use a custom politely phrased "I don't know" or fallback response if specified/requested in your SYSTEM INSTRUCTIONS).
   3. DO NOT HALLUCINATE.
   4. Use professional, concise PLAIN TEXT. 
   5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
