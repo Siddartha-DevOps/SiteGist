@@ -94,6 +94,9 @@ model KnowledgeSource {
   title         String?
   content       String?  @db.Text
   metadata      Json?    // e.g., file size, specific youtube ID metadata
+  status        String   @default("indexed") // queued | processing | indexed | failed (async ingestion state)
+  error         String?  @db.Text            // last ingestion error message, if status = failed
+  lastIndexedAt DateTime?                     // when the source was last successfully embedded
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   search_vector Unsupported("tsvector")? // Managed via raw SQL migration as it is stored and generated
