@@ -31,12 +31,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   
-  // Use upload handler for potential file uploads
-  const uploadHandler = unstable_createMemoryUploadHandler({
-    maxPartSize: 10 * 1024 * 1024, // 10MB
-  });
+  let formData;
+  const contentType = request.headers.get("Content-Type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const uploadHandler = unstable_createMemoryUploadHandler({
+      maxPartSize: 10 * 1024 * 1024, // 10MB
+    });
+    formData = await unstable_parseMultipartFormData(request, uploadHandler);
+  } else {
+    formData = await request.formData();
+  }
   
-  const formData = await unstable_parseMultipartFormData(request, uploadHandler);
   const url = formData.get("url") as string;
   const method = formData.get("_action");
 

@@ -158,14 +158,23 @@ export async function crawlUrl(url: string, recursive = false) {
   
   if (firecrawl && !recursive) {
     try {
-      const response = await (firecrawl as any).scrapeUrl(url, {
-        formats: ["markdown"],
-      });
-      if (response.success) {
+      let response: any;
+      if (typeof (firecrawl as any).scrape === "function") {
+        response = await (firecrawl as any).scrape(url, {
+          formats: ["markdown"],
+        });
+      } else if (typeof (firecrawl as any).scrapeUrl === "function") {
+        response = await (firecrawl as any).scrapeUrl(url, {
+          formats: ["markdown"],
+        });
+      }
+
+      if (response && response.success) {
+        const doc = response.data || response;
         return {
-          title: response.data.metadata?.title || url,
-          content: response.data.markdown,
-          url: response.data.metadata?.sourceURL || url,
+          title: doc.metadata?.title || doc.title || url,
+          content: doc.markdown || doc.content || "",
+          url: doc.metadata?.sourceURL || doc.url || url,
         };
       }
     } catch (e) {
@@ -312,13 +321,23 @@ export async function crawlRecursive(url: string, limit = 10) {
   const firecrawl = getFirecrawl();
   if (firecrawl) {
     try {
-      const response = await (firecrawl as any).crawlUrl(url, {
-        limit,
-        scrapeOptions: { formats: ["markdown"] }
-      });
-      if (response.success) {
+      let response: any;
+      if (typeof (firecrawl as any).crawl === "function") {
+        response = await (firecrawl as any).crawl(url, {
+          limit,
+          scrapeOptions: { formats: ["markdown"] }
+        });
+      } else if (typeof (firecrawl as any).crawlUrl === "function") {
+        response = await (firecrawl as any).crawlUrl(url, {
+          limit,
+          scrapeOptions: { formats: ["markdown"] }
+        });
+      }
+
+      if (response && response.success) {
+        const pages = response.data || response.pages || [];
         // Return array of results
-        return response.data.map((page: any) => ({
+        return pages.map((page: any) => ({
           title: page.metadata?.title || page.url,
           content: page.markdown || page.html,
           url: page.url
