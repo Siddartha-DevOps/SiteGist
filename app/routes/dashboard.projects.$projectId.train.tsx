@@ -30,7 +30,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
-  
+
+  // Safety net: any unhandled error in the branches below is returned as a
+  // friendly inline message instead of crashing to the generic 500 error page.
+  try {
   let formData;
   const contentType = request.headers.get("Content-Type") || "";
   if (contentType.includes("multipart/form-data")) {
@@ -484,6 +487,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   return json({});
+  } catch (error: any) {
+    // Preserve Remix redirects / thrown Responses (e.g. auth) — only handle real errors.
+    if (error instanceof Response) throw error;
+    console.error("[Train Action] Unhandled error:", error);
+    return json(
+      {
+        error: error?.message
+          ? `Something went wrong: ${error.message}`
+          : "An unexpected error occurred. Please try again.",
+      },
+      { status: 400 }
+    );
+  }
 }
 
 export default function TrainProject() {
