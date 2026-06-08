@@ -7,6 +7,7 @@ import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
+import { log, startTimer } from "~/lib/logger.server";
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -697,10 +698,11 @@ export async function* streamRAG(
   console.log(`[RAG Audit] Stage 1: Starting RAG for project: ${projectId}`);
   
   if (!isDemo) {
+    const endRetrieval = startTimer("rag.retrieval", { projectId });
     try {
       const index = pineconeIndex;
       const { prisma } = await import("~/database/db.server");
-      
+
       // Advanced Query Rewriting for conversation
       const searchTerms = await rewriteStandaloneQuery(query, history);
       console.log(`[Query Rewrite] Orig: "${query}" -> Rewritten standalone query: "${searchTerms}"`);
@@ -850,10 +852,20 @@ export async function* streamRAG(
       context = rankedSources
         .map((s: any, i: number) => `[Document ${i+1}]: ${s.text}\nSource: ${s.title || 'Knowledge Base'} (${s.url || 'Internal'})\n---`)
         .join("\n\n");
-        
-      console.log(`[Hybrid Search] Stage 5: Hybrid Retrieval complete.`);
+
+      const rerankEnabled = !!(process.env.PORTKEY_API_KEY && process.env.PORTKEY_COHERE_VIRTUAL_KEY);
+      endRetrieval({
+        ok: true,
+        candidates: initialMatches.length,
+        ranked: rankedSources.length,
+        citations: citationMetadata.length,
+        rerank: rerankEnabled,
+        multiQuery: process.env.RAG_MULTI_QUERY === "1",
+      });
     } catch (e) {
       console.error("[Hybrid Search] Retrieval failed, short-circuiting with fallback message:", e);
+      captureException(e, { where: "streamRAG.retrieval", projectId });
+      endRetrieval({ ok: false });
       yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
       yield fallbackMessage;
       return;

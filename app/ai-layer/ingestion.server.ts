@@ -17,6 +17,8 @@ import { crawlUrl, getYoutubeTranscript } from "~/ai-layer/crawler.server";
 import { chunkTextByTokens } from "~/ai-layer/chunking.server";
 import { upsertChunksBatched, deleteSourceChunks } from "~/ai-layer/ai.server";
 import { inngest, INGEST_SOURCE_EVENT } from "~/inngest/client";
+import { log, startTimer } from "~/lib/logger.server";
+import { captureException } from "~/lib/monitoring.server";
 
 export type IngestResult = { sourceId: string; chunks: number; upserted: number; skipped: boolean };
 
@@ -86,6 +88,7 @@ export async function ingestKnowledgeSource(
   if (!source) throw new Error(`KnowledgeSource ${sourceId} not found`);
 
   const projectId = source.projectId;
+  const endTimer = startTimer("ingest.source", { sourceId, projectId, type: source.type });
 
   try {
     // 1. Resolve content by source type.
@@ -116,7 +119,7 @@ export async function ingestKnowledgeSource(
     const hash = sha256(content);
     if (!opts.force && source.contentHash === hash && source.status === "indexed") {
       await setStatus(sourceId, "indexed", { error: null, lastIndexedAt: new Date() });
-      console.log(`[Ingestion] ${sourceId} unchanged (hash match) — skipped embedding.`);
+      endTimer({ ok: true, skipped: true });
       return { sourceId, chunks: 0, upserted: 0, skipped: true };
     }
 
@@ -160,10 +163,13 @@ export async function ingestKnowledgeSource(
       chunksTotal: chunks.length,
       chunksIndexed: chunks.length,
     });
+    endTimer({ ok: true, skipped: false, chunks: chunks.length, upserted });
     return { sourceId, chunks: chunks.length, upserted, skipped: false };
   } catch (err: any) {
     const message = err?.message ? String(err.message).slice(0, 1000) : "Ingestion failed";
     await setStatus(sourceId, "failed", { error: message }).catch(() => {});
+    captureException(err, { where: "ingestKnowledgeSource", sourceId, projectId, type: source.type });
+    endTimer({ ok: false, message });
     throw err;
   }
 }
