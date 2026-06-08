@@ -325,10 +325,95 @@ export async function embedText(text: string) {
   throw new Error(`Failed to generate embedding after ${maxAttempts} attempts using provider '${EMBEDDING_PROVIDER}'. Original error: ${lastError?.message || String(lastError)}`);
 }
 
+/**
+ * Embed many texts efficiently. OpenAI accepts an array input and returns one
+ * embedding per item in a single request, so we batch instead of issuing one
+ * request per chunk. Gemini is embedded per-item with capped concurrency.
+ * Returns embeddings aligned to input order; a failed item yields an empty array.
+ */
+export async function embedTexts(texts: string[], batchSize = 96): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const results: number[][] = texts.map(() => [] as number[]);
+
+  if (EMBEDDING_PROVIDER === "openai") {
+    const openai = getOpenAI();
+    if (!openai) throw new Error("OpenAI is configured as EMBEDDING_PROVIDER, but no OpenAI client is available.");
+
+    for (let start = 0; start < texts.length; start += batchSize) {
+      const batch = texts.slice(start, start + batchSize);
+      let lastError: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await (openai as any).embeddings.create({
+            model: "text-embedding-3-small",
+            input: batch,
+          });
+          for (let i = 0; i < batch.length; i++) {
+            results[start + i] = response.data[i].embedding as number[];
+          }
+          lastError = null;
+          break;
+        } catch (e: any) {
+          lastError = e;
+          console.warn(`[AI] Batch embed attempt ${attempt}/3 failed (items ${start}-${start + batch.length}):`, e.message || e);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+        }
+      }
+      if (lastError) throw new Error(`Batch embedding failed: ${lastError.message || String(lastError)}`);
+    }
+    return results;
+  }
+
+  // Gemini: embed per item (reuses embedText's retry logic), capped concurrency.
+  const concurrency = 5;
+  for (let start = 0; start < texts.length; start += concurrency) {
+    const slice = texts.slice(start, start + concurrency);
+    const embedded = await Promise.all(slice.map(t => embedText(t).catch(() => [] as number[])));
+    for (let i = 0; i < embedded.length; i++) results[start + i] = embedded[i];
+  }
+  return results;
+}
+
+/**
+ * Like upsertChunks but embeds in batches (one request per ~96 chunks) instead
+ * of one request per chunk. Throws on failure so the ingestion pipeline can mark
+ * the source failed and retry. Returns the count of vectors upserted.
+ */
+export async function upsertChunksBatched(projectId: string, chunks: { text: string; metadata: any }[]) {
+  if (chunks.length === 0) return { upserted: 0 };
+  const index = pineconeIndex;
+  const embeddings = await embedTexts(chunks.map(c => c.text));
+
+  const vectors = chunks.map((chunk, i) => {
+    const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
+    const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
+    return {
+      id: `${projectId}-${hash}-${i}`,
+      values: embeddings[i] || [],
+      metadata: { ...chunk.metadata, source: sourceUrlOrTitle, text: chunk.text, projectId },
+    };
+  });
+
+  const validVectors = vectors.filter(v => {
+    if (!v.values || v.values.length === 0) return false;
+    if (v.values.length !== EMBEDDING_DIMENSION) {
+      console.error(`[AI] DIMENSION_MISMATCH: vector ${v.id} has ${v.values.length}, expected ${EMBEDDING_DIMENSION}. Skipping.`);
+      return false;
+    }
+    return true;
+  });
+
+  if (validVectors.length > 0) {
+    await index.namespace(projectId).upsert({ records: validVectors } as any);
+    console.log(`[AI] Batched upsert: ${validVectors.length}/${chunks.length} chunks to Pinecone.`);
+  }
+  return { upserted: validVectors.length };
+}
+
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
   try {
     const index = pineconeIndex;
-    
+
     const vectors = await Promise.all(
       chunks.map(async (chunk, i) => {
         let values: number[] = [];
