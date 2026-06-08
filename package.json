@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "remix vite:dev",
-    "build": "prisma generate && remix vite:build && node copy-build.js",
+    "build": "prisma generate && prisma migrate deploy && remix vite:build && node copy-build.js",
     "postinstall": "prisma generate",
     "start": "remix-serve ./build/server/index.js",
     "clean": "rm -rf build dist",
