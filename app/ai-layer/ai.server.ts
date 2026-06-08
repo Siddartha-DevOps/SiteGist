@@ -239,7 +239,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
   if (!portkeyApiKey || !cohereVirtualKey) {
     console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 
   // Diagnostic (masked)
@@ -273,7 +273,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     return rerankedMatches;
   } catch (error) {
     console.error("Portkey Rerank error:", error);
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 }
 
@@ -578,6 +578,35 @@ REWRITTEN STANDALONE QUESTION:`;
   }
 }
 
+/**
+ * Multi-query expansion (opt-in via RAG_MULTI_QUERY=1). Generates a few alternative
+ * phrasings of the search query to widen retrieval recall. Returns [] when disabled
+ * or on any failure, so callers can simply spread the result with no behaviour change.
+ */
+export async function expandQueries(query: string, n = 2): Promise<string[]> {
+  if (process.env.RAG_MULTI_QUERY !== "1") return [];
+  try {
+    const gemini = getGemini();
+    if (!gemini) return [];
+    const resp: any = await gemini.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: `Rewrite the search query into ${n} alternative phrasings a knowledge base might match. Return ONLY the rewrites, one per line, no numbering or commentary.\n\nQuery: ${query}`,
+    });
+    const text =
+      resp?.text ??
+      resp?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      "";
+    return String(text)
+      .split("\n")
+      .map((s: string) => s.replace(/^[-*\d.\s]+/, "").trim())
+      .filter(Boolean)
+      .slice(0, n);
+  } catch (e) {
+    console.warn("[Multi-Query] expansion failed:", e);
+    return [];
+  }
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
@@ -722,6 +751,37 @@ export async function* streamRAG(
 
       const [resolvedVectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
       vectorResults = resolvedVectorResults || { matches: [] };
+
+      // Multi-query expansion (opt-in): widen recall by also searching alternative
+      // phrasings of the query and merging in any new vector matches. Default path
+      // (RAG_MULTI_QUERY unset) is untouched.
+      if (process.env.RAG_MULTI_QUERY === "1") {
+        try {
+          const expansions = await expandQueries(searchTerms, 2);
+          if (expansions.length > 0) {
+            const expFilter: Record<string, any> = { projectId: { $eq: projectId } };
+            if (sourceFilter?.urls && sourceFilter.urls.length > 0) expFilter.source = { $in: sourceFilter.urls };
+            const expEmbeddings = await embedTexts(expansions);
+            const extra = await Promise.all(
+              expEmbeddings.map(vec =>
+                vec.length === EMBEDDING_DIMENSION
+                  ? index.namespace(projectId).query({ vector: vec, topK: 10, includeMetadata: true, filter: expFilter }).catch(() => ({ matches: [] }))
+                  : Promise.resolve({ matches: [] })
+              )
+            );
+            if (!vectorResults.matches) vectorResults.matches = [];
+            const seenIds = new Set((vectorResults.matches || []).map((m: any) => m.id));
+            for (const r of extra) {
+              for (const m of (r as any).matches || []) {
+                if (m.id && !seenIds.has(m.id)) { seenIds.add(m.id); vectorResults.matches.push(m); }
+              }
+            }
+            console.log(`[Multi-Query] ${expansions.length} expansions -> ${vectorResults.matches.length} total vector matches.`);
+          }
+        } catch (e) {
+          console.warn("[Multi-Query] merge failed (continuing with base results):", e);
+        }
+      }
 
       console.log(`[Hybrid Search] Vector: ${vectorResults.matches?.length || 0}, Keyword: ${keywordResults?.length || 0}`);
 
