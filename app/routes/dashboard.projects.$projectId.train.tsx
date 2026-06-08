@@ -49,6 +49,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, message: "Source removed and vector data cleaned successfully" });
   }
 
+  if (method === "retry_source") {
+    const sourceId = formData.get("id") as string;
+    const source = await prisma.knowledgeSource.findFirst({
+      where: { id: sourceId, projectId: params.projectId! },
+    });
+    if (!source) return json({ error: "Source not found." }, { status: 404 });
+    await prisma.knowledgeSource.update({
+      where: { id: sourceId },
+      data: { status: "queued", error: null, chunksIndexed: 0 },
+    });
+    await enqueueSourceIngestion(params.projectId!, sourceId);
+    return json({ success: true, message: "Re-queued for training." });
+  }
+
   if (method === "add_qa") {
     const question = (formData.get("question") as string || "").trim();
     const answer = (formData.get("answer") as string || "").trim();
@@ -462,7 +476,7 @@ export default function TrainProject() {
   // update live (queued → processing → indexed/failed) without a manual refresh.
   const revalidator = useRevalidator();
   const sourcesInFlight = ((project as any).knowledgeSources || []).some(
-    (s: any) => s.status === "queued" || s.status === "processing"
+    (s: any) => ["queued", "processing", "crawling", "embedding"].includes(s.status)
   );
   useEffect(() => {
     if (!sourcesInFlight) return;
@@ -1197,21 +1211,45 @@ export default function TrainProject() {
                     <span className="flex items-center gap-1">• <Clock className="w-3 h-3" /> {new Date(source.updatedAt).toLocaleDateString()}</span>
                     <span className="flex items-center gap-1">• <Database className="w-3 h-3" /> {source.content?.length || 0} chars</span>
                   </div>
+                  {source.status === "embedding" && source.chunksTotal > 0 && (
+                    <div className="mt-2 w-56 max-w-full">
+                      <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all"
+                          style={{ width: `${Math.min(100, Math.round((source.chunksIndexed / source.chunksTotal) * 100))}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-zinc-400 font-medium">{source.chunksIndexed}/{source.chunksTotal} chunks embedded</span>
+                    </div>
+                  )}
+                  {source.status === "failed" && source.error && (
+                    <p className="mt-1.5 text-[10px] text-red-500 font-medium max-w-md truncate" title={source.error}>⚠ {source.error}</p>
+                  )}
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <button 
-                  className="p-2.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 rounded-xl transition-all"
-                  title="Resync Source"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <Form method="post">
+                  <input type="hidden" name="_action" value="retry_source" />
+                  <input type="hidden" name="id" value={source.id} />
+                  <button
+                    type="submit"
+                    disabled={["queued", "crawling", "embedding"].includes(source.status)}
+                    className={`p-2.5 rounded-xl transition-all disabled:opacity-40 ${
+                      source.status === "failed"
+                        ? "text-red-500 hover:bg-red-50"
+                        : "text-zinc-400 hover:text-primary hover:bg-zinc-100"
+                    }`}
+                    title={source.status === "failed" ? "Retry training" : "Resync / retrain"}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </Form>
                 <Form method="post">
                   <input type="hidden" name="_action" value="delete_source" />
                   <input type="hidden" name="id" value={source.id} />
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className="p-2.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                     title="Remove Source"
                     onClick={(e) => !confirm("Are you sure? This will remove the source from the training data.") && e.preventDefault()}
@@ -1310,7 +1348,14 @@ function SourceStatusBadge({ status, error }: { status?: string; error?: string 
   switch (status) {
     case "queued":
       return <span className={`${base} bg-amber-50 text-amber-600 border-amber-100`}>Queued</span>;
+    case "crawling":
+      return (
+        <span className={`${base} bg-indigo-50 text-indigo-600 border-indigo-100`}>
+          <Loader2 className="w-2.5 h-2.5 animate-spin" /> Fetching
+        </span>
+      );
     case "processing":
+    case "embedding":
       return (
         <span className={`${base} bg-blue-50 text-blue-600 border-blue-100`}>
           <Loader2 className="w-2.5 h-2.5 animate-spin" /> Training
