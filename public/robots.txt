@@ -1,7 +1,0 @@
-User-agent: *
-Allow: /
-
-# Private/app surfaces — no SEO value, keep crawlers out
-Disallow: /dashboard
-Disallow: /api
-Disallow: /embed
