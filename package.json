@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "remix vite:dev",
-    "build": "prisma generate && remix vite:build && node copy-build.js",
+    "build": "prisma generate && npm run db:deploy && remix vite:build && node copy-build.js",
+    "db:deploy": "if [ -n \"$DATABASE_URL\" ]; then prisma migrate deploy; else echo 'Skipping prisma migrate deploy: DATABASE_URL not set in build environment'; fi",
     "postinstall": "prisma generate",
     "start": "remix-serve ./build/server/index.js",
     "clean": "rm -rf build dist",
