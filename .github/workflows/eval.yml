@@ -1,0 +1,46 @@
+name: RAG eval
+
+# Manual / scheduled accuracy check. Runs the golden-set eval against a deployed
+# instance and fails if the pass rate drops below the threshold.
+#
+# Setup: commit your golden set to eval/golden.jsonl and add a repo secret
+# EVAL_BASE_URL (e.g. https://www.sitegist.co). Optionally set MIN_PASS_RATE.
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_pass_rate:
+        description: "Minimum pass rate (0..1)"
+        required: false
+        default: "0.7"
+  schedule:
+    - cron: "0 7 * * *" # daily (Hobby-plan friendly)
+
+concurrency:
+  group: rag-eval
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Guard — require EVAL_BASE_URL and a golden set
+        run: |
+          if [ -z "${{ secrets.EVAL_BASE_URL }}" ]; then
+            echo "::warning::EVAL_BASE_URL secret not set — skipping eval."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          elif [ ! -f eval/golden.jsonl ]; then
+            echo "::warning::eval/golden.jsonl not found — skipping eval."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+        id: guard
+      - name: Run eval
+        if: steps.guard.outputs.skip != '1'
+        env:
+          EVAL_BASE_URL: ${{ secrets.EVAL_BASE_URL }}
+          MIN_PASS_RATE: ${{ github.event.inputs.min_pass_rate || '0.7' }}
+        run: node scripts/eval-retrieval.mjs
