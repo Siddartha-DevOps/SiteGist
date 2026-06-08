@@ -3,16 +3,26 @@
  *
  * `ingestKnowledgeSource` is the single, reusable unit of work for turning one
  * KnowledgeSource into vectors: resolve content (crawl / transcript / stored) →
- * chunk → batched embed → upsert → update status. It is called by the Inngest
- * durable function (production async path) and by the inline fallback (used until
- * Inngest is configured), so behaviour is identical either way.
+ * chunk (token-based) → batched embed → upsert → update status/progress. It is
+ * called by the Inngest durable function (production async path) and by the
+ * inline fallback, so behaviour is identical either way.
+ *
+ * State machine: queued → crawling → embedding → indexed | failed.
+ * Incremental sync: if the freshly-resolved content hashes to the same value as
+ * the last successful index, embedding is skipped entirely.
  */
+import crypto from "crypto";
 import { prisma } from "~/database/db.server";
-import { crawlUrl, chunkText, getYoutubeTranscript } from "~/ai-layer/crawler.server";
+import { crawlUrl, getYoutubeTranscript } from "~/ai-layer/crawler.server";
+import { chunkTextByTokens } from "~/ai-layer/chunking.server";
 import { upsertChunksBatched, deleteSourceChunks } from "~/ai-layer/ai.server";
 import { inngest, INGEST_SOURCE_EVENT } from "~/inngest/client";
 
-export type IngestResult = { sourceId: string; chunks: number; upserted: number };
+export type IngestResult = { sourceId: string; chunks: number; upserted: number; skipped: boolean };
+
+function sha256(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
 
 /** Async ingestion is used when Inngest is wired up; otherwise we run inline. */
 export function isAsyncIngestionEnabled(): boolean {
@@ -29,7 +39,6 @@ export async function enqueueSourceIngestion(projectId: string, sourceId: string
     await inngest.send({ name: INGEST_SOURCE_EVENT, data: { projectId, sourceId } });
     return;
   }
-  // Inline fallback (best-effort). Mirrors the previous synchronous behaviour.
   try {
     await ingestKnowledgeSource(sourceId);
   } catch (err) {
@@ -57,7 +66,7 @@ export async function enqueueManySourceIngestions(
 
 async function setStatus(
   sourceId: string,
-  status: "queued" | "processing" | "indexed" | "failed",
+  status: "queued" | "crawling" | "embedding" | "indexed" | "failed",
   extra: Record<string, any> = {}
 ) {
   await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { status, ...extra } });
@@ -65,22 +74,26 @@ async function setStatus(
 
 /**
  * Resolve, chunk, embed and upsert a single KnowledgeSource. Marks the row
- * processing → indexed, or failed (and rethrows so the caller/Inngest can retry).
+ * crawling → embedding → indexed, or failed (and rethrows so Inngest can retry).
+ * Skips embedding when content is unchanged since the last successful index
+ * (unless `force` is set, e.g. a manual retry).
  */
-export async function ingestKnowledgeSource(sourceId: string): Promise<IngestResult> {
+export async function ingestKnowledgeSource(
+  sourceId: string,
+  opts: { force?: boolean } = {}
+): Promise<IngestResult> {
   const source = await prisma.knowledgeSource.findUnique({ where: { id: sourceId } });
   if (!source) throw new Error(`KnowledgeSource ${sourceId} not found`);
 
   const projectId = source.projectId;
 
   try {
-    await setStatus(sourceId, "processing", { error: null });
-
     // 1. Resolve content by source type.
     let content = source.content || "";
     let title = source.title || source.source;
 
     if (source.type === "web") {
+      await setStatus(sourceId, "crawling", { error: null });
       const data = await crawlUrl(source.source);
       if (!data || !data.content) {
         throw new Error("Could not crawl or fetch the page. Verify the URL is reachable.");
@@ -89,6 +102,7 @@ export async function ingestKnowledgeSource(sourceId: string): Promise<IngestRes
       title = data.title || title;
       await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { content, title } });
     } else if (source.type === "youtube") {
+      await setStatus(sourceId, "crawling", { error: null });
       const transcript = await getYoutubeTranscript(source.source);
       if (!transcript) throw new Error("No transcript available (captions may be disabled).");
       content = transcript;
@@ -98,11 +112,25 @@ export async function ingestKnowledgeSource(sourceId: string): Promise<IngestRes
 
     if (!content.trim()) throw new Error("No content to index for this source.");
 
-    // 2. Chunk.
-    const chunks = chunkText(content);
+    // 2. Incremental sync: skip embedding when content is unchanged.
+    const hash = sha256(content);
+    if (!opts.force && source.contentHash === hash && source.status === "indexed") {
+      await setStatus(sourceId, "indexed", { error: null, lastIndexedAt: new Date() });
+      console.log(`[Ingestion] ${sourceId} unchanged (hash match) — skipped embedding.`);
+      return { sourceId, chunks: 0, upserted: 0, skipped: true };
+    }
+
+    // 3. Token-based chunking.
+    const chunks = chunkTextByTokens(content);
     if (chunks.length === 0) throw new Error("Content produced zero chunks.");
 
-    // 3. Remove any previous vectors for this source (keeps re-crawls clean).
+    await setStatus(sourceId, "embedding", {
+      error: null,
+      chunksTotal: chunks.length,
+      chunksIndexed: 0,
+    });
+
+    // 4. Remove previous vectors for this source (keeps re-crawls clean).
     const sourceKey = source.type === "web" ? source.source : title || source.source;
     try {
       await deleteSourceChunks(projectId, sourceKey);
@@ -110,16 +138,29 @@ export async function ingestKnowledgeSource(sourceId: string): Promise<IngestRes
       console.warn(`[Ingestion] deleteSourceChunks skipped for ${sourceKey}:`, e);
     }
 
-    // 4. Batched embed + upsert.
+    // 5. Batched embed + upsert with live progress.
     const metaUrl = source.type === "web" || source.type === "youtube" ? source.source : undefined;
     const { upserted } = await upsertChunksBatched(
       projectId,
-      chunks.map(c => ({ text: c, metadata: { title, source: sourceKey, ...(metaUrl ? { url: metaUrl } : {}), type: source.type } }))
+      chunks.map(c => ({ text: c, metadata: { title, source: sourceKey, ...(metaUrl ? { url: metaUrl } : {}), type: source.type } })),
+      {
+        onProgress: async (done) => {
+          await prisma.knowledgeSource
+            .update({ where: { id: sourceId }, data: { chunksIndexed: done } })
+            .catch(() => {});
+        },
+      }
     );
 
-    // 5. Mark indexed.
-    await setStatus(sourceId, "indexed", { error: null, lastIndexedAt: new Date() });
-    return { sourceId, chunks: chunks.length, upserted };
+    // 6. Mark indexed and record the content hash for future incremental skips.
+    await setStatus(sourceId, "indexed", {
+      error: null,
+      lastIndexedAt: new Date(),
+      contentHash: hash,
+      chunksTotal: chunks.length,
+      chunksIndexed: chunks.length,
+    });
+    return { sourceId, chunks: chunks.length, upserted, skipped: false };
   } catch (err: any) {
     const message = err?.message ? String(err.message).slice(0, 1000) : "Ingestion failed";
     await setStatus(sourceId, "failed", { error: message }).catch(() => {});

@@ -379,35 +379,53 @@ export async function embedTexts(texts: string[], batchSize = 96): Promise<numbe
  * of one request per chunk. Throws on failure so the ingestion pipeline can mark
  * the source failed and retry. Returns the count of vectors upserted.
  */
-export async function upsertChunksBatched(projectId: string, chunks: { text: string; metadata: any }[]) {
+export async function upsertChunksBatched(
+  projectId: string,
+  chunks: { text: string; metadata: any }[],
+  opts: { batchSize?: number; onProgress?: (done: number, total: number) => Promise<void> | void } = {}
+) {
   if (chunks.length === 0) return { upserted: 0 };
   const index = pineconeIndex;
-  const embeddings = await embedTexts(chunks.map(c => c.text));
+  const batchSize = opts.batchSize ?? 96;
+  const total = chunks.length;
+  let upserted = 0;
+  let processed = 0;
 
-  const vectors = chunks.map((chunk, i) => {
-    const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
-    const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
-    return {
-      id: `${projectId}-${hash}-${i}`,
-      values: embeddings[i] || [],
-      metadata: { ...chunk.metadata, source: sourceUrlOrTitle, text: chunk.text, projectId },
-    };
-  });
+  // Embed + upsert one batch at a time so progress can be reported and partial
+  // work survives a mid-run failure (the next retry re-upserts deterministically).
+  for (let start = 0; start < chunks.length; start += batchSize) {
+    const batch = chunks.slice(start, start + batchSize);
+    const embeddings = await embedTexts(batch.map(c => c.text), batchSize);
 
-  const validVectors = vectors.filter(v => {
-    if (!v.values || v.values.length === 0) return false;
-    if (v.values.length !== EMBEDDING_DIMENSION) {
-      console.error(`[AI] DIMENSION_MISMATCH: vector ${v.id} has ${v.values.length}, expected ${EMBEDDING_DIMENSION}. Skipping.`);
-      return false;
+    const validVectors = batch
+      .map((chunk, i) => {
+        const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
+        const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
+        return {
+          id: `${projectId}-${hash}-${start + i}`,
+          values: embeddings[i] || [],
+          metadata: { ...chunk.metadata, source: sourceUrlOrTitle, text: chunk.text, projectId },
+        };
+      })
+      .filter(v => {
+        if (!v.values || v.values.length === 0) return false;
+        if (v.values.length !== EMBEDDING_DIMENSION) {
+          console.error(`[AI] DIMENSION_MISMATCH: vector ${v.id} has ${v.values.length}, expected ${EMBEDDING_DIMENSION}. Skipping.`);
+          return false;
+        }
+        return true;
+      });
+
+    if (validVectors.length > 0) {
+      await index.namespace(projectId).upsert({ records: validVectors } as any);
+      upserted += validVectors.length;
     }
-    return true;
-  });
-
-  if (validVectors.length > 0) {
-    await index.namespace(projectId).upsert({ records: validVectors } as any);
-    console.log(`[AI] Batched upsert: ${validVectors.length}/${chunks.length} chunks to Pinecone.`);
+    processed += batch.length;
+    if (opts.onProgress) await opts.onProgress(processed, total);
   }
-  return { upserted: validVectors.length };
+
+  console.log(`[AI] Batched upsert: ${upserted}/${total} chunks to Pinecone.`);
+  return { upserted };
 }
 
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
