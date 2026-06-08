@@ -8,10 +8,6 @@ import { upsertChunks } from "~/ai-layer/ai.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
-import { 
-  unstable_createMemoryUploadHandler, 
-  unstable_parseMultipartFormData 
-} from "@remix-run/node";
 import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -34,16 +30,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // Safety net: any unhandled error in the branches below is returned as a
   // friendly inline message instead of crashing to the generic 500 error page.
   try {
-  let formData;
-  const contentType = request.headers.get("Content-Type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    const uploadHandler = unstable_createMemoryUploadHandler({
-      maxPartSize: 10 * 1024 * 1024, // 10MB
-    });
-    formData = await unstable_parseMultipartFormData(request, uploadHandler);
-  } else {
-    formData = await request.formData();
-  }
+  // Native FormData parsing handles both urlencoded forms and multipart/form-data
+  // file uploads (returning File objects). The previous unstable_parseMultipartFormData
+  // helper threw "Could not parse content as FormData" on the Node serverless runtime.
+  const formData = await request.formData();
   
   const url = formData.get("url") as string;
   const method = formData.get("_action");
