@@ -86,19 +86,23 @@ model Integration {
 }
 
 model KnowledgeSource {
-  id            String   @id @default(cuid())
-  projectId     String
-  project       Project  @relation(fields: [projectId], references: [id])
-  type          String   // 'web', 'file', 'youtube', 'text'
-  source        String   // URL or Filename
-  title         String?
-  content       String?  @db.Text
-  metadata      Json?    // e.g., file size, specific youtube ID metadata
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  search_vector Unsupported("tsvector")? // Managed via raw SQL migration as it is stored and generated
+  id             String    @id @default(cuid())
+  projectId      String
+  project        Project   @relation(fields: [projectId], references: [id])
+  type           String    // 'web', 'file', 'youtube', 'text'
+  source         String    // URL or Filename
+  title          String?
+  content        String?   @db.Text
+  metadata       Json?     // e.g., file size, specific youtube ID metadata
+  indexingStatus String    @default("INDEXED") // PENDING, PROCESSING, INDEXED, ERROR
+  indexingError  String?   @db.Text
+  indexedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  search_vector  Unsupported("tsvector")? // Managed via raw SQL migration as it is stored and generated
 
   @@index([projectId])
+  @@index([projectId, indexingStatus])
 }
 
 model ChatSession {

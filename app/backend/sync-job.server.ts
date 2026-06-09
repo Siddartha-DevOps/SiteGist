@@ -120,26 +120,9 @@ export async function syncAllProjects() {
   console.log("[Sync Job] Global synchronization complete.");
 }
 
-// Simple background loop (best effort for container environment)
-let isLoopRunning = false;
+// Scheduled sync is now handled by the Inngest dailySyncCron function (app/inngest/functions.server.ts).
+// This stub remains for backward compatibility with any callers.
 export function startBackgroundSync() {
-  if (isLoopRunning) return;
-  isLoopRunning = true;
-  
-  const INTERVAL = 12 * 60 * 60 * 1000; // Run every 12 hours
-  
-  console.log("[Sync Job] Background sync scheduler started. Interval: 12h");
-  
-  const run = async () => {
-    try {
-      await syncAllProjects();
-    } catch (e) {
-      console.error("[Sync Job] Error in sync loop:", e);
-    }
-    setTimeout(run, INTERVAL);
-  };
-  
-  // Start the sync process 60 seconds after application launch to ensure no database contention at startup
-  setTimeout(run, 60000); 
+  console.log("[Sync Job] Background sync delegated to Inngest cron — no-op in process.");
 }
 
