@@ -47,13 +47,19 @@ export const links: LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  // Strip trailing slash except for root; exclude query strings and hashes from canonical.
+  const canonicalPath = location.pathname === "/" ? "/" : location.pathname.replace(/\/$/, "");
+  const canonicalUrl = `https://sitegist.co${canonicalPath}`;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>SiteGist — AI-Powered Customer Support</title>
-        <meta name="description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7. No humans required." />
+        <title>SiteGist -- AI-Powered Customer Support</title>
+        <link rel="canonical" href={canonicalUrl} />
+        <meta name="description" content="SiteGist understands your site and delivers instant, accurate answers to your customers -- 24/7. No humans required." />
         <meta name="theme-color" content="#155DEE" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="SiteGist" />
