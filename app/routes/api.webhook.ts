@@ -19,13 +19,15 @@ export async function action({ request }: ActionFunctionArgs) {
   
   console.log(`[Paddle Webhook] Received ${eventType}`, { userId, customerId });
 
+  const REMOVE_BRANDING_ADDON_ID = process.env.VITE_PADDLE_REMOVE_BRANDING_ADDON_ID;
+
   if (
-    eventType === "subscription.created" || 
-    eventType === "subscription.updated" || 
+    eventType === "subscription.created" ||
+    eventType === "subscription.updated" ||
     eventType === "subscription.activated"
   ) {
     const subscription = data as any;
-    const planId = subscription.items?.[0]?.price?.productId || subscription.discount?.id; // Simplified
+    const planId = subscription.items?.[0]?.price?.id || subscription.items?.[0]?.price?.productId || subscription.discount?.id;
     const email = subscription.customer?.email;
     const status = subscription.status;
     const externalSubscriptionId = subscription.id;
@@ -40,29 +42,38 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (user) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { subscriptionTier: planId || "pro" }
-      });
+      // Check if this is a remove-branding add-on purchase
+      if (REMOVE_BRANDING_ADDON_ID && planId === REMOVE_BRANDING_ADDON_ID) {
+        await prisma.userAddon.upsert({
+          where: { userId_type: { userId: user.id, type: "remove_branding" } },
+          update: { status: "active", externalSubscriptionId, externalCustomerId, updatedAt: new Date() },
+          create: { userId: user.id, type: "remove_branding", status: "active", externalSubscriptionId, externalCustomerId },
+        });
+      } else {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { subscriptionTier: planId || "pro" }
+        });
 
-      await prisma.billingSubscription.upsert({
-        where: { externalSubscriptionId },
-        update: {
-          status,
-          planId: planId || "pro",
-          nextBilledAt,
-          updatedAt: new Date()
-        },
-        create: {
-          userId: user.id,
-          externalSubscriptionId,
-          externalCustomerId,
-          status,
-          planId: planId || "pro",
-          provider: "paddle",
-          nextBilledAt,
-        }
-      });
+        await prisma.billingSubscription.upsert({
+          where: { externalSubscriptionId },
+          update: {
+            status,
+            planId: planId || "pro",
+            nextBilledAt,
+            updatedAt: new Date()
+          },
+          create: {
+            userId: user.id,
+            externalSubscriptionId,
+            externalCustomerId,
+            status,
+            planId: planId || "pro",
+            provider: "paddle",
+            nextBilledAt,
+          }
+        });
+      }
     }
   }
 
@@ -71,23 +82,32 @@ export async function action({ request }: ActionFunctionArgs) {
     const externalSubscriptionId = subscription.id;
     const email = subscription.customer?.email;
 
-    if (email || userId) {
-      const user = email 
-        ? await prisma.user.findUnique({ where: { email } })
-        : await prisma.user.findUnique({ where: { id: userId } });
+    // Check if this is an add-on cancellation
+    const addonRecord = await prisma.userAddon.findFirst({ where: { externalSubscriptionId } });
+    if (addonRecord) {
+      await prisma.userAddon.update({
+        where: { id: addonRecord.id },
+        data: { status: "cancelled", updatedAt: new Date() },
+      });
+    } else {
+      if (email || userId) {
+        const user = email
+          ? await prisma.user.findUnique({ where: { email } })
+          : await prisma.user.findUnique({ where: { id: userId } });
 
-      if (user) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { subscriptionTier: "free" }
-        });
+        if (user) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { subscriptionTier: "free" }
+          });
+        }
       }
-    }
 
-    await prisma.billingSubscription.updateMany({
-      where: { externalSubscriptionId },
-      data: { status: "canceled", updatedAt: new Date() }
-    });
+      await prisma.billingSubscription.updateMany({
+        where: { externalSubscriptionId },
+        data: { status: "canceled", updatedAt: new Date() }
+      });
+    }
   }
 
   if (eventType === "transaction.completed") {

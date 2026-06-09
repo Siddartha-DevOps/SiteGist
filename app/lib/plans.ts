@@ -26,3 +26,17 @@ export function getPlanForTier(tier: string | null | undefined): PlanInfo {
       return { name: "Starter", messageLimit: 1000, chatbotLimit: 1 };
   }
 }
+
+export function hasRemoveBrandingAccess(
+  tier: string | null | undefined,
+  addons: { type: string; status: string }[]
+): boolean {
+  const PADDLE_BASIC_PLAN_ID = process.env.VITE_PADDLE_GROWTH_PLAN_ID || process.env.VITE_PADDLE_BASIC_PLAN_ID || "pri_01kqpe8ad9772rdsn3ddbw4bg3";
+  const PADDLE_PRO_PLAN_ID = process.env.VITE_PADDLE_SCALE_PLAN_ID || process.env.VITE_PADDLE_PRO_PLAN_ID || "pri_01kqpe9hv3r1v9wfxxvnjgq9zk";
+
+  if (tier === PADDLE_BASIC_PLAN_ID || tier === PADDLE_PRO_PLAN_ID || tier === "enterprise_plan") {
+    return true;
+  }
+
+  return addons.some((a) => a.type === "remove_branding" && a.status === "active");
+}

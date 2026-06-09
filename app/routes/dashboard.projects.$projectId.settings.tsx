@@ -3,7 +3,8 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2 } from "lucide-react";
+import { hasRemoveBrandingAccess } from "~/lib/plans";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock } from "lucide-react";
 import { useState } from "react";
 
 const PERSONAS = [
@@ -41,13 +42,17 @@ const PERSONAS = [
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
+  const [project, user, addons] = await Promise.all([
+    prisma.project.findFirst({ where: { id: params.projectId, userId } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { subscriptionTier: true } }),
+    prisma.userAddon.findMany({ where: { userId, status: "active" }, select: { type: true, status: true } }),
+  ]);
 
   if (!project) return redirect("/dashboard");
 
-  return json({ project });
+  const canRemoveBranding = hasRemoveBrandingAccess(user?.subscriptionTier, addons);
+
+  return json({ project, canRemoveBranding });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -96,7 +101,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const webhookUrl = formData.get("webhookUrl") as string;
   const customDomain = formData.get("customDomain") as string;
   const allowedDomainsString = formData.get("allowedDomains") as string;
-  const removeBranding = formData.get("removeBranding") === "true";
+  let removeBranding = formData.get("removeBranding") === "true";
+  if (removeBranding) {
+    const [user, addons] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { subscriptionTier: true } }),
+      prisma.userAddon.findMany({ where: { userId, status: "active" }, select: { type: true, status: true } }),
+    ]);
+    if (!hasRemoveBrandingAccess(user?.subscriptionTier, addons)) {
+      removeBranding = false;
+    }
+  }
   
   const leadPolicy = formData.get("leadPolicy") as string; // 'none', 'pre-chat', 'keywords'
   
@@ -168,7 +182,7 @@ interface LeadField {
 }
 
 export default function ProjectSettings() {
-  const { project } = useLoaderData<typeof loader>();
+  const { project, canRemoveBranding } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSaving = navigation.state === "submitting";
@@ -416,31 +430,56 @@ export default function ProjectSettings() {
             <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold flex items-center gap-3">
-                  <Zap className="text-brand-orange w-5 h-5" /> Whitelabeling (Pro)
+                  <Zap className="text-brand-orange w-5 h-5" /> Whitelabeling
                 </h2>
-                <div className="bg-brand-orange/10 text-brand-orange text-[10px] font-black uppercase px-2 py-1 rounded">Pro Feature</div>
+                {canRemoveBranding ? (
+                  <div className="bg-green-50 text-green-600 text-[10px] font-black uppercase px-2 py-1 rounded border border-green-100">Unlocked</div>
+                ) : (
+                  <div className="bg-brand-orange/10 text-brand-orange text-[10px] font-black uppercase px-2 py-1 rounded">Add-on</div>
+                )}
               </div>
               <div className="space-y-6">
                 <div>
-                  <label className="flex items-center gap-3 cursor-pointer group">
-                    <input 
-                      type="checkbox" 
-                      name="removeBranding" 
-                      value="true"
-                      defaultChecked={removeBranding}
-                      className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
-                    />
-                    <div>
-                      <span className="block text-sm font-bold">Remove "Powered by SiteGist"</span>
-                      <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">Hide the SiteGist logo and link from your widget.</span>
+                  {canRemoveBranding ? (
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        name="removeBranding"
+                        value="true"
+                        defaultChecked={removeBranding}
+                        className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
+                      />
+                      <div>
+                        <span className="block text-sm font-bold">Remove "Powered by SiteGist"</span>
+                        <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">Hide the SiteGist logo and link from your widget.</span>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="flex items-start gap-4 p-5 bg-zinc-50 rounded-2xl border border-zinc-100">
+                      <div className="w-5 h-5 rounded border-2 border-zinc-300 bg-zinc-100 shrink-0 mt-0.5 flex items-center justify-center">
+                        <Lock className="w-3 h-3 text-zinc-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-zinc-500">Remove "Powered by SiteGist"</span>
+                          <span className="text-[9px] font-black bg-brand-orange/10 text-brand-orange px-2 py-0.5 rounded uppercase tracking-wide">$39/mo Add-on</span>
+                        </div>
+                        <span className="block text-xs text-zinc-400 mt-0.5">Hide the SiteGist logo and link from your widget.</span>
+                        <Link
+                          to="/dashboard/billing#addons"
+                          className="mt-2 inline-flex items-center gap-1 text-xs font-black text-primary hover:underline"
+                        >
+                          Unlock this feature →
+                        </Link>
+                      </div>
                     </div>
-                  </label>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-bold mb-2 text-brand-dark">Custom CNAME Domain</label>
-                  <input 
-                    type="text" 
-                    name="customDomain" 
+                  <input
+                    type="text"
+                    name="customDomain"
                     placeholder="chat.yourdomain.com"
                     defaultValue={customDomain}
                     className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
