@@ -312,7 +312,7 @@ export default function Billing() {
       monthlyPrice: 39,
       yearlyPrice: 19,
       description: "Perfect for personal projects",
-      features: ["1 Chatbot", "1,000 Messages/mo", "50 Pages Crawled", "Basic AI Model"],
+      features: ["1 Chatbot", "1,000 Messages/mo", "50 Pages Crawled", "Basic AI Model", "95+ Languages"],
       current: user?.subscriptionTier === PADDLE_STARTER_PLAN_ID || user?.subscriptionTier === "starter_plan" || !user?.subscriptionTier || user?.subscriptionTier === "free",
     },
     {
@@ -322,7 +322,7 @@ export default function Billing() {
       yearlyPrice: 59,
       popular: true,
       description: "For growing businesses",
-      features: ["3 Chatbots", "5,000 Messages/mo", "500 Pages Crawled", "GPT-4o Access", "No Branding"],
+      features: ["3 Chatbots", "5,000 Messages/mo", "500 Pages Crawled", "GPT-4o Access", "No Branding", "95+ Languages"],
       current: user?.subscriptionTier === PADDLE_BASIC_PLAN_ID,
     },
     {
@@ -331,7 +331,7 @@ export default function Billing() {
       monthlyPrice: 299,
       yearlyPrice: 199,
       description: "For high-traffic sites",
-      features: ["Unlimited Chatbots", "25,000 Messages/mo", "Unlimited Crawls", "Premium Support", "API Access"],
+      features: ["Unlimited Chatbots", "25,000 Messages/mo", "Unlimited Crawls", "Premium Support", "API Access", "95+ Languages"],
       current: user?.subscriptionTier === PADDLE_PRO_PLAN_ID,
     },
     {
@@ -339,7 +339,7 @@ export default function Billing() {
       name: "Enterprise",
       price: "Custom",
       description: "Tailored solutions",
-      features: ["White Label", "Dedicated Account Manager", "Custom LLM Training", "On-premise Deployment"],
+      features: ["White Label", "Dedicated Account Manager", "Custom LLM Training", "On-premise Deployment", "95+ Languages"],
       current: user?.subscriptionTier === "enterprise_plan",
     },
   ];
@@ -348,7 +348,8 @@ export default function Billing() {
     { q: "Can I cancel anytime?", a: "Yes, you can cancel your subscription at any time from your dashboard settings. No questions asked." },
     { q: "What happens if I exceed my message limit?", a: "The bot will continue to work, but we'll notify you to upgrade or purchase an add-on pack for extra messages." },
     { q: "Do you offer a free trial?", a: "We have a generous free tier to get you started. Pricing plans are for when you need more capacity and features." },
-    { q: "Can I use my own OpenAI API key?", a: "Our Pro and Enterprise plans allow you to use your own API keys for full control over model usage and costs." }
+    { q: "Can I use my own OpenAI API key?", a: "Our Pro and Enterprise plans allow you to use your own API keys for full control over model usage and costs." },
+    { q: "What languages does SiteGist support?", a: "All 95+ languages supported by the underlying AI models — including English, Spanish, French, German, Portuguese, Arabic, Hindi, Japanese, Chinese, and many more. Your bot automatically detects and responds in the visitor's language. No configuration required." },
   ];
 
   return (
