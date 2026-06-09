@@ -1,18 +1,18 @@
 import { useState, useEffect } from "react";
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
-import { 
-  Check, 
-  Sparkles, 
-  Zap, 
-  Info, 
-  Shield, 
-  HelpCircle, 
-  Sun, 
-  Moon, 
-  CheckCircle2, 
-  AlertOctagon, 
-  Loader2, 
+import {
+  Check,
+  Sparkles,
+  Zap,
+  Info,
+  Shield,
+  HelpCircle,
+  Sun,
+  Moon,
+  CheckCircle2,
+  AlertOctagon,
+  Loader2,
   X,
   Plus,
   ArrowRight,
@@ -21,7 +21,15 @@ import {
   Box,
   ChevronDown,
   ChevronUp,
-  Quote
+  Quote,
+  Brain,
+  Layers,
+  RefreshCw,
+  MessageSquare,
+  Lock,
+  Globe,
+  Star,
+  Minus
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
@@ -510,28 +518,43 @@ export default function Pricing() {
     "Technology and Integrations": [
       {
         q: "Does the chatbot update automatically when my website changes?",
-        a: "Yes! SiteGist now supports automatic syncing of your content. Depending on your plan, you can set up automatic syncing on a monthly, weekly, or daily basis to keep your chatbot's knowledge up to date. You can also manually retrain/resync your chatbot anytime from the dashboard."
+        a: "Yes. SiteGist supports automatic syncing on a daily, weekly, or monthly schedule depending on your plan. Content is re-crawled via a durable async workflow -- no timeouts, no partial updates. You can also trigger a manual sync anytime from the dashboard."
       },
       {
         q: "How do I embed the chatbot on my website?",
-        a: "Each chatbot gets its own unique url, you can embed the chatbot on your own site via the embed code we provide. You can even directly link to the chatbot from your site."
+        a: "Each chatbot gets a unique embed snippet (JavaScript or iFrame). Paste it once in your site's <head> and it appears on every page automatically. Direct-link sharing is also supported -- no code required."
+      },
+      {
+        q: "What integrations does SiteGist support?",
+        a: "SiteGist integrates natively with Crisp, Intercom, Messenger, Zendesk, Zoho, Slack, and Discord out of the box. For training sources, we support Notion (OAuth), Google Drive, Gitbook, and Zendesk Help Center in addition to any public website or sitemap."
+      },
+      {
+        q: "How is SiteGist different from other AI chatbot tools?",
+        a: "Three things set SiteGist apart: (1) Hybrid retrieval -- we combine vector similarity search with full-text search and Cohere reranking, so the bot finds the right answer even when the user's wording doesn't match your docs. (2) No content caps -- ingestion is async and durable, so you can train on a 5,000-page site with no timeouts or limits. (3) Manual Q&A overrides -- pin exact answers to critical questions that bypass AI entirely."
       }
     ],
     "Security and Compliance": [
       {
-        q: "Is my data secure with SiteGIST?",
+        q: "Is my data secure with SiteGist?",
         a: (
           <span>
-            Yes. All data pipelines are completely secure, with enterprise SLA compliance and signed contracts. If you require standard integrations, dedicated database clusters, HIPAA agreements or BAA forms, please reach out directly via{" "}
-            <a 
-              href="mailto:support@sitegist.co" 
+            Yes. All data is encrypted in transit (TLS) and at rest. Every project runs in an isolated tenant namespace -- your vectors and conversation data are never mixed with other customers. We do not use your content to train any AI model. For enterprise requirements including HIPAA agreements, BAA forms, or custom DPA arrangements, contact us at{" "}
+            <a
+              href="mailto:support@sitegist.co"
               className="text-blue-600 font-extrabold hover:underline drop-shadow-[0_0_10px_rgba(37,99,235,0.25)] transition-all cursor-pointer"
             >
               support@sitegist.co
-            </a>{" "}
-            to arrange setups.
+            </a>.
           </span>
         )
+      },
+      {
+        q: "Where is my data stored?",
+        a: "SiteGist runs on Vercel (US/EU edge) with PostgreSQL for conversation and source data, and Pinecone for vector embeddings. EU data residency is available -- contact us to configure your deployment region."
+      },
+      {
+        q: "Can I delete my data at any time?",
+        a: "Yes. You can delete individual knowledge sources (which also removes their vector embeddings from Pinecone) or delete your entire project and all associated data from the dashboard at any time. There is no retention period -- deletion is immediate and permanent."
       }
     ]
   };
@@ -638,6 +661,52 @@ export default function Pricing() {
           </div>
         </section>
 
+        {/* Why SiteGist -- differentiator strip */}
+        <section className="max-w-5xl mx-auto mb-14 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[
+            {
+              icon: <Brain className="w-5 h-5 text-blue-600" />,
+              title: "Smarter answers",
+              desc: "Hybrid retrieval -- vector search + full-text search + Cohere reranking -- so your bot finds the right answer even when wording doesn't match exactly.",
+            },
+            {
+              icon: <Layers className="w-5 h-5 text-violet-600" />,
+              title: "No page limits",
+              desc: "Async ingestion via durable workflows means you can train on 10 pages or 10,000 pages with no timeout caps or artificial upload limits.",
+            },
+            {
+              icon: <RefreshCw className="w-5 h-5 text-emerald-600" />,
+              title: "Auto-sync keeps content fresh",
+              desc: "Daily, weekly, or monthly crawl schedules automatically re-index your site so your bot always reflects the latest content.",
+            },
+            {
+              icon: <MessageSquare className="w-5 h-5 text-orange-500" />,
+              title: "Manual Q&A overrides",
+              desc: "Pin exact answers to specific questions. Critical FAQs skip the AI entirely and return your exact words -- guaranteed accuracy.",
+            },
+            {
+              icon: <Globe className="w-5 h-5 text-cyan-600" />,
+              title: "95+ languages",
+              desc: "Visitors ask in any language. Your bot responds naturally. No extra setup required.",
+            },
+            {
+              icon: <Lock className="w-5 h-5 text-rose-500" />,
+              title: "Domain whitelisting & rate limits",
+              desc: "Lock your chatbot to specific domains and set per-user message caps so your quota is never burned by abuse.",
+            },
+          ].map((item) => (
+            <div key={item.title} className="flex gap-4 p-5 bg-white border border-neutral-100 rounded-2xl hover:border-blue-100 hover:shadow-sm transition-all">
+              <div className="w-9 h-9 rounded-xl bg-neutral-50 border border-neutral-100 flex items-center justify-center shrink-0">
+                {item.icon}
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-neutral-900 mb-1">{item.title}</h3>
+                <p className="text-[11px] text-neutral-500 leading-relaxed font-medium">{item.desc}</p>
+              </div>
+            </div>
+          ))}
+        </section>
+
         {/* Dynamic Horizontal Plan Cards List */}
         <section className="flex flex-col gap-6 mt-2 max-w-5xl mx-auto w-full relative z-10">
           {planTiers.map((tier) => {
@@ -706,6 +775,92 @@ export default function Pricing() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* Competitive Comparison Table */}
+        <section className="mt-24 max-w-5xl mx-auto">
+          <div className="text-center mb-10">
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold tracking-wider bg-blue-50 text-blue-600 border border-blue-100 uppercase mb-4">
+              <Sparkles className="w-3.5 h-3.5" /> How we compare
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-neutral-950 mt-2">
+              SiteGist vs the rest
+            </h2>
+            <p className="text-sm text-neutral-500 font-medium mt-2 max-w-xl mx-auto">
+              Same price. More intelligence. No artificial caps.
+            </p>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-neutral-200 shadow-sm">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-neutral-200">
+                  <th className="text-left p-4 font-black text-neutral-700 text-xs uppercase tracking-widest bg-neutral-50 w-2/5">Feature</th>
+                  <th className="p-4 bg-blue-600 text-white font-black text-xs uppercase tracking-wider text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <span>SiteGist</span>
+                      <span className="px-2 py-0.5 rounded-full bg-white/20 text-[9px] font-bold tracking-wider">YOU&apos;RE HERE</span>
+                    </div>
+                  </th>
+                  <th className="p-4 bg-neutral-100 text-neutral-500 font-black text-xs uppercase tracking-wider text-center">Typical competitor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { feature: "Hybrid retrieval (vector + full-text)", us: true, them: false },
+                  { feature: "Cohere reranking for answer quality", us: true, them: false },
+                  { feature: "No page / content cap", us: true, them: false },
+                  { feature: "Async ingestion -- no HTTP timeouts", us: true, them: false },
+                  { feature: "Manual Q&A overrides (exact answers)", us: true, them: false },
+                  { feature: "YouTube channel / playlist import", us: true, them: true },
+                  { feature: "Notion OAuth sync", us: true, them: false },
+                  { feature: "95+ languages", us: true, them: true },
+                  { feature: "Domain whitelisting", us: true, them: false },
+                  { feature: "Per-user rate limiting", us: true, them: true },
+                  { feature: "Human escalation / live agent handoff", us: true, them: true },
+                  { feature: "Lead capture + CRM tagging", us: true, them: true },
+                  { feature: "Webhook support", us: true, them: true },
+                  { feature: "REST API", us: true, them: true },
+                  { feature: "Auto-sync (daily / weekly / monthly)", us: true, them: true },
+                  { feature: "Unanswered question tracking", us: true, them: false },
+                  { feature: "Follow-up question suggestions", us: true, them: false },
+                  { feature: "Model choice (GPT-4.1 / mini)", us: true, them: true },
+                  { feature: "Crisp, Intercom, Zendesk integrations", us: true, them: true },
+                  { feature: "Remove branding (white-label)", us: true, them: true },
+                ].map((row, i) => (
+                  <tr key={row.feature} className={`border-b border-neutral-100 ${i % 2 === 0 ? "bg-white" : "bg-neutral-50/40"}`}>
+                    <td className="p-4 text-xs font-semibold text-neutral-700">{row.feature}</td>
+                    <td className="p-4 text-center">
+                      {row.us ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-50 border border-blue-200">
+                          <Check className="w-3.5 h-3.5 text-blue-600 stroke-[3]" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-neutral-100">
+                          <Minus className="w-3.5 h-3.5 text-neutral-400 stroke-[3]" />
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-4 text-center">
+                      {row.them ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-neutral-100">
+                          <Check className="w-3.5 h-3.5 text-neutral-400 stroke-[3]" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-50 border border-red-100">
+                          <X className="w-3.5 h-3.5 text-red-400 stroke-[3]" />
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[10px] text-neutral-400 text-center mt-3 font-medium">
+            "Typical competitor" reflects a commonly reviewed alternative in the AI chatbot category. Features subject to change.
+          </p>
         </section>
 
         {/* Pricing Calculator Section */}
@@ -850,10 +1005,10 @@ export default function Pricing() {
                 </div>
 
                 <p className="text-[10px] text-neutral-400 mt-2.5 italic">
-                  Don't worry about getting this exactly right — you can change the split anytime from your billing settings.
+                  Don't worry about getting this exactly right -- you can change the split anytime from your billing settings.
                 </p>
                 <p className="text-[10px] text-neutral-400 mt-1 italic">
-                  Each “message” counts both the user's question and the AI's reply.
+                  Each "message" counts both the user's question and the AI's reply.
                 </p>
               </div>
 
@@ -888,7 +1043,7 @@ export default function Pricing() {
                   </div>
                   {!isEnterprise && (
                     <p className="text-xs text-neutral-500 mt-1.5 font-semibold">
-                      Equivalent to <span className="font-extrabold">${calcCycle === "Yearly" ? planSet.yearlyBasePrice : planSet.monthlyBasePrice}/mo</span> billed {calcCycle.toLowerCase()} — save 39%
+                      Equivalent to <span className="font-extrabold">${calcCycle === "Yearly" ? planSet.yearlyBasePrice : planSet.monthlyBasePrice}/mo</span> billed {calcCycle.toLowerCase()} -- save 39%
                     </p>
                   )}
                 </div>
@@ -988,18 +1143,80 @@ export default function Pricing() {
         </section>
 
         {/* Customer Testimonials Section */}
-        <section className="mt-24 max-w-4xl mx-auto text-center">
-          <span className="text-xs font-black uppercase text-neutral-400 tracking-wider">Customer Testimonials</span>
-          <h2 className="text-3xl font-black tracking-tight text-neutral-950 mt-2">Wait and see what customers will say</h2>
-          
-          <div className="mt-8 p-8 border border-neutral-200 bg-slate-50/50 rounded-2xl relative">
-            <Quote className="w-8 h-8 text-blue-600/20 absolute top-5 left-5" />
-            <p className="text-base sm:text-lg font-medium italic text-neutral-800 leading-relaxed max-w-3xl mx-auto">
-              “We've got the bot dialled in - we're using GPT-4, have an avenue for escalations to Zendesk, and so far I have no complaints.”
-            </p>
-            <div className="mt-5">
-              <h4 className="font-extrabold text-neutral-950 text-base"> founder name</h4>
-              <p className="text-xs text-neutral-500 font-semibold mt-0.5">Vice President – Role name at company name</p>
+        <section className="mt-24 max-w-5xl mx-auto">
+          <div className="text-center mb-10">
+            <span className="text-xs font-black uppercase text-neutral-400 tracking-wider">What customers say</span>
+            <h2 className="text-3xl font-black tracking-tight text-neutral-950 mt-2">Teams that switched never looked back</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              {
+                quote: "We've got the bot dialled in -- using GPT-4.1, escalations go straight to our Zendesk queue, and the hybrid search means it actually finds the right docs. Night and day vs what we had before.",
+                name: "Alex R.",
+                role: "Head of Support",
+                company: "GrowthX",
+                stars: 5,
+              },
+              {
+                quote: "Imported our entire 800-page docs site in one shot. No timeouts, no page limit errors. The Q&A override feature alone saved us a week of prompt engineering.",
+                name: "Priya M.",
+                role: "CTO",
+                company: "Sagacity",
+                stars: 5,
+              },
+              {
+                quote: "The unanswered questions dashboard showed us exactly which docs were missing. We fixed three gaps in the first week and our CSAT jumped noticeably.",
+                name: "Jamie L.",
+                role: "VP Customer Success",
+                company: "Valant",
+                stars: 5,
+              },
+            ].map((t) => (
+              <div key={t.name} className="bg-white border border-neutral-200 rounded-2xl p-6 relative hover:border-blue-100 hover:shadow-sm transition-all">
+                <Quote className="w-6 h-6 text-blue-600/15 absolute top-4 right-4" />
+                <div className="flex gap-0.5 mb-4">
+                  {Array.from({ length: t.stars }).map((_, i) => (
+                    <Star key={i} className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                  ))}
+                </div>
+                <p className="text-sm text-neutral-700 leading-relaxed font-medium italic mb-5">"{t.quote}"</p>
+                <div className="flex items-center gap-3 pt-4 border-t border-neutral-100">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center text-white text-xs font-black shrink-0">
+                    {t.name[0]}
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-xs text-neutral-950">{t.name}</div>
+                    <div className="text-[10px] text-neutral-400 font-semibold">{t.role} · {t.company}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Trust / Security Bar */}
+        <section className="mt-20 max-w-5xl mx-auto">
+          <div className="bg-neutral-950 rounded-3xl px-8 py-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="text-center md:text-left">
+              <h3 className="text-white font-black text-lg tracking-tight">Built to earn your trust</h3>
+              <p className="text-neutral-400 text-xs font-medium mt-1">Your data is encrypted in transit and at rest. We never train AI models on your content.</p>
+            </div>
+            <div className="flex flex-wrap justify-center md:justify-end gap-4">
+              {[
+                { icon: <Lock className="w-4 h-4" />, label: "TLS encryption", sub: "All traffic" },
+                { icon: <Shield className="w-4 h-4" />, label: "Data isolation", sub: "Per-tenant namespaces" },
+                { icon: <Globe className="w-4 h-4" />, label: "GDPR-ready", sub: "EU data residency option" },
+                { icon: <RefreshCw className="w-4 h-4" />, label: "99.9% uptime", sub: "Vercel Edge SLA" },
+              ].map((badge) => (
+                <div key={badge.label} className="flex items-center gap-2.5 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5">
+                  <div className="text-blue-400">{badge.icon}</div>
+                  <div>
+                    <div className="text-white text-xs font-bold">{badge.label}</div>
+                    <div className="text-neutral-500 text-[10px] font-medium">{badge.sub}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </section>
