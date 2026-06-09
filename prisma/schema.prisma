@@ -22,6 +22,7 @@ model User {
   usageRecords     UsageRecord[]
   blogPosts        BlogPost[]
   apiKeys          ApiKey[]
+  addons           UserAddon[]
 }
 
 model VerificationToken {
@@ -269,6 +270,21 @@ model ApiKey {
   revokedAt  DateTime?
   createdAt  DateTime  @default(now())
 
+  @@index([userId])
+}
+
+model UserAddon {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                   String   // "remove_branding"
+  status                 String   @default("active") // "active", "cancelled"
+  externalSubscriptionId String?
+  externalCustomerId     String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([userId, type])
   @@index([userId])
 }
 

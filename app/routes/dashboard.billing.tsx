@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { getPlanForTier } from "~/lib/plans";
+import { getPlanForTier, hasRemoveBrandingAccess } from "~/lib/plans";
 import { Check, CreditCard, Loader2, ChevronDown, Zap, MessageSquare, Globe, Plus, Info, AlertTriangle, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -130,7 +130,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Chatbot limit based on current plan (-1 = unlimited)
   const chatbotLimit = planInfo.chatbotLimit;
 
-  return json({ 
+  // Add-ons
+  let userAddons: { type: string; status: string }[] = [];
+  try {
+    userAddons = await prisma.userAddon.findMany({
+      where: { userId, status: "active" },
+      select: { type: true, status: true },
+    });
+  } catch (e) {
+    console.error("[Billing] Addons query failed:", e);
+  }
+
+  const removeBrandingAddonId = process.env.VITE_PADDLE_REMOVE_BRANDING_ADDON_ID || "";
+  const removeBrandingEnabled = hasRemoveBrandingAccess(user?.subscriptionTier, userAddons);
+
+  return json({
     user,
     daysLeft,
     usage: {
@@ -142,6 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     PADDLE_STARTER_PLAN_ID,
     PADDLE_BASIC_PLAN_ID,
     PADDLE_PRO_PLAN_ID,
+    PADDLE_REMOVE_BRANDING_ADDON_ID: removeBrandingAddonId,
     planName,
     messageLimit,
     messagesUsed,
@@ -150,6 +165,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     payments,
     chatbotCount,
     chatbotLimit,
+    removeBrandingEnabled,
   });
 }
 
@@ -172,7 +188,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Billing() {
-  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining, payments, chatbotCount, chatbotLimit } = useLoaderData<typeof loader>();
+  const { user, daysLeft, usage, PADDLE_STARTER_PLAN_ID, PADDLE_BASIC_PLAN_ID, PADDLE_PRO_PLAN_ID, PADDLE_REMOVE_BRANDING_ADDON_ID, planName, messageLimit, messagesUsed, nextBilledAt, daysRemaining, payments, chatbotCount, chatbotLimit, removeBrandingEnabled } = useLoaderData<typeof loader>();
   
   const isUnlimited = messageLimit === -1;
   const usagePercent = isUnlimited ? 0 : Math.min(100, Math.round((messagesUsed / messageLimit) * 100));
@@ -744,32 +760,75 @@ export default function Billing() {
       </div>
 
       {/* Add-ons */}
-      <div className="mb-24 px-12">
-        <h3 className="text-3xl font-black mb-12 font-display text-center">Power-ups & Add-ons</h3>
+      <div id="addons" className="mb-24 px-12">
+        <h3 className="text-3xl font-black mb-4 font-display text-center">Power-ups & Add-ons</h3>
+        <p className="text-center text-sm font-bold text-zinc-400 mb-12">Add individual features to any plan without upgrading.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-           <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
-             <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
-               <MessageSquare className="w-8 h-8 text-primary" />
-             </div>
-             <div>
-               <h4 className="text-xl font-black mb-1 font-display">Extra Messages</h4>
-               <p className="text-sm font-bold text-zinc-400 mb-2">Add 10,000 extra messages to your quota.</p>
-               <span className="text-primary font-black">+ $19/mo</span>
-             </div>
-             <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
-           </div>
+          {/* Remove Branding Add-on */}
+          <div className={`flex items-center gap-6 p-8 bg-white border rounded-[40px] transition-all group ${removeBrandingEnabled ? "border-green-200 bg-green-50/30" : "border-zinc-100 hover:border-primary"}`}>
+            <div className={`w-16 h-16 rounded-[20px] flex items-center justify-center shrink-0 transition-colors ${removeBrandingEnabled ? "bg-green-100" : "bg-zinc-50 group-hover:bg-primary-muted"}`}>
+              <Zap className={`w-8 h-8 ${removeBrandingEnabled ? "text-green-600" : "text-primary"}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <h4 className="text-xl font-black font-display">Remove Branding</h4>
+                {removeBrandingEnabled && (
+                  <span className="text-[10px] font-black bg-green-100 text-green-600 px-2 py-0.5 rounded-full uppercase tracking-wide border border-green-200">Active</span>
+                )}
+              </div>
+              <p className="text-sm font-bold text-zinc-400 mb-2">
+                Hide the "Powered by SiteGist" badge from all your widgets.
+              </p>
+              {removeBrandingEnabled ? (
+                <span className="text-green-600 font-black text-sm">Included in your plan</span>
+              ) : (
+                <span className="text-primary font-black">+ $39/mo</span>
+              )}
+            </div>
+            {removeBrandingEnabled ? (
+              <Check className="w-6 h-6 text-green-500 ml-auto shrink-0" />
+            ) : (
+              <Form method="post">
+                <input type="hidden" name="plan" value={PADDLE_REMOVE_BRANDING_ADDON_ID} />
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !PADDLE_REMOVE_BRANDING_ADDON_ID}
+                  className="flex items-center gap-2 px-5 py-3 bg-primary text-white rounded-2xl font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  {isSubmitting && submittingPlanId === PADDLE_REMOVE_BRANDING_ADDON_ID ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Plus className="w-4 h-4" />
+                  )}
+                  Add
+                </button>
+              </Form>
+            )}
+          </div>
 
-           <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
-             <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
-               <Globe className="w-8 h-8 text-primary" />
-             </div>
-             <div>
-               <h4 className="text-xl font-black mb-1 font-display">Custom Domains</h4>
-               <p className="text-sm font-bold text-zinc-400 mb-2">Host the widget on your own subdomain.</p>
-               <span className="text-primary font-black">+ $29/mo</span>
-             </div>
-             <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
-           </div>
+          <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
+            <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
+              <MessageSquare className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h4 className="text-xl font-black mb-1 font-display">Extra Messages</h4>
+              <p className="text-sm font-bold text-zinc-400 mb-2">Add 10,000 extra messages to your quota.</p>
+              <span className="text-primary font-black">+ $19/mo</span>
+            </div>
+            <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
+          </div>
+
+          <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
+            <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
+              <Globe className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h4 className="text-xl font-black mb-1 font-display">Custom Domains</h4>
+              <p className="text-sm font-bold text-zinc-400 mb-2">Host the widget on your own subdomain.</p>
+              <span className="text-primary font-black">+ $29/mo</span>
+            </div>
+            <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
+          </div>
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
+import { hasRemoveBrandingAccess } from "~/lib/plans";
 import { useState, useEffect, useRef } from "react";
 import { Send, X, Bot, User, Loader2, ThumbsUp, ThumbsDown, Check, ExternalLink } from "lucide-react";
 import Markdown from "react-markdown";
@@ -9,12 +10,25 @@ import Markdown from "react-markdown";
 export async function loader({ params }: LoaderFunctionArgs) {
   const project = await prisma.project.findUnique({
     where: { id: params.projectId },
-    select: { name: true, settings: true, id: true, status: true }
+    select: { name: true, settings: true, id: true, status: true, userId: true }
   });
   if (!project) throw new Response("Not Found", { status: 404 });
 
   if (project.status !== "ACTIVE") {
     return json({ project, notReady: true });
+  }
+
+  // Enforce remove-branding gate at render time
+  const settings = project.settings as any;
+  if (settings?.branding?.removeBranding) {
+    const [user, addons] = await Promise.all([
+      prisma.user.findUnique({ where: { id: project.userId }, select: { subscriptionTier: true } }),
+      prisma.userAddon.findMany({ where: { userId: project.userId, status: "active" }, select: { type: true, status: true } }),
+    ]);
+    if (!hasRemoveBrandingAccess(user?.subscriptionTier, addons)) {
+      const enforced = { ...settings, branding: { ...settings.branding, removeBranding: false } };
+      return json({ project: { ...project, settings: enforced }, notReady: false });
+    }
   }
 
   return json({ project, notReady: false });
