@@ -1,4 +1,20 @@
+import type { MetaFunction } from "@remix-run/node";
 import { Header } from "~/frontend/components/Header";
+
+export const meta: MetaFunction = () => [
+  { title: "AI Chatbot WordPress Plugin | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Add a trained AI chatbot to your WordPress site in minutes. No coding required — install the SiteGist plugin, connect your site, and go live with 24/7 AI support instantly.",
+  },
+  { property: "og:title", content: "AI Chatbot WordPress Plugin | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Install SiteGist's WordPress plugin and go live with an AI support chatbot in minutes. No coding required.",
+  },
+];
 import { Footer } from "~/frontend/components/Footer";
 import { CTAButton } from "~/frontend/components/CTAButton";
 import { 

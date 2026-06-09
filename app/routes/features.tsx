@@ -1,4 +1,20 @@
+import type { MetaFunction } from "@remix-run/node";
 import { Header } from "~/frontend/components/Header";
+
+export const meta: MetaFunction = () => [
+  { title: "Features — AI Chatbot Builder | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Explore every SiteGist feature: auto-crawl your website, capture leads, hand off to humans, reply in 95+ languages, and integrate with Slack, Zapier, Notion, and more.",
+  },
+  { property: "og:title", content: "Features — AI Chatbot Builder | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Auto-crawl, lead capture, 95+ languages, human handover, and 5,000+ integrations via Zapier. Build your AI support bot today.",
+  },
+];
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { CTAButton } from "~/frontend/components/CTAButton";

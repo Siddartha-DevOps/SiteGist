@@ -1,4 +1,20 @@
+import type { MetaFunction } from "@remix-run/node";
 import { useState, useEffect } from "react";
+
+export const meta: MetaFunction = () => [
+  { title: "Pricing — AI Chatbot Plans | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Affordable AI chatbot plans for any website. Start free, upgrade as you grow. All plans include a 7-day trial, lead capture, multilingual support, and no credit card required.",
+  },
+  { property: "og:title", content: "Pricing — AI Chatbot Plans | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Affordable AI chatbot plans for any website. Start free and scale as you grow.",
+  },
+];
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { 

@@ -1,4 +1,20 @@
+import type { MetaFunction } from "@remix-run/node";
 import { Header } from "~/frontend/components/Header";
+
+export const meta: MetaFunction = () => [
+  { title: "AI Lead Generation Chatbot | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Capture leads automatically with your AI chatbot. SiteGist engages every visitor 24/7, collects contact details, and routes hot leads to your CRM — while you sleep.",
+  },
+  { property: "og:title", content: "AI Lead Generation Chatbot | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Engage visitors 24/7, collect contact info, and grow your customer base automatically with SiteGist's AI chatbot.",
+  },
+];
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { CTAButton } from "~/frontend/components/CTAButton";

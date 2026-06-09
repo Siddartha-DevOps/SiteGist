@@ -1,5 +1,20 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+
+export const meta: MetaFunction = () => [
+  { title: "Blog — AI Chatbot Tips & Resources | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Customer support automation insights, AI chatbot tutorials, product updates, and tips for growing your business with AI. From the SiteGist team.",
+  },
+  { property: "og:title", content: "Blog — AI Chatbot Tips & Resources | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Customer support automation insights, AI chatbot tutorials, and product updates from the SiteGist team.",
+  },
+];
 import { useLoaderData, Link } from "@remix-run/react";
 import { Footer } from "~/frontend/components/Footer";
 import { Logo } from "~/frontend/components/Logo";
