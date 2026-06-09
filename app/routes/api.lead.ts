@@ -94,6 +94,27 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  // HubSpot CRM sync — create/update contact if HubSpot integration is configured
+  try {
+    const hubspotIntegration = await prisma.integration.findUnique({
+      where: { projectId_provider: { projectId, provider: "hubspot" } },
+    });
+    if (hubspotIntegration && email) {
+      const nameParts = (name || "").trim().split(" ");
+      const { createOrUpdateHubspotContact } = await import("~/lib/hubspot.server");
+      await createOrUpdateHubspotContact({
+        apiKey: hubspotIntegration.accessToken,
+        email,
+        firstName: nameParts[0] || undefined,
+        lastName: nameParts.slice(1).join(" ") || undefined,
+        phone: phone || undefined,
+        company: company || undefined,
+      });
+    }
+  } catch (hubspotErr) {
+    console.error("[HubSpot] Lead sync failed:", hubspotErr);
+  }
+
   // Email the chatbot owner about the new lead (default ON, never blocks lead capture)
   try {
     const settings = (lead.project.settings as any) || {};
