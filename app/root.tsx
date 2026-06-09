@@ -118,7 +118,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <script
           defer
           data-website-id="dfid_jdhKNHuiQeBJuwVkakfYd"
-          data-domain="stegist.co"
+          data-domain="sitegist.co"
           src="https://datafa.st/js/script.js"
         ></script>
         <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
