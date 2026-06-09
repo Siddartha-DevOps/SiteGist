@@ -102,8 +102,11 @@ export async function action({ request }: ActionFunctionArgs) {
           const zohoIntegration = await prisma.integration.findUnique({
             where: { projectId_provider: { projectId, provider: "zoho" } },
           });
+          const zendeskIntegration = await prisma.integration.findUnique({
+            where: { projectId_provider: { projectId, provider: "zendesk" } },
+          });
 
-          if (intercomIntegration || freshdeskIntegration || zohoIntegration) {
+          if (intercomIntegration || freshdeskIntegration || zohoIntegration || zendeskIntegration) {
             // Load chat transcript
             const messages = await prisma.message.findMany({
               where: { sessionId },
@@ -225,6 +228,25 @@ export async function action({ request }: ActionFunctionArgs) {
                 });
               } catch (zohoErr) {
                 console.error("[Zoho Escalation] Failed creating ticket:", zohoErr);
+              }
+            }
+
+            // --- Zendesk Handoff ---
+            if (zendeskIntegration) {
+              try {
+                const { createZendeskTicket } = await import("~/lib/zendesk.server");
+                const details = zendeskIntegration.details as any;
+                await createZendeskTicket({
+                  subdomain: details.subdomain,
+                  email: details.email,
+                  apiToken: zendeskIntegration.accessToken,
+                  subject: `Chat escalation — ${project.name}`,
+                  body: `Chat escalated from ${project.name}\n\n${transcript}`,
+                  requesterEmail: session?.customerEmail || undefined,
+                  tags: ["escalation", "sitegist"],
+                });
+              } catch (zdErr) {
+                console.error("[Zendesk Escalation] Failed creating ticket:", zdErr);
               }
             }
           }

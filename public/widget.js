@@ -29,7 +29,7 @@
     }
     #sitegist-widget-bubble:hover { transform: scale(1.1); }
     #sitegist-widget-bubble svg { color: white; width: 30px; height: 30px; }
-    
+
     #sitegist-widget-iframe {
       position: fixed;
       bottom: 90px;
@@ -46,6 +46,54 @@
       background: white;
     }
     #sitegist-widget-iframe.open { display: block; }
+
+    #sitegist-proactive-tooltip {
+      position: fixed;
+      bottom: 92px;
+      right: 20px;
+      max-width: 260px;
+      background: #fff;
+      border-radius: 16px;
+      padding: 12px 40px 12px 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.13);
+      z-index: 999999;
+      font-family: system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #18181b;
+      cursor: pointer;
+      display: none;
+    }
+    #sitegist-proactive-tooltip.sg-visible {
+      display: block;
+      animation: sg-pop 0.35s cubic-bezier(0.175,0.885,0.32,1.275);
+    }
+    #sitegist-proactive-tooltip::after {
+      content: '';
+      position: absolute;
+      bottom: -7px;
+      right: 28px;
+      width: 14px;
+      height: 14px;
+      background: #fff;
+      transform: rotate(45deg);
+      border-radius: 2px;
+    }
+    #sitegist-proactive-close {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 18px;
+      line-height: 1;
+      color: #a1a1aa;
+      cursor: pointer;
+      user-select: none;
+    }
+    #sitegist-proactive-close:hover { color: #52525b; }
+    @keyframes sg-pop {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
   `;
   document.head.appendChild(style);
 
@@ -59,15 +107,43 @@
   iframe.src = `${baseUrl}/embed/${projectId}`;
   container.appendChild(iframe);
 
-  bubble.onclick = () => {
-    iframe.classList.toggle('open');
-  };
+  // Proactive tooltip
+  const tooltip = document.createElement('div');
+  tooltip.id = 'sitegist-proactive-tooltip';
 
-  window.addEventListener('message', (event) => {
+  const tooltipClose = document.createElement('span');
+  tooltipClose.id = 'sitegist-proactive-close';
+  tooltipClose.textContent = '×';
+  tooltip.appendChild(tooltipClose);
+
+  const tooltipText = document.createTextNode('');
+  tooltip.appendChild(tooltipText);
+
+  container.appendChild(tooltip);
+
+  tooltipClose.addEventListener('click', function(e) {
+    e.stopPropagation();
+    tooltip.classList.remove('sg-visible');
+  });
+
+  tooltip.addEventListener('click', function() {
+    tooltip.classList.remove('sg-visible');
+    iframe.classList.add('open');
+  });
+
+  bubble.addEventListener('click', function() {
+    tooltip.classList.remove('sg-visible');
+    iframe.classList.toggle('open');
+  });
+
+  window.addEventListener('message', function(event) {
     if (event.data === 'sitegist-close') {
       iframe.classList.remove('open');
     } else if (event.data && event.data.type === 'sitegist-theme') {
       bubble.style.background = event.data.color;
+    } else if (event.data && event.data.type === 'sitegist-proactive') {
+      tooltipText.textContent = event.data.message;
+      tooltip.classList.add('sg-visible');
     }
   });
 })();
