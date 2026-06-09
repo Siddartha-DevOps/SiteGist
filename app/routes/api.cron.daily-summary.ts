@@ -26,11 +26,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let usersProcessed = 0;
   let emailsSent = 0;
+  let snapshotsWritten = 0;
 
   for (const user of users) {
     if (!user.projects.length) continue;
     const projectIds = user.projects.map((p) => p.id);
     usersProcessed++;
+
+    // Write per-project AnalyticsSnapshot for yesterday
+    for (const project of user.projects) {
+      try {
+        const [projMessages, projLeads, projUnanswered] = await Promise.all([
+          prisma.message.count({
+            where: { session: { projectId: project.id }, role: "user", createdAt: window },
+          }),
+          prisma.lead.count({ where: { projectId: project.id, createdAt: window } }),
+          prisma.unansweredQuestion.count({ where: { projectId: project.id, createdAt: window } }),
+        ]);
+
+        await prisma.analyticsSnapshot.create({
+          data: {
+            projectId: project.id,
+            date: startOfYesterday,
+            messagesCount: projMessages,
+            leadsCaptured: projLeads,
+            unansweredCount: projUnanswered,
+          },
+        });
+        snapshotsWritten++;
+      } catch (err) {
+        console.error(`[daily-summary] Snapshot failed for project ${project.id}:`, err);
+      }
+    }
 
     try {
       const [leads, sessions, messages, unansweredList] = await Promise.all([
@@ -68,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  return json({ ok: true, usersProcessed, emailsSent });
+  return json({ ok: true, usersProcessed, emailsSent, snapshotsWritten });
 }
 
 function statCard(label: string, value: number) {
