@@ -216,6 +216,10 @@ export default function ProjectSettings() {
       <div className="mb-12">
         <h1 className="text-4xl font-black mb-2">Bot Settings</h1>
         <p className="text-text-muted">Customize how your AI assistant behaves and looks.</p>
+        <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary/5 border border-primary/10 rounded-full">
+          <span className="text-lg">🌍</span>
+          <span className="text-xs font-black text-primary uppercase tracking-wider">Responds in 95+ languages automatically</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
