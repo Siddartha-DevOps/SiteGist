@@ -191,6 +191,7 @@ export default function ProjectSettings() {
   const [leadFields, setLeadFields] = useState<LeadField[]>(
     currentSettings.leadFields || []
   );
+  const [selectedModel, setSelectedModel] = useState<string>(currentSettings.model || "auto");
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [testError, setTestError] = useState<string>('');
   const [slackTestStatus, setSlackTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -300,18 +301,84 @@ export default function ProjectSettings() {
                 </div>
                 <div>
                   <label className="block text-sm font-bold mb-2">AI Model</label>
-                  <select
-                    name="model"
-                    defaultValue={currentSettings.model || "auto"}
-                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
-                  >
-                    <option value="auto">Auto (Recommended — fastest available)</option>
-                    <option value="gpt-4o">GPT-4o (most capable)</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini (fast & economical)</option>
-                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (fast)</option>
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (advanced reasoning)</option>
-                  </select>
-                  <p className="mt-2 text-xs text-zinc-400">Choose which AI model generates this bot's answers. Auto picks the best available provider.</p>
+                  <input type="hidden" name="model" value={selectedModel} />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                    {[
+                      {
+                        value: "auto",
+                        label: "Auto",
+                        icon: "✦",
+                        badge: "Recommended",
+                        badgeColor: "bg-primary/10 text-primary",
+                        description: "Picks the fastest available provider automatically.",
+                      },
+                      {
+                        value: "gpt-4o-mini",
+                        label: "Fast",
+                        icon: "⚡",
+                        badge: "Low cost",
+                        badgeColor: "bg-green-50 text-green-600",
+                        description: "GPT-4o Mini — ideal for high-volume FAQs and quick answers.",
+                      },
+                      {
+                        value: "gpt-4o",
+                        label: "Accurate",
+                        icon: "🎯",
+                        badge: "Best quality",
+                        badgeColor: "bg-brand-orange/10 text-brand-orange",
+                        description: "GPT-4o — deeper reasoning for complex or nuanced questions.",
+                      },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setSelectedModel(opt.value)}
+                        className={`text-left p-4 rounded-2xl border-2 transition-all ${
+                          selectedModel === opt.value
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-lg">{opt.icon}</span>
+                          <span className={`text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full ${opt.badgeColor}`}>{opt.badge}</span>
+                        </div>
+                        <p className="text-sm font-black mb-1">{opt.label}</p>
+                        <p className="text-[11px] text-zinc-400 leading-snug">{opt.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <details className="group">
+                    <summary className="text-xs font-black text-zinc-400 cursor-pointer hover:text-zinc-600 uppercase tracking-wider select-none list-none flex items-center gap-1">
+                      <span className="group-open:rotate-90 inline-block transition-transform">›</span> Gemini alternatives
+                    </summary>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                      {[
+                        { value: "gemini-2.0-flash", label: "Gemini Flash", icon: "⚡", description: "Google's fast model — great latency, multimodal." },
+                        { value: "gemini-1.5-pro", label: "Gemini Pro", icon: "🎯", description: "Google's advanced reasoning model." },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSelectedModel(opt.value)}
+                          className={`text-left p-4 rounded-2xl border-2 transition-all ${
+                            selectedModel === opt.value
+                              ? "border-primary bg-primary/5 shadow-sm"
+                              : "border-zinc-100 bg-zinc-50 hover:border-zinc-200"
+                          }`}
+                        >
+                          <span className="text-base">{opt.icon}</span>
+                          <p className="text-sm font-black mt-1 mb-0.5">{opt.label}</p>
+                          <p className="text-[11px] text-zinc-400 leading-snug">{opt.description}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                  {selectedModel !== "auto" && (
+                    <p className="mt-3 text-[11px] text-zinc-400 font-medium">
+                      Selected: <span className="font-black text-zinc-600">{selectedModel}</span>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="chatMode" className="block text-sm font-bold mb-2">
