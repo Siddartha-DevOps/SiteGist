@@ -46,6 +46,7 @@ export default function EmbedChat() {
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sdkUser, setSdkUser] = useState<{ userId: string; traits: Record<string, unknown> } | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [rateLimit, setRateLimit] = useState<{ remaining: number; window: string } | null>(null);
@@ -77,6 +78,27 @@ export default function EmbedChat() {
       window.parent.postMessage({ type: 'sitegist-theme', color: primaryColor }, '*');
     }
   }, [primaryColor]);
+
+  // Handle commands sent from the parent page via the SDK
+  useEffect(() => {
+    function handleParentMessage(event: MessageEvent) {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      switch (data.type) {
+        case 'sitegist-identify':
+          if (data.userId) setSdkUser({ userId: String(data.userId), traits: data.traits || {} });
+          break;
+        case 'sitegist-send-message':
+          if (typeof data.text === 'string' && data.text.trim()) {
+            handleSend(data.text.trim());
+          }
+          break;
+      }
+    }
+    window.addEventListener('message', handleParentMessage);
+    return () => window.removeEventListener('message', handleParentMessage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFeedback = async (messageId: string, val: number) => {
     setFeedbackLoading(messageId);
@@ -234,6 +256,11 @@ export default function EmbedChat() {
         }
       }
 
+      // Notify parent SDK that a message exchange completed
+      if (accumulated) {
+        window.parent.postMessage({ type: 'sitegist-message', text: messageToSend, response: accumulated }, '*');
+      }
+
     } catch (error) {
       console.error("Chat error:", error);
       setMessages(prev => {
@@ -265,6 +292,7 @@ export default function EmbedChat() {
       if (resp.success) {
         setShowLeadForm(false);
         setMessages(prev => [...prev, { role: 'assistant', content: "Thanks! We've received your contact info. How else can I help?" }]);
+        window.parent.postMessage({ type: 'sitegist-lead', lead: resp.lead || {} }, '*');
       }
     }
   }, [leadFetcher.data, leadFetcher.state]);

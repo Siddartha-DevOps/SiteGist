@@ -14,9 +14,9 @@ import {
 
 export default function WordpressPlugin() {
   const steps = [
-    { title: "Install", description: "Download our plugin from the WordPress repository or upload the .zip file directly.", icon: <Download className="w-5 h-5" /> },
-    { title: "Activate", description: "Activate the plugin and navigate to the SiteGist settings page in your dashboard.", icon: <Zap className="w-5 h-5" /> },
-    { title: "Connect", description: "Paste your Widget ID from the SiteGist dashboard and you're live instantly.", icon: <Settings className="w-5 h-5" /> },
+    { title: "Install", description: "Download the plugin file and upload it via WordPress Admin > Plugins > Add New > Upload Plugin.", icon: <Download className="w-5 h-5" /> },
+    { title: "Activate", description: "Activate the plugin and open Settings > SiteGist Chatbot in your WordPress admin.", icon: <Zap className="w-5 h-5" /> },
+    { title: "Connect", description: "Paste your Project ID from the SiteGist dashboard and click Save. Your chatbot is live.", icon: <Settings className="w-5 h-5" /> },
   ];
 
   return (
@@ -38,7 +38,14 @@ export default function WordpressPlugin() {
                 Connect your WordPress site to SiteGist in seconds. No theme hacking or complex scripts required. Just install and go live.
              </p>
              <div className="flex flex-col sm:flex-row items-start gap-4">
-               <CTAButton to="#" variant="primary" className="px-10 py-5 text-base w-full sm:w-auto bg-[#21759b] border-none">Download Plugin</CTAButton>
+               <a
+                 href="/sitegist-chatbot.php"
+                 download="sitegist-chatbot.php"
+                 className="inline-flex items-center gap-2 px-10 py-5 text-base font-bold text-white rounded-2xl bg-[#21759b] hover:bg-[#1a5f80] transition-all w-full sm:w-auto justify-center"
+               >
+                 <Download className="w-5 h-5" />
+                 Download Plugin
+               </a>
                <CTAButton to="/signup" variant="secondary" className="px-10 py-5 text-base w-full sm:w-auto">View Setup Guide</CTAButton>
              </div>
           </div>
@@ -63,9 +70,9 @@ export default function WordpressPlugin() {
                    </h4>
                    <div className="space-y-6">
                       <div>
-                        <label className="block text-[10px] font-black text-brand-gray uppercase tracking-widest mb-2">Widget ID</label>
+                        <label className="block text-[10px] font-black text-brand-gray uppercase tracking-widest mb-2">Project ID</label>
                         <div className="w-full py-3 px-4 bg-brand-light rounded-xl border border-brand-border text-sm font-mono text-brand-dark">
-                          sg_widget_live_7fy2k8...
+                          cm9x3kabcdef0123456...
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
