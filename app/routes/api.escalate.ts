@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { fireProjectWebhooks } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -56,17 +56,14 @@ export async function action({ request }: ActionFunctionArgs) {
             console.error("[Escalation API] Error sending email notification:", emailErr);
           });
 
-          // 4. Fire project.webhookUrl if set (same pattern as existing handoff webhook)
-          if (project.webhookUrl) {
-            console.log(`[Escalation API] Triggering webhook for project: ${project.name}`);
-            await sendWebhook(project.webhookUrl, 'conversation.escalated', {
-              id: project.id,
-              name: project.name,
-            }, {
-              session: { id: sessionId },
-              trigger: 'visitor_requested',
-            });
-          }
+          // 4. Fire webhooks for this project (fan-out to all registered targets)
+          await fireProjectWebhooks(project.id, project.webhookUrl, 'conversation.escalated', {
+            id: project.id,
+            name: project.name,
+          }, {
+            session: { id: sessionId },
+            trigger: 'visitor_requested',
+          });
 
           const slackWebhookUrl = (project.settings as any)?.slackWebhookUrl;
           if (slackWebhookUrl) {

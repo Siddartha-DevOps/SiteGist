@@ -70,6 +70,7 @@ model Project {
   integrations         Integration[]
   knowledgeQAs         KnowledgeQA[]
   members              ProjectMember[]
+  zapierHooks          ZapierHook[]
 }
 
 model Integration {
@@ -271,6 +272,18 @@ model ApiKey {
   createdAt  DateTime  @default(now())
 
   @@index([userId])
+}
+
+model ZapierHook {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hookUrl   String
+  event     String   @default("all")
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, event])
 }
 
 model UserAddon {

@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { fireProjectWebhooks } from "~/lib/webhook.server";
 import { notifySlackLeadCaptured } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -55,35 +55,29 @@ export async function action({ request }: ActionFunctionArgs) {
     },
   });
 
-  // Feature 3: Real-Time Notifications
-  if (lead.project.webhookUrl) {
-    try {
-      let customFields = {};
-      if (lead.notes) {
-        try {
-          customFields = JSON.parse(lead.notes);
-        } catch (parseError) {
-          console.warn("[api.lead.ts] Failed to parse lead notes as JSON for custom fields:", parseError);
-        }
-      }
-      await sendWebhook(lead.project.webhookUrl, 'lead.captured', {
-        id: lead.project.id,
-        name: lead.project.name,
-      }, {
-        lead: {
-          id: lead.id,
-          name: lead.name,
-          email: lead.email,
-          phone: lead.phone,
-          company: lead.company,
-          customFields,
-          createdAt: lead.createdAt,
-        },
-        session: { id: lead.sessionId },
-      });
-    } catch (e) {
-      console.error("Webhook notification failed:", e);
+  // Real-Time Notifications — fan out to all webhook targets for this project
+  try {
+    let customFields = {};
+    if (lead.notes) {
+      try { customFields = JSON.parse(lead.notes); } catch {}
     }
+    await fireProjectWebhooks(lead.projectId, lead.project.webhookUrl, 'lead.captured', {
+      id: lead.project.id,
+      name: lead.project.name,
+    }, {
+      lead: {
+        id: lead.id,
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        company: lead.company,
+        customFields,
+        createdAt: lead.createdAt,
+      },
+      session: { id: lead.sessionId },
+    });
+  } catch (e) {
+    console.error("Webhook notification failed:", e);
   }
 
   const slackWebhookUrl = (lead.project.settings as any)?.slackWebhookUrl;

@@ -3,7 +3,7 @@ import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { fireProjectWebhooks } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
@@ -241,8 +241,8 @@ export async function action({ request }: ActionFunctionArgs) {
                 data: { mode: 'human', isRead: false },
               });
 
-              if (project?.webhookUrl) {
-                await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+              if (project) {
+                await fireProjectWebhooks(project.id, project.webhookUrl, 'conversation.escalated', {
                   id: project.id,
                   name: project.name,
                 }, {
@@ -276,9 +276,9 @@ export async function action({ request }: ActionFunctionArgs) {
           const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
           const isHandoffRequested = handoffKeywords.some(keyword => message.toLowerCase().includes(keyword));
 
-          if (isHandoffRequested && project?.webhookUrl) {
-            console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhook.`);
-            await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+          if (isHandoffRequested && project) {
+            console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhooks.`);
+            await fireProjectWebhooks(project.id, project.webhookUrl, 'conversation.escalated', {
               id: project.id,
               name: project.name,
             }, {

@@ -109,16 +109,20 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const project = await prisma.project.findFirst({
     where: { id: params.projectId, userId },
-    include: { integrations: true },
+    include: {
+      integrations: true,
+      _count: { select: { zapierHooks: true } },
+    },
   });
 
   if (!project) return redirect("/dashboard");
 
-  return json({ project });
+  const appUrl = process.env.APP_URL || "https://app.sitegist.co";
+  return json({ project, appUrl });
 }
 
 export default function ProjectIntegrations() {
-  const { project } = useLoaderData<typeof loader>();
+  const { project, appUrl } = useLoaderData<typeof loader>();
   const [connecting, setConnecting] = useState<string | null>(null);
   const revalidator = useRevalidator();
   const [slackInput, setSlackInput] = useState("");
@@ -355,7 +359,8 @@ export default function ProjectIntegrations() {
             )}
 
             {item.id === 'zapier' && (
-              <div className="mt-0">
+              <div className="mt-0 space-y-4">
+                {/* Simple webhook paste approach */}
                 {!item.connected ? (
                   <zapierFetcher.Form method="post">
                     <input type="hidden" name="_action" value="connect_zapier" />
@@ -378,30 +383,67 @@ export default function ProjectIntegrations() {
                       {zapierFetcher.state === "submitting" ? "Saving..." : "Connect Zapier"}
                     </button>
                     <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
-                      Create a{" "}
-                      <a href="https://zapier.com/apps/webhook" target="_blank" rel="noopener noreferrer" className="text-primary underline font-bold">
-                        Webhooks by Zapier
-                      </a>
-                      {" "}trigger and paste the URL above
+                      Use a{" "}
+                      <span className="text-primary font-bold">Webhooks by Zapier</span>
+                      {" "}trigger and paste the catch URL above
                     </p>
                   </zapierFetcher.Form>
                 ) : (
                   <zapierFetcher.Form method="post">
                     <input type="hidden" name="_action" value="disconnect_zapier" />
                     <button
-                      type="submit"
+                      type="button"
                       className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
                     >
-                      Already Integrated
+                      Webhook Connected
                     </button>
                     <button
                       type="submit"
-                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
                     >
                       Disconnect Zapier
                     </button>
                   </zapierFetcher.Form>
                 )}
+
+                {/* REST Hooks API guide */}
+                <details className="group">
+                  <summary className="cursor-pointer text-xs font-bold text-zinc-500 hover:text-zinc-700 flex items-center gap-1 select-none list-none">
+                    <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+                    Developer: REST Hooks API
+                    {(project as any)._count?.zapierHooks > 0 && (
+                      <span className="ml-auto bg-green-100 text-green-700 text-[10px] font-black px-2 py-0.5 rounded-full">
+                        {(project as any)._count.zapierHooks} active
+                      </span>
+                    )}
+                  </summary>
+                  <div className="mt-3 p-3 bg-zinc-50 rounded-xl border border-zinc-100 space-y-2">
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Register multiple Zaps per event type using the REST Hooks API. Authenticate with your{" "}
+                      <a href="/dashboard/settings/api-keys" className="text-primary underline font-bold">SiteGist API key</a>.
+                    </p>
+                    <div className="space-y-1 font-mono text-[10px] text-zinc-600 bg-white border border-zinc-200 rounded-lg p-2">
+                      <p className="text-zinc-400 font-sans font-bold text-[9px] uppercase mb-1">Subscribe</p>
+                      <p>POST {appUrl}/api/zapier/hooks</p>
+                      <p className="text-zinc-400 mt-1">{"{ projectId, hookUrl, event }"}</p>
+                    </div>
+                    <div className="space-y-1 font-mono text-[10px] text-zinc-600 bg-white border border-zinc-200 rounded-lg p-2">
+                      <p className="text-zinc-400 font-sans font-bold text-[9px] uppercase mb-1">Unsubscribe</p>
+                      <p>DELETE {appUrl}/api/zapier/hooks?hookId=…</p>
+                    </div>
+                    <div className="space-y-1 font-mono text-[10px] text-zinc-600 bg-white border border-zinc-200 rounded-lg p-2">
+                      <p className="text-zinc-400 font-sans font-bold text-[9px] uppercase mb-1">Polling (sample data)</p>
+                      <p>GET {appUrl}/api/zapier/leads?projectId=…</p>
+                      <p>GET {appUrl}/api/zapier/conversations?projectId=…</p>
+                    </div>
+                    <p className="text-[10px] text-zinc-400">
+                      Supported events: <code className="bg-zinc-100 px-1 rounded">all</code>{" "}
+                      <code className="bg-zinc-100 px-1 rounded">lead.captured</code>{" "}
+                      <code className="bg-zinc-100 px-1 rounded">conversation.escalated</code>{" "}
+                      <code className="bg-zinc-100 px-1 rounded">conversation.resolved</code>
+                    </p>
+                  </div>
+                </details>
               </div>
             )}
 
