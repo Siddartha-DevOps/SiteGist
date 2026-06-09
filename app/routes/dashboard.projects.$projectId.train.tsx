@@ -1,16 +1,16 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
+import { useLoaderData, Form, useNavigation, useActionData, useRevalidator } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { chunkText, getSitemapUrls, crawlUrl } from "~/ai-layer/crawler.server";
-import { upsertChunks } from "~/ai-layer/ai.server";
-import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
+import { getSitemapUrls } from "~/ai-layer/crawler.server";
+import { inngest } from "~/inngest/client.server";
+import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen, CheckCircle, AlertCircle, Hourglass } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
-import { 
-  unstable_createMemoryUploadHandler, 
-  unstable_parseMultipartFormData 
+import {
+  unstable_createMemoryUploadHandler,
+  unstable_parseMultipartFormData
 } from "@remix-run/node";
 import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 
@@ -141,157 +141,67 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (method === "crawl_single") {
-    try {
-      const data = await crawlUrl(url);
-      if (!data) {
-        return json({ error: "Could not crawl or fetch the page. Please verify the URL and try again." }, { status: 400 });
-      }
-      const content = data.content || "";
-      const title = data.title || url;
+    const existing = await prisma.knowledgeSource.findFirst({
+      where: { projectId: params.projectId, source: url, type: "web" },
+    });
 
-      const existing = await prisma.knowledgeSource.findFirst({
-        where: { projectId: params.projectId, source: url, type: "web" },
-      });
-
-      if (existing) {
-        await prisma.knowledgeSource.update({
+    const source = existing
+      ? await prisma.knowledgeSource.update({
           where: { id: existing.id },
-          data: { title, content },
-        });
-      } else {
-        await prisma.knowledgeSource.create({
+          data: { indexingStatus: "PENDING", indexingError: null },
+        })
+      : await prisma.knowledgeSource.create({
           data: {
             projectId: params.projectId!,
             type: "web",
             source: url,
-            title,
-            content,
+            title: url,
+            indexingStatus: "PENDING",
           },
         });
-      }
 
-      const chunks = chunkText(content);
-      await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url, title } })));
+    await inngest.send({
+      name: "sitegist/ingest.web.single",
+      data: { sourceId: source.id, url, projectId: params.projectId! },
+    });
 
-      return json({ success: true, message: "Page crawled and indexed successfully" });
-    } catch (e: any) {
-      return json({ error: `Crawl Error: ${e.message}` }, { status: 400 });
-    }
+    return json({ success: true, message: "Page queued for indexing — it will appear as Trained shortly." });
   }
 
   if (method === "add_text") {
     const title = formData.get("title") as string;
     const content = formData.get("content") as string;
-    
-    await prisma.knowledgeSource.create({
+
+    const source = await prisma.knowledgeSource.create({
       data: {
         projectId: params.projectId!,
         type: "text",
         source: title,
         title,
         content,
+        indexingStatus: "PENDING",
       },
     });
 
-    const chunks = chunkText(content);
-    await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { title } })));
+    await inngest.send({
+      name: "sitegist/ingest.source",
+      data: { sourceId: source.id, projectId: params.projectId! },
+    });
 
-    return json({ success: true, message: "Text content added and indexed successfully" });
+    return json({ success: true, message: "Text content queued for indexing." });
   }
 
   if (method === "add_youtube") {
     const videoUrl = formData.get("url") as string;
-    const {
-      getYoutubeTranscript,
-      detectYouTubeUrlType,
-      extractPlaylistId,
-      extractChannelHandle,
-      getPlaylistVideos,
-      getChannelVideos,
-      getVideoTitle,
-    } = await import("~/ai-layer/crawler.server");
 
-    const urlType = detectYouTubeUrlType(videoUrl);
-    const VIDEO_CAP = 20; // max per request to avoid timeout
-
-    // Resolve to array of { id: string, title: string }
-    let videos: { id: string; title: string }[] = [];
-    try {
-      if (urlType === "playlist") {
-        const playlistId = extractPlaylistId(videoUrl);
-        if (!playlistId) return json({ error: "Could not extract playlist ID from URL." }, { status: 400 });
-        videos = await getPlaylistVideos(playlistId, VIDEO_CAP);
-      } else if (urlType === "channel") {
-        const handle = extractChannelHandle(videoUrl);
-        if (!handle) return json({ error: "Could not extract channel handle from URL." }, { status: 400 });
-        videos = await getChannelVideos(handle, VIDEO_CAP);
-      } else {
-        // Single video — extract ID from URL
-        const match = videoUrl.match(/(?:v=|youtu\.be\/)([^&\s]+)/);
-        const id = match?.[1] ?? videoUrl;
-        const title = await getVideoTitle(id);
-        videos = [{ id, title }];
-      }
-    } catch (e: any) {
-      return json({ error: e.message || "Failed to fetch video list from YouTube API." }, { status: 400 });
-    }
-
-    if (videos.length === 0) {
-      return json({ error: "No videos found. Check the URL and try again." }, { status: 400 });
-    }
-
-    let imported = 0;
-    let skipped = 0;
-
-    for (const video of videos) {
-      const canonicalUrl = `https://www.youtube.com/watch?v=${video.id}`;
-
-      // Skip if already imported for this project
-      const existing = await prisma.knowledgeSource.findFirst({
-        where: { projectId: params.projectId!, source: canonicalUrl },
-      });
-      if (existing) {
-        skipped++;
-        continue;
-      }
-
-      const transcript = await getYoutubeTranscript(canonicalUrl);
-      if (!transcript) {
-        skipped++;
-        continue; // no captions, skip silently
-      }
-
-      await prisma.knowledgeSource.create({
-        data: {
-          projectId: params.projectId!,
-          type: "youtube",
-          source: canonicalUrl,
-          title: video.title || `YouTube Video (${video.id})`,
-          content: transcript,
-        },
-      });
-
-      const chunks = chunkText(transcript);
-      await upsertChunks(
-        params.projectId!,
-        chunks.map(c => ({ text: c, metadata: { title: video.title || "YouTube Video", source: canonicalUrl } }))
-      );
-
-      imported++;
-    }
-
-    const isMulti = urlType !== "video";
-    const cappedNote = videos.length >= VIDEO_CAP
-      ? ` (first ${VIDEO_CAP} videos — re-submit to import more)`
-      : "";
+    await inngest.send({
+      name: "sitegist/ingest.youtube",
+      data: { projectId: params.projectId!, videoUrl },
+    });
 
     return json({
       success: true,
-      message: isMulti
-        ? `Imported ${imported} video transcript${imported !== 1 ? "s" : ""}, skipped ${skipped}${cappedNote}.`
-        : imported > 0
-          ? "YouTube transcript imported and indexed successfully."
-          : "Could not fetch transcript. Make sure the video has captions enabled.",
+      message: "YouTube source queued — transcripts will be indexed in the background with no video limit.",
     });
   }
 
@@ -301,10 +211,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     let content = "";
-    
+
     if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
       content = await parsePdf(buffer);
-    } else if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.endsWith(".docx")) {
+    } else if (
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.name.endsWith(".docx")
+    ) {
       content = await parseDocx(buffer);
     } else if (file.type === "text/plain") {
       content = buffer.toString();
@@ -330,20 +243,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!content.trim()) return json({ error: "Failed to extract text from file" }, { status: 400 });
 
-    await prisma.knowledgeSource.create({
+    // Save content to DB immediately (parsing was synchronous); embed asynchronously via Inngest.
+    const source = await prisma.knowledgeSource.create({
       data: {
         projectId: params.projectId!,
         type: "file",
         source: file.name,
         title: file.name,
-        content: content,
+        content,
+        indexingStatus: "PENDING",
       },
     });
 
-    const chunks = chunkText(content);
-    await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { title: file.name, source: 'file' } })));
+    await inngest.send({
+      name: "sitegist/ingest.source",
+      data: { sourceId: source.id, projectId: params.projectId! },
+    });
 
-    return json({ success: true, message: `File "${file.name}" uploaded and indexed successfully` });
+    return json({ success: true, message: `File "${file.name}" uploaded and queued for indexing.` });
   }
 
   if (method === "update_sync_schedule") {
@@ -365,19 +282,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (method === "trigger_sync_now") {
-    const { syncProjectSources } = await import("~/backend/sync-job.server");
-    try {
-      await syncProjectSources(params.projectId!);
-      return json({ success: true, message: "On-demand sync successfully completed! All web pages and active integrations have been recrawled and updated." });
-    } catch (err: any) {
-      return json({ error: `On-demand sync failed: ${err.message}` }, { status: 500 });
-    }
+    await inngest.send({
+      name: "sitegist/ingest.project.sync",
+      data: { projectId: params.projectId! },
+    });
+    return json({ success: true, message: "Sync queued — all web pages and integrations will be recrawled in the background." });
   }
 
   if (method === "sync_notion") {
-    const { syncNotion } = await import("~/backend/integrations.server");
-    await syncNotion(params.projectId!);
-    return json({ success: true, message: "Notion pages synced successfully" });
+    await inngest.send({
+      name: "sitegist/ingest.notion",
+      data: { projectId: params.projectId! },
+    });
+    return json({ success: true, message: "Notion sync queued — pages will be indexed shortly." });
   }
 
   if (method === "sync_google") {
@@ -436,50 +353,52 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "No URLs found in this sitemap" }, { status: 400 });
     }
 
-    const results = [];
-    const maxToCrawl = Math.min(urls.length, 30); // Crawl up to 30 pages to prevent extreme timeouts
-    const crawledUrls = urls.slice(0, maxToCrawl);
+    // Create placeholder records immediately so the user sees them as Pending.
+    // createMany is faster than N individual creates.
+    const existingSources = await prisma.knowledgeSource.findMany({
+      where: { projectId: params.projectId!, source: { in: urls }, type: "web" },
+      select: { id: true, source: true },
+    });
+    const existingMap = new Map(existingSources.map((s) => [s.source, s.id]));
 
-    for (const itemUrl of crawledUrls) {
-      try {
-        const data = await crawlUrl(itemUrl);
-        if (data && data.content) {
-          const content = data.content || "";
-          const title = data.title || itemUrl;
-          
-          const existing = await prisma.knowledgeSource.findFirst({
-            where: { projectId: params.projectId, source: itemUrl, type: "web" },
-          });
-
-          if (existing) {
-            await prisma.knowledgeSource.update({
-              where: { id: existing.id },
-              data: { title, content },
-            });
-          } else {
-            await prisma.knowledgeSource.create({
-              data: {
-                projectId: params.projectId!,
-                type: "web",
-                source: itemUrl,
-                title,
-                content,
-              },
-            });
-          }
-
-          const chunks = chunkText(content);
-          await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url: itemUrl, title } })));
-          results.push(itemUrl);
-         }
-      } catch (err) {
-        console.error(`Sitemap scrape failed for ${itemUrl}:`, err);
-      }
+    const newUrls = urls.filter((u) => !existingMap.has(u));
+    if (newUrls.length > 0) {
+      await prisma.knowledgeSource.createMany({
+        data: newUrls.map((u) => ({
+          projectId: params.projectId!,
+          type: "web",
+          source: u,
+          title: u,
+          indexingStatus: "PENDING",
+        })),
+      });
     }
 
-    return json({ 
-      success: true, 
-      message: `Successfully crawled and indexed ${results.length} pages from the sitemap!` 
+    // Re-fetch to get all IDs (including just-created ones).
+    const allSources = await prisma.knowledgeSource.findMany({
+      where: { projectId: params.projectId!, source: { in: urls }, type: "web" },
+      select: { id: true, source: true },
+    });
+
+    // Mark existing records as PENDING too (they will be re-crawled).
+    const existingIds = existingSources.map((s) => s.id);
+    if (existingIds.length > 0) {
+      await prisma.knowledgeSource.updateMany({
+        where: { id: { in: existingIds } },
+        data: { indexingStatus: "PENDING", indexingError: null },
+      });
+    }
+
+    const sources = allSources.map((s) => ({ sourceId: s.id, url: s.source }));
+
+    await inngest.send({
+      name: "sitegist/ingest.web.batch",
+      data: { projectId: params.projectId!, sources },
+    });
+
+    return json({
+      success: true,
+      message: `${sources.length} pages queued for indexing — no page limit, progress shown below.`,
     });
   }
 
@@ -490,6 +409,7 @@ export default function TrainProject() {
   const { project } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as any;
   const navigation = useNavigation();
+  const { revalidate } = useRevalidator();
   const isCrawling = navigation.state === "submitting";
   const [activeTab, setActiveTab] = useState<"web" | "text" | "youtube" | "files" | "qa">("web");
   const [qaSearch, setQaSearch] = useState("");
@@ -497,6 +417,17 @@ export default function TrainProject() {
   const [editingQa, setEditingQa] = useState<any | null>(null);
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
+
+  // Auto-refresh while any source is still being indexed.
+  const sources = (project as any).knowledgeSources as any[];
+  const hasPending = sources.some(
+    (s) => s.indexingStatus === "PENDING" || s.indexingStatus === "PROCESSING"
+  );
+  useEffect(() => {
+    if (!hasPending) return;
+    const id = setInterval(revalidate, 4000);
+    return () => clearInterval(id);
+  }, [hasPending, revalidate]);
 
   useEffect(() => {
     if (actionData?.success) {
@@ -1079,7 +1010,7 @@ export default function TrainProject() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-sm text-zinc-800">Found {actionData.sitemapUrls.length} URLs</h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Click below to queue all pages for background indexing — no page limit.</p>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />
@@ -1151,7 +1082,7 @@ export default function TrainProject() {
                           </span>
                         )}
                       </h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Click below to queue all pages for background indexing — no page limit.</p>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />
@@ -1210,7 +1141,28 @@ export default function TrainProject() {
         </div>
         
         <div className="divide-y divide-zinc-50">
-          {(project as any).knowledgeSources.map((source: any) => (
+          {(project as any).knowledgeSources.map((source: any) => {
+            const status: string = source.indexingStatus || "INDEXED";
+            const statusBadge =
+              status === "INDEXED" ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-600 rounded text-[9px] font-black uppercase tracking-tighter border border-green-100">
+                  <CheckCircle className="w-2.5 h-2.5" /> Trained
+                </span>
+              ) : status === "PROCESSING" ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-black uppercase tracking-tighter border border-blue-100 animate-pulse">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" /> Indexing
+                </span>
+              ) : status === "PENDING" ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[9px] font-black uppercase tracking-tighter border border-amber-100">
+                  <Hourglass className="w-2.5 h-2.5" /> Queued
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-500 rounded text-[9px] font-black uppercase tracking-tighter border border-red-100" title={source.indexingError || ""}>
+                  <AlertCircle className="w-2.5 h-2.5" /> Error
+                </span>
+              );
+
+            return (
             <div key={source.id} className="p-6 flex items-center justify-between group hover:bg-zinc-50/50 transition-all">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border ${
@@ -1218,44 +1170,42 @@ export default function TrainProject() {
                   source.type === 'file' ? 'bg-orange-50 text-orange-500 border-orange-100' :
                   'bg-zinc-50 text-zinc-500 border-zinc-100'
                 }`}>
-                  {source.type === 'web' ? <Globe className="w-6 h-6" /> : 
+                  {source.type === 'web' ? <Globe className="w-6 h-6" /> :
                    source.type === 'file' ? <FileText className="w-6 h-6" /> : <Type className="w-6 h-6" />}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h4 className="font-bold text-sm truncate max-w-sm">{source.title || source.source}</h4>
-                    <span className="px-2 py-0.5 bg-green-50 text-green-600 rounded text-[9px] font-black uppercase tracking-tighter border border-green-100">Trained</span>
+                    {statusBadge}
                   </div>
                   <div className="flex items-center gap-3 text-[10px] text-zinc-400 font-medium">
                     <span className="truncate max-w-[200px] font-mono">{source.source}</span>
                     <span className="flex items-center gap-1">• <Clock className="w-3 h-3" /> {new Date(source.updatedAt).toLocaleDateString()}</span>
                     <span className="flex items-center gap-1">• <Database className="w-3 h-3" /> {source.content?.length || 0} chars</span>
                   </div>
+                  {status === "ERROR" && source.indexingError && (
+                    <p className="mt-1 text-[10px] text-red-400 font-medium">{source.indexingError}</p>
+                  )}
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <button 
-                  className="p-2.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 rounded-xl transition-all"
-                  title="Resync Source"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
                 <Form method="post">
                   <input type="hidden" name="_action" value="delete_source" />
                   <input type="hidden" name="id" value={source.id} />
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className="p-2.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                     title="Remove Source"
                     onClick={(e) => !confirm("Are you sure? This will remove the source from the training data.") && e.preventDefault()}
                   >
-                    <TrashIcon className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </Form>
               </div>
             </div>
-          ))}
+            );
+          })}
           {(project as any).knowledgeSources.length === 0 && (
             <div className="p-20 text-center text-zinc-400 italic flex flex-col items-center">
               <Database className="w-12 h-12 mb-4 opacity-20" />
