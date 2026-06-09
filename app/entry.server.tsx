@@ -6,8 +6,6 @@ import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { validateEnvAtStartup } from "./env.server";
-import { captureException } from "./lib/monitoring.server";
-import { log } from "./lib/logger.server";
 
 // Run crucial production configuration checks on boot
 validateEnvAtStartup().catch(err => {
@@ -15,21 +13,6 @@ validateEnvAtStartup().catch(err => {
 });
 
 const ABORT_DELAY = 5_000;
-
-/**
- * Central error hook — Remix calls this for every uncaught error thrown by a
- * loader, action, or during render. Report it to Sentry (no-op without
- * SENTRY_DSN) and emit a structured log line.
- */
-export function handleError(error: unknown, { request }: { request: Request }) {
-  if (request.signal.aborted) return; // user navigated away; not a real error
-  captureException(error, { where: "remix.handleError", url: request.url, method: request.method });
-  log.error("server_error", {
-    url: request.url,
-    method: request.method,
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
 
 export default function handleRequest(
   request: Request,
