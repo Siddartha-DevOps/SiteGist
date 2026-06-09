@@ -3,10 +3,10 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar } from "lucide-react";
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar 
+import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar, Zap } from "lucide-react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar
 } from 'recharts';
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -17,7 +17,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   if (!project) return redirect("/dashboard");
 
-  const range = Number(new URL(request.url).searchParams.get("range")) === 30 ? 30 : 7;
+  const rawRange = Number(new URL(request.url).searchParams.get("range"));
+  const range: 7 | 30 | 90 = rawRange === 30 ? 30 : rawRange === 90 ? 90 : 7;
 
   // Get messages with feedback
   const messagesWithFeedback = await prisma.message.findMany({
@@ -42,48 +43,87 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Real daily volume for the selected range
+  // For 90-day view use stored snapshots; for 7/30-day use live queries (more accurate for recent days)
   const since = new Date();
   since.setHours(0, 0, 0, 0);
   since.setDate(since.getDate() - (range - 1));
 
-  const [recentMessages, recentLeads] = await Promise.all([
-    prisma.message.findMany({
-      where: { session: { projectId: params.projectId }, role: "user", createdAt: { gte: since } },
-      select: { createdAt: true },
-    }),
-    prisma.lead.findMany({
-      where: { projectId: params.projectId, createdAt: { gte: since } },
-      select: { createdAt: true },
-    }),
-  ]);
+  let chartData: { day: string; messages: number; leads: number }[];
 
-  const buckets: { day: string; key: string; messages: number; leads: number }[] = [];
-  for (let i = range - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - i);
-    buckets.push({
-      key: d.toDateString(),
-      day: range === 7
-        ? d.toLocaleDateString("en-US", { weekday: "short" })
-        : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      messages: 0,
-      leads: 0,
+  if (range === 90) {
+    const snapshots = await prisma.analyticsSnapshot.findMany({
+      where: { projectId: params.projectId, date: { gte: since } },
+      orderBy: { date: "asc" },
+      select: { date: true, messagesCount: true, leadsCaptured: true },
     });
+    const buckets: { day: string; key: string; messages: number; leads: number }[] = [];
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+      buckets.push({ key: d.toDateString(), day: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), messages: 0, leads: 0 });
+    }
+    const bucketIndex = new Map(buckets.map((b, i) => [b.key, i]));
+    for (const s of snapshots) {
+      const d = new Date(s.date); d.setHours(0, 0, 0, 0);
+      const i = bucketIndex.get(d.toDateString());
+      if (i != null) { buckets[i].messages = s.messagesCount; buckets[i].leads = s.leadsCaptured; }
+    }
+    // Thin out to weekly labels for readability
+    chartData = buckets.map((b, i) => ({ day: i % 7 === 0 ? b.day : "", messages: b.messages, leads: b.leads }));
+  } else {
+    const [recentMessages, recentLeads] = await Promise.all([
+      prisma.message.findMany({
+        where: { session: { projectId: params.projectId }, role: "user", createdAt: { gte: since } },
+        select: { createdAt: true },
+      }),
+      prisma.lead.findMany({
+        where: { projectId: params.projectId, createdAt: { gte: since } },
+        select: { createdAt: true },
+      }),
+    ]);
+    const buckets: { day: string; key: string; messages: number; leads: number }[] = [];
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+      buckets.push({
+        key: d.toDateString(),
+        day: range === 7
+          ? d.toLocaleDateString("en-US", { weekday: "short" })
+          : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        messages: 0, leads: 0,
+      });
+    }
+    const bucketIndex = new Map(buckets.map((b, i) => [b.key, i]));
+    for (const m of recentMessages) {
+      const d = new Date(m.createdAt); d.setHours(0, 0, 0, 0);
+      const i = bucketIndex.get(d.toDateString()); if (i != null) buckets[i].messages++;
+    }
+    for (const l of recentLeads) {
+      const d = new Date(l.createdAt); d.setHours(0, 0, 0, 0);
+      const i = bucketIndex.get(d.toDateString()); if (i != null) buckets[i].leads++;
+    }
+    chartData = buckets.map(b => ({ day: b.day, messages: b.messages, leads: b.leads }));
   }
-  const bucketIndex = new Map(buckets.map((b, i) => [b.key, i]));
-  for (const m of recentMessages) {
-    const d = new Date(m.createdAt); d.setHours(0, 0, 0, 0);
-    const i = bucketIndex.get(d.toDateString());
-    if (i != null) buckets[i].messages++;
-  }
-  for (const l of recentLeads) {
-    const d = new Date(l.createdAt); d.setHours(0, 0, 0, 0);
-    const i = bucketIndex.get(d.toDateString());
-    if (i != null) buckets[i].leads++;
-  }
-  const chartData = buckets.map(b => ({ day: b.day, messages: b.messages, leads: b.leads }));
+
+  // Peak hours — messages by hour of day (last 30 days, live)
+  const hourSince = new Date(); hourSince.setDate(hourSince.getDate() - 30);
+  const hourMessages = await prisma.message.findMany({
+    where: { session: { projectId: params.projectId }, role: "user", createdAt: { gte: hourSince } },
+    select: { createdAt: true },
+  });
+  const hourBuckets = Array.from({ length: 24 }, (_, h) => ({ hour: `${h}:00`, count: 0 }));
+  for (const m of hourMessages) { hourBuckets[new Date(m.createdAt).getUTCHours()].count++; }
+  const hourlyData = hourBuckets;
+
+  // Latency trend from stored snapshots (last 30 snapshots)
+  const latencySnapshots = await prisma.analyticsSnapshot.findMany({
+    where: { projectId: params.projectId, avgLatency: { not: null } },
+    orderBy: { date: "asc" },
+    take: 30,
+    select: { date: true, avgLatency: true },
+  });
+  const latencyTrend = latencySnapshots.map(s => ({
+    day: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    latency: s.avgLatency != null ? parseFloat(s.avgLatency.toFixed(2)) : null,
+  }));
 
   const totalSessions = await prisma.chatSession.count({
     where: { projectId: params.projectId }
@@ -96,15 +136,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const conversionRate = totalSessions > 0 ? ((totalLeads / totalSessions) * 100).toFixed(1) : 0;
 
   // Real response speed from analytics snapshots (em-dash if none yet)
-  const snapshots = await prisma.analyticsSnapshot.findMany({
-    where: { projectId: params.projectId },
-    orderBy: { date: "desc" },
-    take: 30,
-    select: { avgLatency: true },
-  });
-  const latencies = snapshots.map(s => s.avgLatency).filter((v): v is number => v != null);
-  const avgLatency = latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : null;
-  const responseSpeed = avgLatency != null ? `${avgLatency.toFixed(1)}s` : "—";
+  const avgLatencyVal = latencySnapshots.length
+    ? latencySnapshots.reduce((sum, s) => sum + (s.avgLatency ?? 0), 0) / latencySnapshots.length
+    : null;
+  const responseSpeed = avgLatencyVal != null ? `${avgLatencyVal.toFixed(1)}s` : "—";
 
   // Real CSAT from thumbs feedback
   const ratedTotal = thumbsUpCount + thumbsDownCount;
@@ -138,6 +173,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     thumbsUpCount,
     thumbsDownCount,
     chartData,
+    hourlyData,
+    latencyTrend,
     sentimentData: [
       { name: "Positive", value: Math.round((thumbsUpCount / sentimentDenom) * 100), color: "#22c55e" },
       { name: "Neutral", value: Math.round((neutralCount / sentimentDenom) * 100), color: "#94a3b8" },
@@ -159,13 +196,15 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export default function ProjectInsights() {
-  const { 
-    project, 
-    messagesWithFeedback, 
-    unanswered, 
-    thumbsUpCount, 
-    thumbsDownCount, 
-    chartData, 
+  const {
+    project,
+    messagesWithFeedback,
+    unanswered,
+    thumbsUpCount,
+    thumbsDownCount,
+    chartData,
+    hourlyData,
+    latencyTrend,
     sentimentData,
     totalSessions,
     totalLeads,
@@ -222,6 +261,7 @@ export default function ProjectInsights() {
             >
               <option value="7">Last 7 Days</option>
               <option value="30">Last 30 Days</option>
+              <option value="90">Last 90 Days</option>
             </select>
           </div>
           <div className="h-[300px] w-full">
@@ -346,6 +386,78 @@ export default function ProjectInsights() {
                Expand Knowledge Base →
             </Link>
          </div>
+      </div>
+
+      {/* Peak Hours + Latency Trend */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12 mt-8">
+        {/* Peak Hours */}
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-brand-orange" /> Peak Hours
+          </h2>
+          <p className="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-wide">Message volume by hour (UTC, last 30 days)</p>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={hourlyData} barSize={8}>
+                <XAxis
+                  dataKey="hour"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 10, fontWeight: 700, fill: '#a1a1aa' }}
+                  interval={3}
+                />
+                <YAxis hide />
+                <Tooltip
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px -5px rgba(0,0,0,0.1)', fontSize: '12px', fontWeight: 'bold' }}
+                  formatter={(v: any) => [v, 'Messages']}
+                />
+                <Bar dataKey="count" fill="#155DEE" radius={[4, 4, 0, 0]}>
+                  {hourlyData.map((entry: any, index: number) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.count === Math.max(...hourlyData.map((h: any) => h.count)) ? '#f97316' : '#155DEE'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-[10px] text-zinc-400 font-bold text-center mt-2 uppercase tracking-wider">
+            {hourlyData.reduce((a: any, b: any) => a.count > b.count ? a : b, hourlyData[0])?.count > 0
+              ? `Busiest at ${hourlyData.reduce((a: any, b: any) => a.count > b.count ? a : b, hourlyData[0]).hour} UTC`
+              : 'No data yet — send some test messages'}
+          </p>
+        </div>
+
+        {/* Response Latency Trend */}
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
+            <Zap className="w-5 h-5 text-primary" /> Response Latency
+          </h2>
+          <p className="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-wide">Average AI response time in seconds (from daily snapshots)</p>
+          <div className="h-[220px]">
+            {latencyTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={latencyTrend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#a1a1aa' }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#a1a1aa' }} unit="s" />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px -5px rgba(0,0,0,0.1)', fontSize: '12px', fontWeight: 'bold' }}
+                    formatter={(v: any) => [`${v}s`, 'Avg latency']}
+                  />
+                  <Line type="monotone" dataKey="latency" stroke="#155DEE" strokeWidth={3} dot={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <Zap className="w-8 h-8 text-zinc-200 mb-3" />
+                <p className="text-sm font-bold text-zinc-400">No latency data yet</p>
+                <p className="text-xs text-zinc-300 mt-1">Snapshots populate daily via the cron job</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
