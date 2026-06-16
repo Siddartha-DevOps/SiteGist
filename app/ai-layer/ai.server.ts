@@ -8,6 +8,9 @@ import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
 import { log, startTimer } from "~/lib/logger.server";
+import { cacheGet, cacheSet, cacheKey } from "~/lib/cache.server";
+
+const EMBED_CACHE_TTL = 60 * 60 * 24 * 7; // 7 days
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -279,6 +282,12 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 }
 
 export async function embedText(text: string) {
+  // Cache layer: identical text → identical embedding. Big win for repeated
+  // queries. No-op when Redis isn't configured.
+  const ck = `emb:${EMBEDDING_PROVIDER}:${cacheKey(text)}`;
+  const cached = await cacheGet<number[]>(ck);
+  if (cached && cached.length === EMBEDDING_DIMENSION) return cached;
+
   const maxAttempts = 3;
   let lastError: any = null;
 
@@ -297,6 +306,7 @@ export async function embedText(text: string) {
         if (!embedding || embedding.length === 0) {
           throw new Error("OpenAI returned an empty embedding.");
         }
+        await cacheSet(ck, embedding, EMBED_CACHE_TTL);
         return embedding;
       } else {
         const gemini = getGemini();
@@ -311,6 +321,7 @@ export async function embedText(text: string) {
         if (!values || values.length === 0) {
           throw new Error("Gemini returned an empty embedding.");
         }
+        await cacheSet(ck, values, EMBED_CACHE_TTL);
         return values;
       }
     } catch (e: any) {
