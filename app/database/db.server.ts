@@ -133,17 +133,36 @@ function enrichWithMockRelations(modelLower: string, item: any): any {
   return res;
 }
 
+/**
+ * The mock/offline fallback is a DEVELOPMENT convenience only. In production it
+ * would silently serve fake data and accept writes that vanish — a data-integrity
+ * and trust hazard. It is therefore disabled in production unless explicitly
+ * opted in with ALLOW_DB_MOCK=1.
+ */
+function isMockAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" || process.env.ALLOW_DB_MOCK === "1";
+}
+
 function getFallbackMockData(model: string | undefined, operation: string, args: any): any {
   const modelLower = (model || "").toLowerCase();
-  
+
+  if (!isMockAllowed()) {
+    // Fail loud rather than fake: surface the outage so it's caught by error
+    // tracking and the user sees a real error instead of corrupt/empty data.
+    throw new Error(
+      `[DB] Database is unavailable and the mock fallback is disabled in production ` +
+      `(model=${model}, op=${operation}). Refusing to serve or accept mock data.`
+    );
+  }
+
   if (typeof global !== "undefined" && !(global as any).__db_warned_mock__) {
     (global as any).__db_warned_mock__ = true;
     console.warn("================================================================================");
-    console.warn("[SiteGist Resiliency] Operating in Elegant Local Sandbox Mode.");
+    console.warn("[SiteGist Resiliency] Operating in Elegant Local Sandbox Mode (DEV ONLY).");
     console.warn("Active cloud database is currently unreachable. Local high-fidelity mock data active.");
     console.warn("================================================================================");
   }
-  
+
   if (!mockDb[modelLower]) {
     mockDb[modelLower] = [];
   }
@@ -427,7 +446,32 @@ function getClient(useFallback = false): any {
   if (url.includes("placeholder") || url.includes("your-database-url")) {
     setEntirelyOffline(true);
   }
-  
+
+  // On serverless, an unpooled connection string will exhaust DB connections at
+  // scale. Warn once in production if the URL doesn't look pooled (Accelerate,
+  // PgBouncer, or a provider pooler endpoint).
+  if (
+    process.env.NODE_ENV === "production" &&
+    url &&
+    !url.includes("placeholder") &&
+    typeof global !== "undefined" &&
+    !(global as any).__db_pool_warned__
+  ) {
+    const pooled =
+      url.startsWith("prisma") ||
+      url.includes("pgbouncer=true") ||
+      url.includes("-pooler.") ||
+      url.includes(":6543");
+    if (!pooled) {
+      (global as any).__db_pool_warned__ = true;
+      console.warn(
+        "[DB] DATABASE_URL does not look pooled. On serverless, use Prisma Accelerate " +
+        "(prisma://…) or a pooled endpoint (PgBouncer / Neon -pooler / Supabase :6543) " +
+        "and keep DIRECT_DATABASE_URL for migrations. See docs/PRODUCTION_SAFETY.md."
+      );
+    }
+  }
+
   const rawClient = new PrismaClient({
     datasourceUrl: url,
     log: [], // Suppress internal raw driver stderr/stdout prints to prevent console noise
