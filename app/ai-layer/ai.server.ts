@@ -7,6 +7,7 @@ import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
+import { log, startTimer } from "~/lib/logger.server";
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -239,7 +240,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
   if (!portkeyApiKey || !cohereVirtualKey) {
     console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 
   // Diagnostic (masked)
@@ -273,7 +274,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     return rerankedMatches;
   } catch (error) {
     console.error("Portkey Rerank error:", error);
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 }
 
@@ -325,10 +326,113 @@ export async function embedText(text: string) {
   throw new Error(`Failed to generate embedding after ${maxAttempts} attempts using provider '${EMBEDDING_PROVIDER}'. Original error: ${lastError?.message || String(lastError)}`);
 }
 
+/**
+ * Embed many texts efficiently. OpenAI accepts an array input and returns one
+ * embedding per item in a single request, so we batch instead of issuing one
+ * request per chunk. Gemini is embedded per-item with capped concurrency.
+ * Returns embeddings aligned to input order; a failed item yields an empty array.
+ */
+export async function embedTexts(texts: string[], batchSize = 96): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const results: number[][] = texts.map(() => [] as number[]);
+
+  if (EMBEDDING_PROVIDER === "openai") {
+    const openai = getOpenAI();
+    if (!openai) throw new Error("OpenAI is configured as EMBEDDING_PROVIDER, but no OpenAI client is available.");
+
+    for (let start = 0; start < texts.length; start += batchSize) {
+      const batch = texts.slice(start, start + batchSize);
+      let lastError: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await (openai as any).embeddings.create({
+            model: "text-embedding-3-small",
+            input: batch,
+          });
+          for (let i = 0; i < batch.length; i++) {
+            results[start + i] = response.data[i].embedding as number[];
+          }
+          lastError = null;
+          break;
+        } catch (e: any) {
+          lastError = e;
+          console.warn(`[AI] Batch embed attempt ${attempt}/3 failed (items ${start}-${start + batch.length}):`, e.message || e);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+        }
+      }
+      if (lastError) throw new Error(`Batch embedding failed: ${lastError.message || String(lastError)}`);
+    }
+    return results;
+  }
+
+  // Gemini: embed per item (reuses embedText's retry logic), capped concurrency.
+  const concurrency = 5;
+  for (let start = 0; start < texts.length; start += concurrency) {
+    const slice = texts.slice(start, start + concurrency);
+    const embedded = await Promise.all(slice.map(t => embedText(t).catch(() => [] as number[])));
+    for (let i = 0; i < embedded.length; i++) results[start + i] = embedded[i];
+  }
+  return results;
+}
+
+/**
+ * Like upsertChunks but embeds in batches (one request per ~96 chunks) instead
+ * of one request per chunk. Throws on failure so the ingestion pipeline can mark
+ * the source failed and retry. Returns the count of vectors upserted.
+ */
+export async function upsertChunksBatched(
+  projectId: string,
+  chunks: { text: string; metadata: any }[],
+  opts: { batchSize?: number; onProgress?: (done: number, total: number) => Promise<void> | void } = {}
+) {
+  if (chunks.length === 0) return { upserted: 0 };
+  const index = pineconeIndex;
+  const batchSize = opts.batchSize ?? 96;
+  const total = chunks.length;
+  let upserted = 0;
+  let processed = 0;
+
+  // Embed + upsert one batch at a time so progress can be reported and partial
+  // work survives a mid-run failure (the next retry re-upserts deterministically).
+  for (let start = 0; start < chunks.length; start += batchSize) {
+    const batch = chunks.slice(start, start + batchSize);
+    const embeddings = await embedTexts(batch.map(c => c.text), batchSize);
+
+    const validVectors = batch
+      .map((chunk, i) => {
+        const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
+        const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
+        return {
+          id: `${projectId}-${hash}-${start + i}`,
+          values: embeddings[i] || [],
+          metadata: { ...chunk.metadata, source: sourceUrlOrTitle, text: chunk.text, projectId },
+        };
+      })
+      .filter(v => {
+        if (!v.values || v.values.length === 0) return false;
+        if (v.values.length !== EMBEDDING_DIMENSION) {
+          console.error(`[AI] DIMENSION_MISMATCH: vector ${v.id} has ${v.values.length}, expected ${EMBEDDING_DIMENSION}. Skipping.`);
+          return false;
+        }
+        return true;
+      });
+
+    if (validVectors.length > 0) {
+      await index.namespace(projectId).upsert({ records: validVectors } as any);
+      upserted += validVectors.length;
+    }
+    processed += batch.length;
+    if (opts.onProgress) await opts.onProgress(processed, total);
+  }
+
+  console.log(`[AI] Batched upsert: ${upserted}/${total} chunks to Pinecone.`);
+  return { upserted };
+}
+
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
   try {
     const index = pineconeIndex;
-    
+
     const vectors = await Promise.all(
       chunks.map(async (chunk, i) => {
         let values: number[] = [];
@@ -475,6 +579,35 @@ REWRITTEN STANDALONE QUESTION:`;
   }
 }
 
+/**
+ * Multi-query expansion (opt-in via RAG_MULTI_QUERY=1). Generates a few alternative
+ * phrasings of the search query to widen retrieval recall. Returns [] when disabled
+ * or on any failure, so callers can simply spread the result with no behaviour change.
+ */
+export async function expandQueries(query: string, n = 2): Promise<string[]> {
+  if (process.env.RAG_MULTI_QUERY !== "1") return [];
+  try {
+    const gemini = getGemini();
+    if (!gemini) return [];
+    const resp: any = await gemini.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: `Rewrite the search query into ${n} alternative phrasings a knowledge base might match. Return ONLY the rewrites, one per line, no numbering or commentary.\n\nQuery: ${query}`,
+    });
+    const text =
+      resp?.text ??
+      resp?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      "";
+    return String(text)
+      .split("\n")
+      .map((s: string) => s.replace(/^[-*\d.\s]+/, "").trim())
+      .filter(Boolean)
+      .slice(0, n);
+  } catch (e) {
+    console.warn("[Multi-Query] expansion failed:", e);
+    return [];
+  }
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
@@ -565,10 +698,11 @@ export async function* streamRAG(
   console.log(`[RAG Audit] Stage 1: Starting RAG for project: ${projectId}`);
   
   if (!isDemo) {
+    const endRetrieval = startTimer("rag.retrieval", { projectId });
     try {
       const index = pineconeIndex;
       const { prisma } = await import("~/database/db.server");
-      
+
       // Advanced Query Rewriting for conversation
       const searchTerms = await rewriteStandaloneQuery(query, history);
       console.log(`[Query Rewrite] Orig: "${query}" -> Rewritten standalone query: "${searchTerms}"`);
@@ -619,6 +753,37 @@ export async function* streamRAG(
 
       const [resolvedVectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
       vectorResults = resolvedVectorResults || { matches: [] };
+
+      // Multi-query expansion (opt-in): widen recall by also searching alternative
+      // phrasings of the query and merging in any new vector matches. Default path
+      // (RAG_MULTI_QUERY unset) is untouched.
+      if (process.env.RAG_MULTI_QUERY === "1") {
+        try {
+          const expansions = await expandQueries(searchTerms, 2);
+          if (expansions.length > 0) {
+            const expFilter: Record<string, any> = { projectId: { $eq: projectId } };
+            if (sourceFilter?.urls && sourceFilter.urls.length > 0) expFilter.source = { $in: sourceFilter.urls };
+            const expEmbeddings = await embedTexts(expansions);
+            const extra = await Promise.all(
+              expEmbeddings.map(vec =>
+                vec.length === EMBEDDING_DIMENSION
+                  ? index.namespace(projectId).query({ vector: vec, topK: 10, includeMetadata: true, filter: expFilter }).catch(() => ({ matches: [] }))
+                  : Promise.resolve({ matches: [] })
+              )
+            );
+            if (!vectorResults.matches) vectorResults.matches = [];
+            const seenIds = new Set((vectorResults.matches || []).map((m: any) => m.id));
+            for (const r of extra) {
+              for (const m of (r as any).matches || []) {
+                if (m.id && !seenIds.has(m.id)) { seenIds.add(m.id); vectorResults.matches.push(m); }
+              }
+            }
+            console.log(`[Multi-Query] ${expansions.length} expansions -> ${vectorResults.matches.length} total vector matches.`);
+          }
+        } catch (e) {
+          console.warn("[Multi-Query] merge failed (continuing with base results):", e);
+        }
+      }
 
       console.log(`[Hybrid Search] Vector: ${vectorResults.matches?.length || 0}, Keyword: ${keywordResults?.length || 0}`);
 
@@ -687,10 +852,20 @@ export async function* streamRAG(
       context = rankedSources
         .map((s: any, i: number) => `[Document ${i+1}]: ${s.text}\nSource: ${s.title || 'Knowledge Base'} (${s.url || 'Internal'})\n---`)
         .join("\n\n");
-        
-      console.log(`[Hybrid Search] Stage 5: Hybrid Retrieval complete.`);
+
+      const rerankEnabled = !!(process.env.PORTKEY_API_KEY && process.env.PORTKEY_COHERE_VIRTUAL_KEY);
+      endRetrieval({
+        ok: true,
+        candidates: initialMatches.length,
+        ranked: rankedSources.length,
+        citations: citationMetadata.length,
+        rerank: rerankEnabled,
+        multiQuery: process.env.RAG_MULTI_QUERY === "1",
+      });
     } catch (e) {
       console.error("[Hybrid Search] Retrieval failed, short-circuiting with fallback message:", e);
+      captureException(e, { where: "streamRAG.retrieval", projectId });
+      endRetrieval({ ok: false });
       yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
       yield fallbackMessage;
       return;

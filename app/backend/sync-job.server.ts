@@ -1,7 +1,6 @@
 import { prisma } from "~/database/db.server";
 import { syncNotion, syncGoogleDrive } from "./integrations.server";
-import { crawlUrl, chunkText } from "~/ai-layer/crawler.server";
-import { upsertChunks } from "~/ai-layer/ai.server";
+import { enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
 
 /**
  * Performs a comprehensive synchronization of all knowledge sources for a single project.
@@ -21,34 +20,12 @@ export async function syncProjectSources(projectId: string) {
     return;
   }
   
-  // 2. Loop through and sync WEB knowledge sources (recrawl)
+  // 2. Re-ingest WEB knowledge sources through the durable pipeline. Incremental
+  // sync skips re-embedding pages whose content hasn't changed since last index.
   const webSources = project.knowledgeSources.filter(source => source.type === "web");
-  for (const source of webSources) {
-    try {
-      console.log(`[Sync Job] Recrawling web source URL: ${source.source}`);
-      const crawled = await crawlUrl(source.source);
-      if (crawled && crawled.content) {
-        // Save back to db
-        await prisma.knowledgeSource.update({
-          where: { id: source.id },
-          data: {
-            title: crawled.title || source.title,
-            content: crawled.content,
-            updatedAt: new Date()
-          }
-        });
-        
-        // Chunk and upsert to Pinecone
-        const chunks = chunkText(crawled.content);
-        await upsertChunks(projectId, chunks.map(c => ({
-          text: c,
-          metadata: { url: source.source, title: crawled.title || source.title, type: "web" }
-        })));
-        console.log(`[Sync Job] Successfully recrawled and embedded: ${source.source}`);
-      }
-    } catch (err) {
-      console.error(`[Sync Job] Failed to recrawl web source ${source.source}:`, err);
-    }
+  if (webSources.length > 0) {
+    console.log(`[Sync Job] Queueing ${webSources.length} web source(s) for incremental re-ingest.`);
+    await enqueueManySourceIngestions(webSources.map(s => ({ projectId, sourceId: s.id })));
   }
   
   // 3. Sync Notion integrations if present

@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# RAG eval — project-specific golden set
+eval/golden.jsonl
