@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
-import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
+import { streamRAG, generateFollowUpSuggestions, analyzeSentiment } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 import { sendWebhook } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
@@ -9,6 +9,15 @@ import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
 
 const HISTORY_CHAR_BUDGET = 6000;
+
+// Score a user message's sentiment without blocking the chat response.
+function scoreSentimentAsync(messageId: string, text: string) {
+  analyzeSentiment(text)
+    .then((sentiment) =>
+      prisma.message.update({ where: { id: messageId }, data: { sentiment } })
+    )
+    .catch((e) => console.warn("[Sentiment] async update failed:", e));
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Chat Action] Incoming request: ${request.method} ${request.url}`);
@@ -43,6 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
     let project = null;
     let systemPrompt = "You are a helpful AI assistant for SiteGist, a platform that builds AI chatbots from website content.";
     let modelPreference: string | undefined = undefined;
+    let responseLanguage: string | undefined = undefined;
     let chatMode: 'ai-only' | 'hybrid' | 'agent-only' = 'ai-only';
 
     if (projectId !== "demo-project") {
@@ -58,6 +68,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const settings = project.settings as any;
         systemPrompt = settings?.systemPrompt || systemPrompt;
         modelPreference = settings?.model || undefined;
+        responseLanguage = settings?.language || undefined;
         chatMode = settings?.chatMode || 'ai-only';
 
         // Domain whitelisting check
@@ -177,13 +188,14 @@ export async function action({ request }: ActionFunctionArgs) {
         if (session.mode === "human") {
           console.log(`[Chat] Session ${session.id} is in HUMAN mode. Skipping AI.`);
           // Log user message first
-          await prisma.message.create({
+          const humanModeUserMsg = await prisma.message.create({
             data: {
               sessionId: session.id,
               role: "user",
               content: message,
             },
           });
+          scoreSentimentAsync(humanModeUserMsg.id, message);
 
           // Broadcast visitor message to PartyKit room live
           const partykitHost = process.env.PARTYKIT_HOST;
@@ -234,13 +246,14 @@ export async function action({ request }: ActionFunctionArgs) {
         formattedHistory = selectedMessages.reverse().map(m => ({ role: m.role, content: m.content }));
 
         // 3. Log user message
-        await prisma.message.create({
+        const userMsg = await prisma.message.create({
           data: {
             sessionId: session.id,
             role: "user",
             content: message,
           },
         });
+        scoreSentimentAsync(userMsg.id, message);
       } catch (dbError) {
         console.error("[Chat] Database error in session management:", dbError);
       }
@@ -301,7 +314,7 @@ export async function action({ request }: ActionFunctionArgs) {
           }
 
           console.log(`[Chat] Initiating RAG for project: ${projectId}`);
-          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference);
+          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference, undefined, responseLanguage);
           
           // Check for handoff intent
           const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];

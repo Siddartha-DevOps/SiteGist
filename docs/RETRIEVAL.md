@@ -12,10 +12,28 @@ Reranking is already wired into the pipeline; it just needs keys to activate. Se
 
 - `PORTKEY_API_KEY`
 - `PORTKEY_COHERE_VIRTUAL_KEY`
+- `COHERE_RERANK_MODEL` *(optional)* — defaults to **`rerank-multilingual-v3.0`** so
+  non-English queries rerank well too. Set to `rerank-english-v3.0` for English-only bots.
 
 When these are absent the pipeline **falls back to score-sorted top-5** (improved: it
 now orders candidates by hybrid score instead of arbitrary order), so retrieval is
 reasonable even without Cohere — but enabling rerank is a meaningful, low-effort quality win.
+
+On boot, `validateEnvAtStartup` logs `[CONFIG] Reranking: ENABLED|DISABLED` so you can
+confirm at a glance whether prod picked up the keys. `GET /api/health` also live-probes
+the rerank endpoint.
+
+## Multilingual answers (95+ languages)
+`streamRAG` detects the language of each user message (`app/lib/language.server.ts`) and
+injects a **LANGUAGE REQUIREMENT** into the prompt so the LLM answers in the user's
+language — even when the indexed knowledge is in another language (it translates). The
+embedding models (`text-embedding-3-small` / Gemini `text-embedding-004`) are already
+multilingual, so retrieval works cross-language. Detection is two-tier: Unicode script
+ranges for non-Latin scripts + a stop-word heuristic for common Latin-script languages,
+falling back to "mirror the user's language" when uncertain.
+
+Pin a fixed answer language per chatbot with the project setting `settings.language`
+(e.g. `"fr"` or `"Spanish"`); `"auto"`/unset = mirror the visitor.
 
 ## Multi-query expansion (opt-in)
 Set `RAG_MULTI_QUERY=1` to also search 2 LLM-generated alternative phrasings of the

@@ -135,6 +135,7 @@ model Message {
   role      String      // 'user' or 'assistant'
   content   String      @db.Text
   feedback  Int?        // 1 for thumbs up, -1 for thumbs down
+  sentiment String?     // 'positive' | 'neutral' | 'negative' (scored async for user messages)
   createdAt DateTime    @default(now())
 }
 
@@ -196,6 +197,9 @@ model AnalyticsSnapshot {
   leadsCaptured   Int      @default(0)
   avgLatency      Float?
   unansweredCount Int      @default(0)
+  positiveCount   Int      @default(0)
+  neutralCount    Int      @default(0)
+  negativeCount   Int      @default(0)
 }
 
 model KnowledgeQA {

@@ -9,6 +9,12 @@ import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
 import { log, startTimer } from "~/lib/logger.server";
 import { cacheGet, cacheSet, cacheKey } from "~/lib/cache.server";
+import { languageDirective } from "~/lib/language.server";
+
+// Cohere rerank model. Defaults to the multilingual model so non-English queries
+// rerank well too (matches the multilingual answer behaviour). Override with
+// COHERE_RERANK_MODEL (e.g. "rerank-english-v3.0" for English-only deployments).
+const RERANK_MODEL = process.env.COHERE_RERANK_MODEL?.trim() || "rerank-multilingual-v3.0";
 
 const EMBED_CACHE_TTL = 60 * 60 * 24 * 7; // 7 days
 
@@ -260,7 +266,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "rerank-english-v3.0",
+          model: RERANK_MODEL,
           query: query,
           documents: documents.map(d => d.text),
           top_n: 5,
@@ -279,6 +285,65 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     console.error("Portkey Rerank error:", error);
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
+}
+
+export type Sentiment = "positive" | "neutral" | "negative";
+
+// High-signal lexicon for an instant, zero-cost first pass (covers obvious cases
+// and emoji). Ambiguous / non-English messages fall through to a tiny LLM call.
+const SENT_POSITIVE = /\b(thank|thanks|great|awesome|perfect|love|loved|excellent|amazing|good|helpful|nice|works|worked|solved|happy|brilliant|wonderful)\b|😊|😀|👍|❤|🙏|🎉/i;
+const SENT_NEGATIVE = /\b(bad|terrible|awful|hate|useless|broken|wrong|angry|frustrat\w*|disappoint\w*|refund|cancel|worst|stupid|annoying|rubbish|scam|never works?|doesn'?t work|not working)\b|😠|😡|👎|💢|😤/i;
+
+/**
+ * Classify the sentiment of a customer message. Lexicon fast-path first (free,
+ * deterministic); ambiguous or non-English text falls back to a 1-word LLM
+ * classification so it works across the 95+ supported languages. Always resolves
+ * (never throws) — defaults to "neutral" — so it is safe to call fire-and-forget.
+ */
+export async function analyzeSentiment(text: string): Promise<Sentiment> {
+  const t = (text || "").trim();
+  if (!t) return "neutral";
+
+  const pos = SENT_POSITIVE.test(t);
+  const neg = SENT_NEGATIVE.test(t);
+  if (pos && !neg) return "positive";
+  if (neg && !pos) return "negative";
+
+  const prompt = `Classify the sentiment of this customer support message as exactly one lowercase word: positive, negative, or neutral.\n\nMessage: """${t.slice(0, 500)}"""\n\nSentiment:`;
+  const read = (raw: string): Sentiment | null => {
+    const w = raw.toLowerCase();
+    if (w.includes("positive")) return "positive";
+    if (w.includes("negative")) return "negative";
+    if (w.includes("neutral")) return "neutral";
+    return null;
+  };
+
+  try {
+    const gemini = getGemini();
+    if (gemini) {
+      const r = await gemini.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: prompt,
+        config: { maxOutputTokens: 4 },
+      });
+      const out = read(r.text || "");
+      if (out) return out;
+    }
+    const openai = getOpenAI();
+    if (openai) {
+      const r = await (openai as any).chat.completions.create({
+        model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 4,
+        temperature: 0,
+      });
+      const out = read(r.choices?.[0]?.message?.content || "");
+      if (out) return out;
+    }
+  } catch (e) {
+    console.warn("[Sentiment] LLM classification failed, defaulting to neutral:", e);
+  }
+  return "neutral";
 }
 
 export async function embedText(text: string) {
@@ -625,12 +690,17 @@ export async function* streamRAG(
   systemPrompt?: string,
   history: { role: string, content: string }[] = [],
   modelPreference?: string,
-  sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] }
+  sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] },
+  responseLanguage?: string
 ) {
   if (isPlainGreeting(query)) {
     yield "Hi! How can I help you today?";
     return;
   }
+
+  // Multilingual: respond in the user's language (auto-detected) unless the
+  // project pins a fixed language via settings.language.
+  const langInstruction = languageDirective(query, responseLanguage);
 
   // PREDEFINED Q&A INTERCEPTION LAYER
   if (projectId !== "demo-project") {
@@ -929,6 +999,9 @@ How it works:
   SYSTEM INSTRUCTIONS:
   ${systemPrompt || "Provide helpful, accurate answers based only on the knowledge provided."}
 
+  LANGUAGE REQUIREMENT:
+  ${langInstruction}
+
   KNOWLEDGE CONTEXT:
   ${context}
 
@@ -937,12 +1010,13 @@ How it works:
 
   STRICT RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE AND THE SYSTEM INSTRUCTIONS.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "${fallbackLine}"
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say (translated into the required language): "${fallbackLine}"
   3. DO NOT HALLUCINATE OR INVENT FACTS THAT ARE NOT PRESENT IN THE CONTEXT.
   4. Use professional, concise PLAIN TEXT.
   5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
   6. Use clean paragraphs or simple dashes (-) for lists.
   7. If the user only greets you, reply briefly and warmly and invite their question.
+  8. ALWAYS obey the LANGUAGE REQUIREMENT above for your entire response.
 
   USER QUERY: ${query}
 

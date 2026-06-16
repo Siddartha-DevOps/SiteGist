@@ -90,7 +90,7 @@ export async function loader() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "rerank-english-v3.0",
+          model: process.env.COHERE_RERANK_MODEL?.trim() || "rerank-multilingual-v3.0",
           query: "test",
           documents: ["test document"],
           top_n: 1,

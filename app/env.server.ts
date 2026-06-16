@@ -13,6 +13,8 @@ export interface EnvSchema {
   FIRECRAWL_API_KEY: string;
   OPENAI_API_KEY: string | undefined;
   PORTKEY_API_KEY: string | undefined;
+  PORTKEY_COHERE_VIRTUAL_KEY: string | undefined;
+  COHERE_RERANK_MODEL: string | undefined;
   CLOUDFLARE_TURNSTILE_SECRET_KEY: string | undefined;
   PADDLE_API_KEY: string | undefined;
   UPSTASH_REDIS_REST_URL: string | undefined;
@@ -61,6 +63,8 @@ export function getCleanEnv(): EnvSchema {
     FIRECRAWL_API_KEY: firecrawlKey,
     OPENAI_API_KEY: cleanValue(process.env.OPENAI_API_KEY),
     PORTKEY_API_KEY: cleanValue(process.env.PORTKEY_API_KEY),
+    PORTKEY_COHERE_VIRTUAL_KEY: cleanValue(process.env.PORTKEY_COHERE_VIRTUAL_KEY),
+    COHERE_RERANK_MODEL: cleanValue(process.env.COHERE_RERANK_MODEL),
     CLOUDFLARE_TURNSTILE_SECRET_KEY: cleanValue(process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY),
     PADDLE_API_KEY: cleanValue(process.env.PADDLE_API_KEY),
     UPSTASH_REDIS_REST_URL: cleanValue(process.env.UPSTASH_REDIS_REST_URL),
@@ -112,6 +116,16 @@ export async function validateEnvAtStartup() {
       console.error("DEPLOYMENT WARNING: Startup validation failed. Logging warning but continuing boot to avoid healthcheck failure.");
     }
   }
+
+  // Retrieval-quality diagnostic: reranking is the single biggest answer-quality
+  // lever and stays silently off until both Portkey keys are present.
+  const rerankEnabled = !!(currentEnv.PORTKEY_API_KEY && currentEnv.PORTKEY_COHERE_VIRTUAL_KEY);
+  console.log(
+    `[CONFIG] Reranking: ${rerankEnabled ? "ENABLED" : "DISABLED"}` +
+      (rerankEnabled
+        ? ` (model: ${currentEnv.COHERE_RERANK_MODEL || "rerank-multilingual-v3.0"})`
+        : " — set PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY to enable Cohere rerank.")
+  );
 
   // Database Connection Validation Check
   if (currentEnv.DATABASE_URL) {
