@@ -146,12 +146,13 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const csatScore = ratedTotal > 0 ? Math.round((thumbsUpCount / ratedTotal) * 100) : 0;
   const csatLabel = ratedTotal > 0 ? `${csatScore}%` : "—";
 
-  // Real sentiment split across all assistant answers
-  const totalAssistant = await prisma.message.count({
-    where: { session: { projectId: params.projectId }, role: "assistant" },
-  });
-  const neutralCount = Math.max(totalAssistant - thumbsUpCount - thumbsDownCount, 0);
-  const sentimentDenom = totalAssistant || 1;
+  // Real sentiment split: classified per user message (see analyzeSentiment).
+  const [positiveCount, negativeCount, neutralCount] = await Promise.all([
+    prisma.message.count({ where: { session: { projectId: params.projectId }, role: "user", sentiment: "positive" } }),
+    prisma.message.count({ where: { session: { projectId: params.projectId }, role: "user", sentiment: "negative" } }),
+    prisma.message.count({ where: { session: { projectId: params.projectId }, role: "user", sentiment: "neutral" } }),
+  ]);
+  const sentimentDenom = (positiveCount + negativeCount + neutralCount) || 1;
 
   // Real knowledge coverage: answered vs unanswered user questions
   const totalUserQuestions = await prisma.message.count({
@@ -176,9 +177,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     hourlyData,
     latencyTrend,
     sentimentData: [
-      { name: "Positive", value: Math.round((thumbsUpCount / sentimentDenom) * 100), color: "#22c55e" },
+      { name: "Positive", value: Math.round((positiveCount / sentimentDenom) * 100), color: "#22c55e" },
       { name: "Neutral", value: Math.round((neutralCount / sentimentDenom) * 100), color: "#94a3b8" },
-      { name: "Negative", value: Math.round((thumbsDownCount / sentimentDenom) * 100), color: "#ef4444" },
+      { name: "Negative", value: Math.round((negativeCount / sentimentDenom) * 100), color: "#ef4444" },
     ],
     totalSessions,
     totalLeads,

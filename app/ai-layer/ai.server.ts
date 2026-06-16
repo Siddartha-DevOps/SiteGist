@@ -7,6 +7,16 @@ import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
+import { log, startTimer } from "~/lib/logger.server";
+import { cacheGet, cacheSet, cacheKey } from "~/lib/cache.server";
+import { languageDirective } from "~/lib/language.server";
+
+// Cohere rerank model. Defaults to the multilingual model so non-English queries
+// rerank well too (matches the multilingual answer behaviour). Override with
+// COHERE_RERANK_MODEL (e.g. "rerank-english-v3.0" for English-only deployments).
+const RERANK_MODEL = process.env.COHERE_RERANK_MODEL?.trim() || "rerank-multilingual-v3.0";
+
+const EMBED_CACHE_TTL = 60 * 60 * 24 * 7; // 7 days
 
 const VECTOR_SCORE_THRESHOLD = 0.30;
 
@@ -239,7 +249,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
   if (!portkeyApiKey || !cohereVirtualKey) {
     console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 
   // Diagnostic (masked)
@@ -256,7 +266,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "rerank-english-v3.0",
+          model: RERANK_MODEL,
           query: query,
           documents: documents.map(d => d.text),
           top_n: 5,
@@ -273,11 +283,76 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     return rerankedMatches;
   } catch (error) {
     console.error("Portkey Rerank error:", error);
-    return documents.slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
   }
 }
 
+export type Sentiment = "positive" | "neutral" | "negative";
+
+// High-signal lexicon for an instant, zero-cost first pass (covers obvious cases
+// and emoji). Ambiguous / non-English messages fall through to a tiny LLM call.
+const SENT_POSITIVE = /\b(thank|thanks|great|awesome|perfect|love|loved|excellent|amazing|good|helpful|nice|works|worked|solved|happy|brilliant|wonderful)\b|😊|😀|👍|❤|🙏|🎉/i;
+const SENT_NEGATIVE = /\b(bad|terrible|awful|hate|useless|broken|wrong|angry|frustrat\w*|disappoint\w*|refund|cancel|worst|stupid|annoying|rubbish|scam|never works?|doesn'?t work|not working)\b|😠|😡|👎|💢|😤/i;
+
+/**
+ * Classify the sentiment of a customer message. Lexicon fast-path first (free,
+ * deterministic); ambiguous or non-English text falls back to a 1-word LLM
+ * classification so it works across the 95+ supported languages. Always resolves
+ * (never throws) — defaults to "neutral" — so it is safe to call fire-and-forget.
+ */
+export async function analyzeSentiment(text: string): Promise<Sentiment> {
+  const t = (text || "").trim();
+  if (!t) return "neutral";
+
+  const pos = SENT_POSITIVE.test(t);
+  const neg = SENT_NEGATIVE.test(t);
+  if (pos && !neg) return "positive";
+  if (neg && !pos) return "negative";
+
+  const prompt = `Classify the sentiment of this customer support message as exactly one lowercase word: positive, negative, or neutral.\n\nMessage: """${t.slice(0, 500)}"""\n\nSentiment:`;
+  const read = (raw: string): Sentiment | null => {
+    const w = raw.toLowerCase();
+    if (w.includes("positive")) return "positive";
+    if (w.includes("negative")) return "negative";
+    if (w.includes("neutral")) return "neutral";
+    return null;
+  };
+
+  try {
+    const gemini = getGemini();
+    if (gemini) {
+      const r = await gemini.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: prompt,
+        config: { maxOutputTokens: 4 },
+      });
+      const out = read(r.text || "");
+      if (out) return out;
+    }
+    const openai = getOpenAI();
+    if (openai) {
+      const r = await (openai as any).chat.completions.create({
+        model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 4,
+        temperature: 0,
+      });
+      const out = read(r.choices?.[0]?.message?.content || "");
+      if (out) return out;
+    }
+  } catch (e) {
+    console.warn("[Sentiment] LLM classification failed, defaulting to neutral:", e);
+  }
+  return "neutral";
+}
+
 export async function embedText(text: string) {
+  // Cache layer: identical text → identical embedding. Big win for repeated
+  // queries. No-op when Redis isn't configured.
+  const ck = `emb:${EMBEDDING_PROVIDER}:${cacheKey(text)}`;
+  const cached = await cacheGet<number[]>(ck);
+  if (cached && cached.length === EMBEDDING_DIMENSION) return cached;
+
   const maxAttempts = 3;
   let lastError: any = null;
 
@@ -296,6 +371,7 @@ export async function embedText(text: string) {
         if (!embedding || embedding.length === 0) {
           throw new Error("OpenAI returned an empty embedding.");
         }
+        await cacheSet(ck, embedding, EMBED_CACHE_TTL);
         return embedding;
       } else {
         const gemini = getGemini();
@@ -310,6 +386,7 @@ export async function embedText(text: string) {
         if (!values || values.length === 0) {
           throw new Error("Gemini returned an empty embedding.");
         }
+        await cacheSet(ck, values, EMBED_CACHE_TTL);
         return values;
       }
     } catch (e: any) {
@@ -325,10 +402,113 @@ export async function embedText(text: string) {
   throw new Error(`Failed to generate embedding after ${maxAttempts} attempts using provider '${EMBEDDING_PROVIDER}'. Original error: ${lastError?.message || String(lastError)}`);
 }
 
+/**
+ * Embed many texts efficiently. OpenAI accepts an array input and returns one
+ * embedding per item in a single request, so we batch instead of issuing one
+ * request per chunk. Gemini is embedded per-item with capped concurrency.
+ * Returns embeddings aligned to input order; a failed item yields an empty array.
+ */
+export async function embedTexts(texts: string[], batchSize = 96): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const results: number[][] = texts.map(() => [] as number[]);
+
+  if (EMBEDDING_PROVIDER === "openai") {
+    const openai = getOpenAI();
+    if (!openai) throw new Error("OpenAI is configured as EMBEDDING_PROVIDER, but no OpenAI client is available.");
+
+    for (let start = 0; start < texts.length; start += batchSize) {
+      const batch = texts.slice(start, start + batchSize);
+      let lastError: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await (openai as any).embeddings.create({
+            model: "text-embedding-3-small",
+            input: batch,
+          });
+          for (let i = 0; i < batch.length; i++) {
+            results[start + i] = response.data[i].embedding as number[];
+          }
+          lastError = null;
+          break;
+        } catch (e: any) {
+          lastError = e;
+          console.warn(`[AI] Batch embed attempt ${attempt}/3 failed (items ${start}-${start + batch.length}):`, e.message || e);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+        }
+      }
+      if (lastError) throw new Error(`Batch embedding failed: ${lastError.message || String(lastError)}`);
+    }
+    return results;
+  }
+
+  // Gemini: embed per item (reuses embedText's retry logic), capped concurrency.
+  const concurrency = 5;
+  for (let start = 0; start < texts.length; start += concurrency) {
+    const slice = texts.slice(start, start + concurrency);
+    const embedded = await Promise.all(slice.map(t => embedText(t).catch(() => [] as number[])));
+    for (let i = 0; i < embedded.length; i++) results[start + i] = embedded[i];
+  }
+  return results;
+}
+
+/**
+ * Like upsertChunks but embeds in batches (one request per ~96 chunks) instead
+ * of one request per chunk. Throws on failure so the ingestion pipeline can mark
+ * the source failed and retry. Returns the count of vectors upserted.
+ */
+export async function upsertChunksBatched(
+  projectId: string,
+  chunks: { text: string; metadata: any }[],
+  opts: { batchSize?: number; onProgress?: (done: number, total: number) => Promise<void> | void } = {}
+) {
+  if (chunks.length === 0) return { upserted: 0 };
+  const index = pineconeIndex;
+  const batchSize = opts.batchSize ?? 96;
+  const total = chunks.length;
+  let upserted = 0;
+  let processed = 0;
+
+  // Embed + upsert one batch at a time so progress can be reported and partial
+  // work survives a mid-run failure (the next retry re-upserts deterministically).
+  for (let start = 0; start < chunks.length; start += batchSize) {
+    const batch = chunks.slice(start, start + batchSize);
+    const embeddings = await embedTexts(batch.map(c => c.text), batchSize);
+
+    const validVectors = batch
+      .map((chunk, i) => {
+        const hash = crypto.createHash("sha256").update(chunk.text).digest("hex").substring(0, 16);
+        const sourceUrlOrTitle = chunk.metadata.url || chunk.metadata.source || "internal";
+        return {
+          id: `${projectId}-${hash}-${start + i}`,
+          values: embeddings[i] || [],
+          metadata: { ...chunk.metadata, source: sourceUrlOrTitle, text: chunk.text, projectId },
+        };
+      })
+      .filter(v => {
+        if (!v.values || v.values.length === 0) return false;
+        if (v.values.length !== EMBEDDING_DIMENSION) {
+          console.error(`[AI] DIMENSION_MISMATCH: vector ${v.id} has ${v.values.length}, expected ${EMBEDDING_DIMENSION}. Skipping.`);
+          return false;
+        }
+        return true;
+      });
+
+    if (validVectors.length > 0) {
+      await index.namespace(projectId).upsert({ records: validVectors } as any);
+      upserted += validVectors.length;
+    }
+    processed += batch.length;
+    if (opts.onProgress) await opts.onProgress(processed, total);
+  }
+
+  console.log(`[AI] Batched upsert: ${upserted}/${total} chunks to Pinecone.`);
+  return { upserted };
+}
+
 export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
   try {
     const index = pineconeIndex;
-    
+
     const vectors = await Promise.all(
       chunks.map(async (chunk, i) => {
         let values: number[] = [];
@@ -475,18 +655,52 @@ REWRITTEN STANDALONE QUESTION:`;
   }
 }
 
+/**
+ * Multi-query expansion (opt-in via RAG_MULTI_QUERY=1). Generates a few alternative
+ * phrasings of the search query to widen retrieval recall. Returns [] when disabled
+ * or on any failure, so callers can simply spread the result with no behaviour change.
+ */
+export async function expandQueries(query: string, n = 2): Promise<string[]> {
+  if (process.env.RAG_MULTI_QUERY !== "1") return [];
+  try {
+    const gemini = getGemini();
+    if (!gemini) return [];
+    const resp: any = await gemini.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: `Rewrite the search query into ${n} alternative phrasings a knowledge base might match. Return ONLY the rewrites, one per line, no numbering or commentary.\n\nQuery: ${query}`,
+    });
+    const text =
+      resp?.text ??
+      resp?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      "";
+    return String(text)
+      .split("\n")
+      .map((s: string) => s.replace(/^[-*\d.\s]+/, "").trim())
+      .filter(Boolean)
+      .slice(0, n);
+  } catch (e) {
+    console.warn("[Multi-Query] expansion failed:", e);
+    return [];
+  }
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
   systemPrompt?: string,
   history: { role: string, content: string }[] = [],
   modelPreference?: string,
-  sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] }
+  sourceFilter?: { urls?: string[]; types?: ('web' | 'file' | 'youtube' | 'text')[] },
+  responseLanguage?: string
 ) {
   if (isPlainGreeting(query)) {
     yield "Hi! How can I help you today?";
     return;
   }
+
+  // Multilingual: respond in the user's language (auto-detected) unless the
+  // project pins a fixed language via settings.language.
+  const langInstruction = languageDirective(query, responseLanguage);
 
   // PREDEFINED Q&A INTERCEPTION LAYER
   if (projectId !== "demo-project") {
@@ -565,10 +779,11 @@ export async function* streamRAG(
   console.log(`[RAG Audit] Stage 1: Starting RAG for project: ${projectId}`);
   
   if (!isDemo) {
+    const endRetrieval = startTimer("rag.retrieval", { projectId });
     try {
       const index = pineconeIndex;
       const { prisma } = await import("~/database/db.server");
-      
+
       // Advanced Query Rewriting for conversation
       const searchTerms = await rewriteStandaloneQuery(query, history);
       console.log(`[Query Rewrite] Orig: "${query}" -> Rewritten standalone query: "${searchTerms}"`);
@@ -619,6 +834,37 @@ export async function* streamRAG(
 
       const [resolvedVectorResults, keywordResults] = await Promise.all([vectorTask, keywordTask]);
       vectorResults = resolvedVectorResults || { matches: [] };
+
+      // Multi-query expansion (opt-in): widen recall by also searching alternative
+      // phrasings of the query and merging in any new vector matches. Default path
+      // (RAG_MULTI_QUERY unset) is untouched.
+      if (process.env.RAG_MULTI_QUERY === "1") {
+        try {
+          const expansions = await expandQueries(searchTerms, 2);
+          if (expansions.length > 0) {
+            const expFilter: Record<string, any> = { projectId: { $eq: projectId } };
+            if (sourceFilter?.urls && sourceFilter.urls.length > 0) expFilter.source = { $in: sourceFilter.urls };
+            const expEmbeddings = await embedTexts(expansions);
+            const extra = await Promise.all(
+              expEmbeddings.map(vec =>
+                vec.length === EMBEDDING_DIMENSION
+                  ? index.namespace(projectId).query({ vector: vec, topK: 10, includeMetadata: true, filter: expFilter }).catch(() => ({ matches: [] }))
+                  : Promise.resolve({ matches: [] })
+              )
+            );
+            if (!vectorResults.matches) vectorResults.matches = [];
+            const seenIds = new Set((vectorResults.matches || []).map((m: any) => m.id));
+            for (const r of extra) {
+              for (const m of (r as any).matches || []) {
+                if (m.id && !seenIds.has(m.id)) { seenIds.add(m.id); vectorResults.matches.push(m); }
+              }
+            }
+            console.log(`[Multi-Query] ${expansions.length} expansions -> ${vectorResults.matches.length} total vector matches.`);
+          }
+        } catch (e) {
+          console.warn("[Multi-Query] merge failed (continuing with base results):", e);
+        }
+      }
 
       console.log(`[Hybrid Search] Vector: ${vectorResults.matches?.length || 0}, Keyword: ${keywordResults?.length || 0}`);
 
@@ -687,10 +933,20 @@ export async function* streamRAG(
       context = rankedSources
         .map((s: any, i: number) => `[Document ${i+1}]: ${s.text}\nSource: ${s.title || 'Knowledge Base'} (${s.url || 'Internal'})\n---`)
         .join("\n\n");
-        
-      console.log(`[Hybrid Search] Stage 5: Hybrid Retrieval complete.`);
+
+      const rerankEnabled = !!(process.env.PORTKEY_API_KEY && process.env.PORTKEY_COHERE_VIRTUAL_KEY);
+      endRetrieval({
+        ok: true,
+        candidates: initialMatches.length,
+        ranked: rankedSources.length,
+        citations: citationMetadata.length,
+        rerank: rerankEnabled,
+        multiQuery: process.env.RAG_MULTI_QUERY === "1",
+      });
     } catch (e) {
       console.error("[Hybrid Search] Retrieval failed, short-circuiting with fallback message:", e);
+      captureException(e, { where: "streamRAG.retrieval", projectId });
+      endRetrieval({ ok: false });
       yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
       yield fallbackMessage;
       return;
@@ -743,6 +999,9 @@ How it works:
   SYSTEM INSTRUCTIONS:
   ${systemPrompt || "Provide helpful, accurate answers based only on the knowledge provided."}
 
+  LANGUAGE REQUIREMENT:
+  ${langInstruction}
+
   KNOWLEDGE CONTEXT:
   ${context}
 
@@ -751,12 +1010,13 @@ How it works:
 
   STRICT RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE AND THE SYSTEM INSTRUCTIONS.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say: "${fallbackLine}"
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say (translated into the required language): "${fallbackLine}"
   3. DO NOT HALLUCINATE OR INVENT FACTS THAT ARE NOT PRESENT IN THE CONTEXT.
   4. Use professional, concise PLAIN TEXT.
   5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
   6. Use clean paragraphs or simple dashes (-) for lists.
   7. If the user only greets you, reply briefly and warmly and invite their question.
+  8. ALWAYS obey the LANGUAGE REQUIREMENT above for your entire response.
 
   USER QUERY: ${query}
 

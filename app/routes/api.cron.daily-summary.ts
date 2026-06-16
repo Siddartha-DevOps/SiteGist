@@ -36,12 +36,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Write per-project AnalyticsSnapshot for yesterday
     for (const project of user.projects) {
       try {
-        const [projMessages, projLeads, projUnanswered] = await Promise.all([
+        const [projMessages, projLeads, projUnanswered, projPositive, projNeutral, projNegative] = await Promise.all([
           prisma.message.count({
             where: { session: { projectId: project.id }, role: "user", createdAt: window },
           }),
           prisma.lead.count({ where: { projectId: project.id, createdAt: window } }),
           prisma.unansweredQuestion.count({ where: { projectId: project.id, createdAt: window } }),
+          prisma.message.count({ where: { session: { projectId: project.id }, role: "user", sentiment: "positive", createdAt: window } }),
+          prisma.message.count({ where: { session: { projectId: project.id }, role: "user", sentiment: "neutral", createdAt: window } }),
+          prisma.message.count({ where: { session: { projectId: project.id }, role: "user", sentiment: "negative", createdAt: window } }),
         ]);
 
         await prisma.analyticsSnapshot.create({
@@ -51,6 +54,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             messagesCount: projMessages,
             leadsCaptured: projLeads,
             unansweredCount: projUnanswered,
+            positiveCount: projPositive,
+            neutralCount: projNeutral,
+            negativeCount: projNegative,
           },
         });
         snapshotsWritten++;
@@ -60,7 +66,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     try {
-      const [leads, sessions, messages, unansweredList] = await Promise.all([
+      const [leads, sessions, messages, unansweredList, positive, neutral, negative] = await Promise.all([
         prisma.lead.count({ where: { projectId: { in: projectIds }, createdAt: window } }),
         prisma.chatSession.count({ where: { projectId: { in: projectIds }, createdAt: window } }),
         prisma.message.count({
@@ -72,6 +78,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           orderBy: { createdAt: "desc" },
           take: 5,
         }),
+        prisma.message.count({ where: { session: { projectId: { in: projectIds } }, role: "user", sentiment: "positive", createdAt: window } }),
+        prisma.message.count({ where: { session: { projectId: { in: projectIds } }, role: "user", sentiment: "neutral", createdAt: window } }),
+        prisma.message.count({ where: { session: { projectId: { in: projectIds } }, role: "user", sentiment: "negative", createdAt: window } }),
       ]);
 
       // Skip users with no activity yesterday — don't spam empty digests
@@ -87,6 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           sessions,
           messages,
           unanswered: unansweredList.map((u) => u.question),
+          sentiment: { positive, neutral, negative },
         }),
       });
       emailsSent++;
@@ -111,12 +121,26 @@ function buildDailyEmail({
   sessions,
   messages,
   unanswered,
+  sentiment,
 }: {
   leads: number;
   sessions: number;
   messages: number;
   unanswered: string[];
+  sentiment: { positive: number; neutral: number; negative: number };
 }): string {
+  const sentimentTotal = sentiment.positive + sentiment.neutral + sentiment.negative;
+  const sentimentSection =
+    sentimentTotal > 0
+      ? `
+        <div style="margin:20px 0; padding:16px; background:#f4f4f5; border-radius:16px;">
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#a1a1aa; margin-bottom:8px;">Visitor sentiment</div>
+          <div style="font-size:14px; color:#18181b; font-weight:600;">
+            😊 ${sentiment.positive} positive · 😐 ${sentiment.neutral} neutral · 😞 ${sentiment.negative} negative
+          </div>
+        </div>`
+      : "";
+
   const unansweredSection =
     unanswered.length > 0
       ? `
@@ -139,6 +163,8 @@ function buildDailyEmail({
         ${statCard("Conversations", sessions)}
         ${statCard("Messages", messages)}
       </div>
+
+      ${sentimentSection}
 
       <div style="border-top:1px solid #e4e4e7; padding-top:4px; margin-top:20px;">
         ${unansweredSection}

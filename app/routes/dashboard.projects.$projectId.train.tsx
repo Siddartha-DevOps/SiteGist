@@ -1,17 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/react";
+import { useLoaderData, Form, useNavigation, useActionData, useRevalidator } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { chunkText, getSitemapUrls, crawlUrl } from "~/ai-layer/crawler.server";
-import { upsertChunks } from "~/ai-layer/ai.server";
+import { getSitemapUrls } from "~/ai-layer/crawler.server";
+import { enqueueSourceIngestion, enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
-import { 
-  unstable_createMemoryUploadHandler, 
-  unstable_parseMultipartFormData 
-} from "@remix-run/node";
 import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
@@ -30,17 +26,14 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
-  
-  let formData;
-  const contentType = request.headers.get("Content-Type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    const uploadHandler = unstable_createMemoryUploadHandler({
-      maxPartSize: 10 * 1024 * 1024, // 10MB
-    });
-    formData = await unstable_parseMultipartFormData(request, uploadHandler);
-  } else {
-    formData = await request.formData();
-  }
+
+  // Safety net: any unhandled error in the branches below is returned as a
+  // friendly inline message instead of crashing to the generic 500 error page.
+  try {
+  // Native FormData parsing handles both urlencoded forms and multipart/form-data
+  // file uploads (returning File objects). The previous unstable_parseMultipartFormData
+  // helper threw "Could not parse content as FormData" on the Node serverless runtime.
+  const formData = await request.formData();
   
   const url = formData.get("url") as string;
   const method = formData.get("_action");
@@ -54,6 +47,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
       await prisma.knowledgeSource.delete({ where: { id: sourceId } });
     }
     return json({ success: true, message: "Source removed and vector data cleaned successfully" });
+  }
+
+  if (method === "retry_source") {
+    const sourceId = formData.get("id") as string;
+    const source = await prisma.knowledgeSource.findFirst({
+      where: { id: sourceId, projectId: params.projectId! },
+    });
+    if (!source) return json({ error: "Source not found." }, { status: 404 });
+    await prisma.knowledgeSource.update({
+      where: { id: sourceId },
+      data: { status: "queued", error: null, chunksIndexed: 0 },
+    });
+    await enqueueSourceIngestion(params.projectId!, sourceId);
+    return json({ success: true, message: "Re-queued for training." });
   }
 
   if (method === "add_qa") {
@@ -141,68 +148,40 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (method === "crawl_single") {
-    try {
-      const data = await crawlUrl(url);
-      if (!data) {
-        return json({ error: "Could not crawl or fetch the page. Please verify the URL and try again." }, { status: 400 });
-      }
-      const content = data.content || "";
-      const title = data.title || url;
-
-      const existing = await prisma.knowledgeSource.findFirst({
-        where: { projectId: params.projectId, source: url, type: "web" },
-      });
-
-      if (existing) {
-        await prisma.knowledgeSource.update({
+    // Create/refresh the source row and hand off to the async ingestion pipeline.
+    // The crawl + embed now happen in a durable background workflow (or inline as
+    // a fallback when Inngest is not configured), so this request returns instantly.
+    const existing = await prisma.knowledgeSource.findFirst({
+      where: { projectId: params.projectId, source: url, type: "web" },
+    });
+    const src = existing
+      ? await prisma.knowledgeSource.update({
           where: { id: existing.id },
-          data: { title, content },
+          data: { status: "queued", error: null },
+        })
+      : await prisma.knowledgeSource.create({
+          data: { projectId: params.projectId!, type: "web", source: url, title: url, status: "queued" },
         });
-      } else {
-        await prisma.knowledgeSource.create({
-          data: {
-            projectId: params.projectId!,
-            type: "web",
-            source: url,
-            title,
-            content,
-          },
-        });
-      }
 
-      const chunks = chunkText(content);
-      await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url, title } })));
-
-      return json({ success: true, message: "Page crawled and indexed successfully" });
-    } catch (e: any) {
-      return json({ error: `Crawl Error: ${e.message}` }, { status: 400 });
-    }
+    await enqueueSourceIngestion(params.projectId!, src.id);
+    return json({ success: true, message: "Page queued for training. It will show as Trained once indexing finishes." });
   }
 
   if (method === "add_text") {
     const title = formData.get("title") as string;
     const content = formData.get("content") as string;
-    
-    await prisma.knowledgeSource.create({
-      data: {
-        projectId: params.projectId!,
-        type: "text",
-        source: title,
-        title,
-        content,
-      },
+
+    const src = await prisma.knowledgeSource.create({
+      data: { projectId: params.projectId!, type: "text", source: title, title, content, status: "queued" },
     });
 
-    const chunks = chunkText(content);
-    await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { title } })));
-
-    return json({ success: true, message: "Text content added and indexed successfully" });
+    await enqueueSourceIngestion(params.projectId!, src.id);
+    return json({ success: true, message: "Text content added and queued for training." });
   }
 
   if (method === "add_youtube") {
     const videoUrl = formData.get("url") as string;
     const {
-      getYoutubeTranscript,
       detectYouTubeUrlType,
       extractPlaylistId,
       extractChannelHandle,
@@ -240,13 +219,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "No videos found. Check the URL and try again." }, { status: 400 });
     }
 
-    let imported = 0;
+    // Create queued source rows and fan out to the ingestion pipeline. Transcripts
+    // are fetched in the background; videos without captions are marked failed there.
+    let queued = 0;
     let skipped = 0;
+    const toEnqueue: { projectId: string; sourceId: string }[] = [];
 
     for (const video of videos) {
       const canonicalUrl = `https://www.youtube.com/watch?v=${video.id}`;
-
-      // Skip if already imported for this project
       const existing = await prisma.knowledgeSource.findFirst({
         where: { projectId: params.projectId!, source: canonicalUrl },
       });
@@ -254,31 +234,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
         skipped++;
         continue;
       }
-
-      const transcript = await getYoutubeTranscript(canonicalUrl);
-      if (!transcript) {
-        skipped++;
-        continue; // no captions, skip silently
-      }
-
-      await prisma.knowledgeSource.create({
+      const src = await prisma.knowledgeSource.create({
         data: {
           projectId: params.projectId!,
           type: "youtube",
           source: canonicalUrl,
           title: video.title || `YouTube Video (${video.id})`,
-          content: transcript,
+          status: "queued",
         },
       });
-
-      const chunks = chunkText(transcript);
-      await upsertChunks(
-        params.projectId!,
-        chunks.map(c => ({ text: c, metadata: { title: video.title || "YouTube Video", source: canonicalUrl } }))
-      );
-
-      imported++;
+      toEnqueue.push({ projectId: params.projectId!, sourceId: src.id });
+      queued++;
     }
+
+    await enqueueManySourceIngestions(toEnqueue);
 
     const isMulti = urlType !== "video";
     const cappedNote = videos.length >= VIDEO_CAP
@@ -288,10 +257,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({
       success: true,
       message: isMulti
-        ? `Imported ${imported} video transcript${imported !== 1 ? "s" : ""}, skipped ${skipped}${cappedNote}.`
-        : imported > 0
-          ? "YouTube transcript imported and indexed successfully."
-          : "Could not fetch transcript. Make sure the video has captions enabled.",
+        ? `Queued ${queued} video${queued !== 1 ? "s" : ""} for training, skipped ${skipped} already-added${cappedNote}.`
+        : queued > 0
+          ? "YouTube video queued for training."
+          : "This video is already in your knowledge base.",
     });
   }
 
@@ -330,20 +299,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!content.trim()) return json({ error: "Failed to extract text from file" }, { status: 400 });
 
-    await prisma.knowledgeSource.create({
+    // Text is extracted here (the File can't cross the queue boundary); embedding
+    // is handed off to the ingestion pipeline.
+    const src = await prisma.knowledgeSource.create({
       data: {
         projectId: params.projectId!,
         type: "file",
         source: file.name,
         title: file.name,
         content: content,
+        status: "queued",
       },
     });
 
-    const chunks = chunkText(content);
-    await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { title: file.name, source: 'file' } })));
-
-    return json({ success: true, message: `File "${file.name}" uploaded and indexed successfully` });
+    await enqueueSourceIngestion(params.projectId!, src.id);
+    return json({ success: true, message: `File "${file.name}" uploaded and queued for training.` });
   }
 
   if (method === "update_sync_schedule") {
@@ -436,54 +406,50 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "No URLs found in this sitemap" }, { status: 400 });
     }
 
-    const results = [];
-    const maxToCrawl = Math.min(urls.length, 30); // Crawl up to 30 pages to prevent extreme timeouts
-    const crawledUrls = urls.slice(0, maxToCrawl);
+    // With async ingestion the per-request crawl cap is no longer needed for
+    // timeout safety; keep a generous bound to avoid unbounded fan-out per click.
+    const maxToQueue = Math.min(urls.length, 200);
+    const targetUrls = urls.slice(0, maxToQueue);
 
-    for (const itemUrl of crawledUrls) {
-      try {
-        const data = await crawlUrl(itemUrl);
-        if (data && data.content) {
-          const content = data.content || "";
-          const title = data.title || itemUrl;
-          
-          const existing = await prisma.knowledgeSource.findFirst({
-            where: { projectId: params.projectId, source: itemUrl, type: "web" },
+    const toEnqueue: { projectId: string; sourceId: string }[] = [];
+    for (const itemUrl of targetUrls) {
+      const existing = await prisma.knowledgeSource.findFirst({
+        where: { projectId: params.projectId, source: itemUrl, type: "web" },
+      });
+      const src = existing
+        ? await prisma.knowledgeSource.update({
+            where: { id: existing.id },
+            data: { status: "queued", error: null },
+          })
+        : await prisma.knowledgeSource.create({
+            data: { projectId: params.projectId!, type: "web", source: itemUrl, title: itemUrl, status: "queued" },
           });
-
-          if (existing) {
-            await prisma.knowledgeSource.update({
-              where: { id: existing.id },
-              data: { title, content },
-            });
-          } else {
-            await prisma.knowledgeSource.create({
-              data: {
-                projectId: params.projectId!,
-                type: "web",
-                source: itemUrl,
-                title,
-                content,
-              },
-            });
-          }
-
-          const chunks = chunkText(content);
-          await upsertChunks(params.projectId!, chunks.map(c => ({ text: c, metadata: { url: itemUrl, title } })));
-          results.push(itemUrl);
-         }
-      } catch (err) {
-        console.error(`Sitemap scrape failed for ${itemUrl}:`, err);
-      }
+      toEnqueue.push({ projectId: params.projectId!, sourceId: src.id });
     }
 
-    return json({ 
-      success: true, 
-      message: `Successfully crawled and indexed ${results.length} pages from the sitemap!` 
+    await enqueueManySourceIngestions(toEnqueue);
+
+    const cappedNote = urls.length > maxToQueue ? ` (first ${maxToQueue} of ${urls.length})` : "";
+    return json({
+      success: true,
+      message: `Queued ${toEnqueue.length} page${toEnqueue.length !== 1 ? "s" : ""} from the sitemap for training${cappedNote}. They'll show as Trained as they finish.`,
     });
   }
 
   return json({});
+  } catch (error: any) {
+    // Preserve Remix redirects / thrown Responses (e.g. auth) — only handle real errors.
+    if (error instanceof Response) throw error;
+    console.error("[Train Action] Unhandled error:", error);
+    return json(
+      {
+        error: error?.message
+          ? `Something went wrong: ${error.message}`
+          : "An unexpected error occurred. Please try again.",
+      },
+      { status: 400 }
+    );
+  }
 }
 
 export default function TrainProject() {
@@ -505,6 +471,20 @@ export default function TrainProject() {
       setQaAnswer("");
     }
   }, [actionData]);
+
+  // Poll the loader while any source is still being ingested so the status badges
+  // update live (queued → processing → indexed/failed) without a manual refresh.
+  const revalidator = useRevalidator();
+  const sourcesInFlight = ((project as any).knowledgeSources || []).some(
+    (s: any) => ["queued", "processing", "crawling", "embedding"].includes(s.status)
+  );
+  useEffect(() => {
+    if (!sourcesInFlight) return;
+    const t = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 4000);
+    return () => clearInterval(t);
+  }, [sourcesInFlight, revalidator]);
 
   const [connecting, setConnecting] = useState<string | null>(null);
 
@@ -1224,28 +1204,52 @@ export default function TrainProject() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h4 className="font-bold text-sm truncate max-w-sm">{source.title || source.source}</h4>
-                    <span className="px-2 py-0.5 bg-green-50 text-green-600 rounded text-[9px] font-black uppercase tracking-tighter border border-green-100">Trained</span>
+                    <SourceStatusBadge status={source.status} error={source.error} />
                   </div>
                   <div className="flex items-center gap-3 text-[10px] text-zinc-400 font-medium">
                     <span className="truncate max-w-[200px] font-mono">{source.source}</span>
                     <span className="flex items-center gap-1">• <Clock className="w-3 h-3" /> {new Date(source.updatedAt).toLocaleDateString()}</span>
                     <span className="flex items-center gap-1">• <Database className="w-3 h-3" /> {source.content?.length || 0} chars</span>
                   </div>
+                  {source.status === "embedding" && source.chunksTotal > 0 && (
+                    <div className="mt-2 w-56 max-w-full">
+                      <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 transition-all"
+                          style={{ width: `${Math.min(100, Math.round((source.chunksIndexed / source.chunksTotal) * 100))}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-zinc-400 font-medium">{source.chunksIndexed}/{source.chunksTotal} chunks embedded</span>
+                    </div>
+                  )}
+                  {source.status === "failed" && source.error && (
+                    <p className="mt-1.5 text-[10px] text-red-500 font-medium max-w-md truncate" title={source.error}>⚠ {source.error}</p>
+                  )}
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <button 
-                  className="p-2.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 rounded-xl transition-all"
-                  title="Resync Source"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <Form method="post">
+                  <input type="hidden" name="_action" value="retry_source" />
+                  <input type="hidden" name="id" value={source.id} />
+                  <button
+                    type="submit"
+                    disabled={["queued", "crawling", "embedding"].includes(source.status)}
+                    className={`p-2.5 rounded-xl transition-all disabled:opacity-40 ${
+                      source.status === "failed"
+                        ? "text-red-500 hover:bg-red-50"
+                        : "text-zinc-400 hover:text-primary hover:bg-zinc-100"
+                    }`}
+                    title={source.status === "failed" ? "Retry training" : "Resync / retrain"}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </Form>
                 <Form method="post">
                   <input type="hidden" name="_action" value="delete_source" />
                   <input type="hidden" name="id" value={source.id} />
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className="p-2.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                     title="Remove Source"
                     onClick={(e) => !confirm("Are you sure? This will remove the source from the training data.") && e.preventDefault()}
@@ -1338,3 +1342,33 @@ const TrashIcon = ({ className }: { className?: string }) => (
     <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
   </svg>
 );
+
+function SourceStatusBadge({ status, error }: { status?: string; error?: string | null }) {
+  const base = "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter border inline-flex items-center gap-1";
+  switch (status) {
+    case "queued":
+      return <span className={`${base} bg-amber-50 text-amber-600 border-amber-100`}>Queued</span>;
+    case "crawling":
+      return (
+        <span className={`${base} bg-indigo-50 text-indigo-600 border-indigo-100`}>
+          <Loader2 className="w-2.5 h-2.5 animate-spin" /> Fetching
+        </span>
+      );
+    case "processing":
+    case "embedding":
+      return (
+        <span className={`${base} bg-blue-50 text-blue-600 border-blue-100`}>
+          <Loader2 className="w-2.5 h-2.5 animate-spin" /> Training
+        </span>
+      );
+    case "failed":
+      return (
+        <span className={`${base} bg-red-50 text-red-600 border-red-100`} title={error || "Ingestion failed"}>
+          Failed
+        </span>
+      );
+    case "indexed":
+    default:
+      return <span className={`${base} bg-green-50 text-green-600 border-green-100`}>Trained</span>;
+  }
+}

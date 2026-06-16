@@ -95,6 +95,12 @@ model KnowledgeSource {
   title         String?
   content       String?  @db.Text
   metadata      Json?    // e.g., file size, specific youtube ID metadata
+  status        String   @default("indexed") // queued | crawling | embedding | indexed | failed (async ingestion state)
+  error         String?  @db.Text            // last ingestion error message, if status = failed
+  lastIndexedAt DateTime?                     // when the source was last successfully embedded
+  contentHash   String?                       // sha256 of last-indexed content, for incremental-sync skip
+  chunksTotal   Int      @default(0)          // total chunks for the current ingest (progress bar)
+  chunksIndexed Int      @default(0)          // chunks embedded so far (progress bar)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   search_vector Unsupported("tsvector")? // Managed via raw SQL migration as it is stored and generated
@@ -129,6 +135,7 @@ model Message {
   role      String      // 'user' or 'assistant'
   content   String      @db.Text
   feedback  Int?        // 1 for thumbs up, -1 for thumbs down
+  sentiment String?     // 'positive' | 'neutral' | 'negative' (scored async for user messages)
   createdAt DateTime    @default(now())
 }
 
@@ -190,6 +197,9 @@ model AnalyticsSnapshot {
   leadsCaptured   Int      @default(0)
   avgLatency      Float?
   unansweredCount Int      @default(0)
+  positiveCount   Int      @default(0)
+  neutralCount    Int      @default(0)
+  negativeCount   Int      @default(0)
 }
 
 model KnowledgeQA {

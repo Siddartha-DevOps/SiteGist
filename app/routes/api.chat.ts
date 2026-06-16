@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
-import { streamRAG, generateFollowUpSuggestions } from "~/ai-layer/ai.server";
+import { streamRAG, generateFollowUpSuggestions, analyzeSentiment } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 import { sendWebhook } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
@@ -9,6 +9,15 @@ import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
 
 const HISTORY_CHAR_BUDGET = 6000;
+
+// Score a user message's sentiment without blocking the chat response.
+function scoreSentimentAsync(messageId: string, text: string) {
+  analyzeSentiment(text)
+    .then((sentiment) =>
+      prisma.message.update({ where: { id: messageId }, data: { sentiment } })
+    )
+    .catch((e) => console.warn("[Sentiment] async update failed:", e));
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Chat Action] Incoming request: ${request.method} ${request.url}`);
@@ -43,6 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
     let project = null;
     let systemPrompt = "You are a helpful AI assistant for SiteGist, a platform that builds AI chatbots from website content.";
     let modelPreference: string | undefined = undefined;
+    let responseLanguage: string | undefined = undefined;
     let chatMode: 'ai-only' | 'hybrid' | 'agent-only' = 'ai-only';
 
     if (projectId !== "demo-project") {
@@ -58,6 +68,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const settings = project.settings as any;
         systemPrompt = settings?.systemPrompt || systemPrompt;
         modelPreference = settings?.model || undefined;
+        responseLanguage = settings?.language || undefined;
         chatMode = settings?.chatMode || 'ai-only';
 
         // Domain whitelisting check
@@ -81,8 +92,14 @@ export async function action({ request }: ActionFunctionArgs) {
           return json({ error: "quota_exceeded", message: "This chatbot has reached its monthly message limit. Please try again later." }, { status: 429 });
         }
       } catch (quotaErr) {
-        console.error("[Chat] Quota check failed (allowing request):", quotaErr);
+        // Fail CLOSED: if we can't confirm the account is under quota, don't
+        // serve a (billable) LLM call. Protects revenue and the LLM bill.
+        console.error("[Chat] Quota check failed (failing closed):", quotaErr);
         captureException(quotaErr, { where: "api.chat.quota", projectId });
+        return json(
+          { error: "temporarily_unavailable", message: "We're having trouble right now. Please try again in a moment." },
+          { status: 503 }
+        );
       }
     }
 
@@ -91,14 +108,39 @@ export async function action({ request }: ActionFunctionArgs) {
     const rateLimitWindow = settings?.rateLimitWindow || "day";
     let count = 0;
 
-    if (projectId !== "demo-project" && rateLimitPerUser > 0) {
-      const redis = getRedis();
-      if (redis) {
-        const visitorIp =
-          request.headers.get('cf-connecting-ip') ||
-          request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
-          'unknown';
+    // Visitor IP + Redis are shared by the global and per-project rate limits.
+    const visitorIp =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+      'unknown';
+    const redis = getRedis();
 
+    // Global per-IP ceiling — abuse / cost protection that applies to EVERY bot,
+    // even those without a per-project limit configured. Default 30/min; tune via
+    // GLOBAL_RATE_LIMIT_PER_MIN (0 disables). Requires Redis to enforce.
+    if (projectId !== "demo-project" && redis) {
+      const globalPerMin = parseInt(process.env.GLOBAL_RATE_LIMIT_PER_MIN || "30", 10);
+      if (globalPerMin > 0) {
+        try {
+          const gKey = `ratelimit:global:${projectId}:${visitorIp}`;
+          const gCount = await redis.incr(gKey);
+          if (gCount === 1) await redis.expire(gKey, 60);
+          if (gCount > globalPerMin) {
+            return json(
+              { error: "rate_limited", message: "Too many requests. Please slow down and try again shortly." },
+              { status: 429 }
+            );
+          }
+        } catch (e) {
+          console.warn("[Global Rate Limit] failed:", e);
+        }
+      }
+    } else if (projectId !== "demo-project" && !redis) {
+      console.warn("[Rate Limit] Redis not configured — global abuse protection is OFF. Set UPSTASH_REDIS_* to enable.");
+    }
+
+    if (projectId !== "demo-project" && rateLimitPerUser > 0) {
+      if (redis) {
         const windowSeconds = rateLimitWindow === 'hour' ? 3600 : 86400;
         const redisKey = `ratelimit:${projectId}:${visitorIp}`;
 
@@ -146,13 +188,14 @@ export async function action({ request }: ActionFunctionArgs) {
         if (session.mode === "human") {
           console.log(`[Chat] Session ${session.id} is in HUMAN mode. Skipping AI.`);
           // Log user message first
-          await prisma.message.create({
+          const humanModeUserMsg = await prisma.message.create({
             data: {
               sessionId: session.id,
               role: "user",
               content: message,
             },
           });
+          scoreSentimentAsync(humanModeUserMsg.id, message);
 
           // Broadcast visitor message to PartyKit room live
           const partykitHost = process.env.PARTYKIT_HOST;
@@ -203,13 +246,14 @@ export async function action({ request }: ActionFunctionArgs) {
         formattedHistory = selectedMessages.reverse().map(m => ({ role: m.role, content: m.content }));
 
         // 3. Log user message
-        await prisma.message.create({
+        const userMsg = await prisma.message.create({
           data: {
             sessionId: session.id,
             role: "user",
             content: message,
           },
         });
+        scoreSentimentAsync(userMsg.id, message);
       } catch (dbError) {
         console.error("[Chat] Database error in session management:", dbError);
       }
@@ -270,7 +314,7 @@ export async function action({ request }: ActionFunctionArgs) {
           }
 
           console.log(`[Chat] Initiating RAG for project: ${projectId}`);
-          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference);
+          const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference, undefined, responseLanguage);
           
           // Check for handoff intent
           const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];

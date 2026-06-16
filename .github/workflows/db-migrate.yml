@@ -1,0 +1,61 @@
+name: Database migrations
+
+# Applies Prisma migrations to the production database on merge to main.
+# Runs SEPARATELY from the Vercel web build (per the project guardrail: never run
+# `prisma migrate deploy` inside the web build — it fails on existing tables).
+#
+# Setup (one-time): add a repo secret MIGRATE_DATABASE_URL set to the DIRECT
+# (non-pooled) Postgres connection string. Settings → Secrets and variables →
+# Actions → New repository secret.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "prisma/migrations/**"
+      - "prisma/schema.prisma"
+      - ".github/workflows/db-migrate.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: db-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Require MIGRATE_DATABASE_URL secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::MIGRATE_DATABASE_URL secret is not set. Add the DIRECT (non-pooled) Postgres URL in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # The production DB was provisioned with `prisma db push` (no migration
+      # history). Mark the pre-idempotent legacy migrations as already applied so
+      # `migrate deploy` won't try to recreate existing tables. P3008 on re-runs
+      # ("already recorded") is expected and tolerated.
+      - name: Baseline legacy migrations (first run only)
+        run: |
+          for m in 20260521170040_init 20260606082200_fts_gin_index 20260607105700_add_stored_search_vector; do
+            npx prisma migrate resolve --applied "$m" || echo "  ($m already recorded — ok)"
+          done
+
+      - name: Apply pending migrations
+        run: npx prisma migrate deploy
