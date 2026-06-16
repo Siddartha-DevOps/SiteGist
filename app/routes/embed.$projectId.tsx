@@ -7,6 +7,30 @@ import { useState, useEffect, useRef } from "react";
 import { Send, X, Bot, User, Loader2, ThumbsUp, ThumbsDown, Check, ExternalLink } from "lucide-react";
 import Markdown from "react-markdown";
 
+function computeIsOffline(bh: any): boolean {
+  if (!bh?.enabled) return false;
+  const tz = bh.timezone || "UTC";
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    weekday: "long",
+  }).formatToParts(now);
+  const weekday = parts.find(p => p.type === "weekday")?.value?.toLowerCase() ?? "";
+  const hour = parseInt(parts.find(p => p.type === "hour")?.value ?? "0", 10);
+  const minute = parseInt(parts.find(p => p.type === "minute")?.value ?? "0", 10);
+  const current = hour * 60 + minute;
+  const dayMap: Record<string, number> = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+  const dayIdx = dayMap[weekday] ?? -1;
+  const enabledDays: number[] = bh.days ?? [1,2,3,4,5];
+  if (!enabledDays.includes(dayIdx)) return true;
+  const [sh, sm] = (bh.startTime || "09:00").split(":").map(Number);
+  const [eh, em] = (bh.endTime || "17:00").split(":").map(Number);
+  return current < sh * 60 + sm || current >= eh * 60 + em;
+}
+
 export async function loader({ params }: LoaderFunctionArgs) {
   const project = await prisma.project.findUnique({
     where: { id: params.projectId },
@@ -15,11 +39,12 @@ export async function loader({ params }: LoaderFunctionArgs) {
   if (!project) throw new Response("Not Found", { status: 404 });
 
   if (project.status !== "ACTIVE") {
-    return json({ project, notReady: true });
+    return json({ project, notReady: true, isOffline: false });
   }
 
-  // Enforce remove-branding gate at render time
   const settings = project.settings as any;
+
+  // Enforce remove-branding gate at render time
   if (settings?.branding?.removeBranding) {
     const [user, addons] = await Promise.all([
       prisma.user.findUnique({ where: { id: project.userId }, select: { subscriptionTier: true } }),
@@ -27,11 +52,11 @@ export async function loader({ params }: LoaderFunctionArgs) {
     ]);
     if (!hasRemoveBrandingAccess(user?.subscriptionTier, addons)) {
       const enforced = { ...settings, branding: { ...settings.branding, removeBranding: false } };
-      return json({ project: { ...project, settings: enforced }, notReady: false });
+      return json({ project: { ...project, settings: enforced }, notReady: false, isOffline: computeIsOffline(settings?.businessHours) });
     }
   }
 
-  return json({ project, notReady: false });
+  return json({ project, notReady: false, isOffline: computeIsOffline(settings?.businessHours) });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -53,7 +78,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function EmbedChat() {
-  const { project, notReady } = useLoaderData<typeof loader>();
+  const { project, notReady, isOffline } = useLoaderData<typeof loader>();
+  const settings = project.settings as any;
   const [isEmbedded, setIsEmbedded] = useState(true); // default true to avoid flash
   const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
@@ -71,7 +97,16 @@ export default function EmbedChat() {
     setIsEmbedded(window.self !== window.top);
   }, []);
 
-  const settings = project.settings as any;
+  // Proactive trigger — send a postMessage to the parent widget after the configured delay
+  const proactive = settings?.proactiveTrigger;
+  useEffect(() => {
+    if (!proactive?.enabled || !proactive?.message) return;
+    const delay = Math.max(1, proactive.delay ?? 5) * 1000;
+    const t = setTimeout(() => {
+      window.parent.postMessage({ type: "sitegist-proactive", message: proactive.message }, "*");
+    }, delay);
+    return () => clearTimeout(t);
+  }, [proactive?.enabled, proactive?.delay, proactive?.message]);
   const branding = settings?.branding || {};
   const removeBranding = branding.removeBranding || false;
   const primaryColor = branding.primaryColor || "#6C5CE7";
@@ -393,7 +428,7 @@ export default function EmbedChat() {
           </div>
           <div>
             <h1 className="font-bold text-sm">{assistantName}</h1>
-            <p className="text-[10px] opacity-80 uppercase tracking-widest font-medium">Assistant • Online</p>
+            <p className="text-[10px] opacity-80 uppercase tracking-widest font-medium">{isOffline ? "Away · Offline Hours" : "Assistant · Online"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -426,7 +461,13 @@ export default function EmbedChat() {
               )}
             </div>
             <h2 className="font-bold mb-2">Welcome to {project.name}!</h2>
-            <p className={`text-sm mb-8 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>{greetingMessage}</p>
+            <p className={`text-sm mb-4 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>{greetingMessage}</p>
+            {isOffline && (
+              <div className={`mb-4 px-4 py-3 rounded-xl text-xs text-left ${isDarkMode ? 'bg-amber-900/30 border border-amber-700/30 text-amber-300' : 'bg-amber-50 border border-amber-100 text-amber-700'}`}>
+                <p className="font-bold mb-0.5">Currently Away</p>
+                <p className="opacity-80">{settings?.businessHours?.offlineMessage || "We're currently offline. Leave a message and we'll get back to you."}</p>
+              </div>
+            )}
             
             {suggestions.length > 0 && (
               <div className="flex flex-col gap-2">
@@ -528,6 +569,11 @@ export default function EmbedChat() {
         {rateLimit && rateLimit.remaining <= 5 && (
           <p className="text-[10px] text-center text-zinc-400 mt-2 font-bold tracking-wide uppercase select-none">
             {rateLimit.remaining} message{rateLimit.remaining !== 1 ? 's' : ''} remaining {rateLimit.window === 'hour' ? 'this hour' : 'today'}
+          </p>
+        )}
+        {isOffline && (
+          <p className="text-[10px] text-center text-amber-500 mt-2 font-bold tracking-wide uppercase select-none">
+            Offline · Response may be delayed
           </p>
         )}
         {!removeBranding && (

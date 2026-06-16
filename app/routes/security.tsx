@@ -1,4 +1,14 @@
+import type { MetaFunction } from "@remix-run/node";
 import { Header } from "~/frontend/components/Header";
+
+export const meta: MetaFunction = () => [
+  { title: "Security — Enterprise-Grade AI Chatbot | SiteGist" },
+  {
+    name: "description",
+    content:
+      "SiteGist is built with security first. Data encryption in transit and at rest, SOC 2-aligned infrastructure, and strict access controls keep your customer data safe.",
+  },
+];
 import { Footer } from "~/frontend/components/Footer";
 import { CTAButton } from "~/frontend/components/CTAButton";
 import { 

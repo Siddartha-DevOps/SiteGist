@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, Link, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download } from "lucide-react";
+import { ChevronLeft, User, Bot, Send, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download, StickyNote, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useRef, useState } from "react";
 import { createChatSocket } from "~/lib/partykit.client";
@@ -14,8 +14,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     where: { id: params.sessionId },
     include: {
       messages: { orderBy: { createdAt: "asc" } },
-      project: { select: { name: true, userId: true } },
+      project: { select: { name: true, userId: true, id: true } },
       tags: { orderBy: { createdAt: "asc" } },
+      notes: { orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -28,14 +29,20 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     data: { isRead: true },
   });
 
-  return json({ session });
+  const cannedResponses = await prisma.cannedResponse.findMany({
+    where: { projectId: session.project.id },
+    orderBy: { title: "asc" },
+    select: { id: true, title: true, body: true },
+  });
+
+  return json({ session, cannedResponses });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   const formData = await request.formData();
   const action = formData.get("_action");
-  
+
   if (action === "export_transcript") {
     const session = await (prisma.chatSession as any).findUnique({
       where: { id: params.sessionId },
@@ -66,7 +73,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
     });
   }
-  
+
   if (action === "toggle_mode") {
     const session = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
     const newMode = (session as any).mode === "human" ? "ai" : "human";
@@ -122,8 +129,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  const content = formData.get("content") as string;
+  if (action === "add_note") {
+    const content = (formData.get("noteContent") as string)?.trim();
+    if (!content) return json({ error: "Content required" }, { status: 400 });
+    await prisma.conversationNote.create({
+      data: {
+        sessionId: params.sessionId!,
+        authorId: userId,
+        content,
+      },
+    });
+    return json({ success: true });
+  }
 
+  const content = formData.get("content") as string;
   if (!content) return json({ error: "Content is required" }, { status: 400 });
 
   await prisma.message.create({
@@ -143,24 +162,39 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function SessionDetail() {
-  const { session } = useLoaderData<typeof loader>();
+  const { session, cannedResponses } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const formRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const fetcher = useFetcher();
   const replyFetcher = useFetcher();
+  const noteFetcher = useFetcher<{ success?: boolean }>();
   const resolveFetcher = useFetcher();
-  
+
   const isSending = navigation.state === "submitting" || replyFetcher.state === "submitting";
 
   const [localMessages, setLocalMessages] = useState<any[]>(session.messages);
+  const [localNotes, setLocalNotes] = useState<any[]>(session.notes);
   const [showTagInput, setShowTagInput] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [replyMode, setReplyMode] = useState<"reply" | "note">("reply");
+  const [replyText, setReplyText] = useState("");
+  const [showCannedPicker, setShowCannedPicker] = useState(false);
 
   useEffect(() => {
     setLocalMessages(session.messages);
   }, [session.messages]);
+
+  useEffect(() => {
+    setLocalNotes(session.notes);
+  }, [session.notes]);
+
+  // Build a merged, sorted timeline for rendering
+  const timeline = [
+    ...localMessages.map((m) => ({ ...m, _type: "message" as const })),
+    ...localNotes.map((n) => ({ ...n, _type: "note" as const })),
+  ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   // Connect to PartyKit for real-time delivery in the inbox
   useEffect(() => {
@@ -172,7 +206,6 @@ export default function SessionDetail() {
         const data = JSON.parse(evt.data);
         if (data.type === "message") {
           setLocalMessages((prev) => {
-            // Avoid duplicates
             if (prev.some((m: any) => m.content === data.content && m.role === data.role)) {
               return prev;
             }
@@ -202,7 +235,7 @@ export default function SessionDetail() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [localMessages]);
+  }, [timeline.length]);
 
   useEffect(() => {
     if (replyFetcher.state === "idle" && !isSending) {
@@ -212,26 +245,40 @@ export default function SessionDetail() {
 
   const handleAgentReplySubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const content = formData.get("content") as string;
-    if (!content?.trim()) return;
+    if (!replyText.trim()) return;
 
-    // Optimistically update
-    setLocalMessages((prev) => [
-      ...prev,
-      {
-        id: "temp-" + Date.now(),
-        role: "assistant",
-        content,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-
-    replyFetcher.submit(
-      JSON.stringify({ sessionId: session.id, content }),
-      { method: "post", action: "/api/agent-reply", encType: "application/json" }
-    );
-    e.currentTarget.reset();
+    if (replyMode === "note") {
+      // Optimistic note
+      setLocalNotes((prev) => [
+        ...prev,
+        {
+          id: "temp-note-" + Date.now(),
+          content: replyText,
+          authorId: "me",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      noteFetcher.submit(
+        { _action: "add_note", noteContent: replyText },
+        { method: "post" }
+      );
+    } else {
+      setLocalMessages((prev) => [
+        ...prev,
+        {
+          id: "temp-" + Date.now(),
+          role: "assistant",
+          content: replyText,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      replyFetcher.submit(
+        JSON.stringify({ sessionId: session.id, content: replyText }),
+        { method: "post", action: "/api/agent-reply", encType: "application/json" }
+      );
+    }
+    setReplyText("");
+    setShowCannedPicker(false);
   };
 
   const handleResolveSession = () => {
@@ -262,9 +309,8 @@ export default function SessionDetail() {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
-          {/* Star button */}
           <fetcher.Form method="post">
             <input type="hidden" name="_action" value="toggle_star" />
             <button
@@ -280,7 +326,6 @@ export default function SessionDetail() {
             </button>
           </fetcher.Form>
 
-          {/* Archive button */}
           <fetcher.Form method="post">
             <input type="hidden" name="_action" value="toggle_archive" />
             <button
@@ -292,20 +337,20 @@ export default function SessionDetail() {
             </button>
           </fetcher.Form>
 
-           <Form method="post">
-              <input type="hidden" name="_action" value="toggle_mode" />
-              <button 
-                type="submit"
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                  session.mode === 'human' 
-                    ? 'bg-amber-100 text-amber-600 border border-amber-200' 
-                    : 'bg-zinc-50 text-zinc-400 border border-zinc-100 hover:bg-zinc-100'
-                }`}
-              >
-                {session.mode === 'human' ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
-                {session.mode === 'human' ? 'Human Mode Active' : 'Enable Live Takeover'}
-              </button>
-           </Form>
+          <Form method="post">
+            <input type="hidden" name="_action" value="toggle_mode" />
+            <button
+              type="submit"
+              className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                session.mode === 'human'
+                  ? 'bg-amber-100 text-amber-600 border border-amber-200'
+                  : 'bg-zinc-50 text-zinc-400 border border-zinc-100 hover:bg-zinc-100'
+              }`}
+            >
+              {session.mode === 'human' ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
+              {session.mode === 'human' ? 'Human Mode Active' : 'Enable Live Takeover'}
+            </button>
+          </Form>
 
           <Form method="post">
             <input type="hidden" name="_action" value="export_transcript" />
@@ -321,8 +366,6 @@ export default function SessionDetail() {
 
       {/* Tags and Assign Panel */}
       <div className="px-6 py-3 border-b border-zinc-50 bg-white flex items-center gap-6 flex-wrap">
-
-        {/* Tags */}
         <div className="flex items-center gap-2 flex-wrap flex-1">
           <Tag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           {session.tags.map((tag: any) => (
@@ -341,7 +384,6 @@ export default function SessionDetail() {
               </fetcher.Form>
             </span>
           ))}
-          {/* Add tag form */}
           {showTagInput ? (
             <fetcher.Form
               method="post"
@@ -374,7 +416,6 @@ export default function SessionDetail() {
           )}
         </div>
 
-        {/* Assign to */}
         <fetcher.Form method="post" className="flex items-center gap-2 shrink-0">
           <input type="hidden" name="_action" value="assign" />
           <UserPlus className="w-3.5 h-3.5 text-zinc-400" />
@@ -393,58 +434,162 @@ export default function SessionDetail() {
         </fetcher.Form>
       </div>
 
-      {/* Messages Area */}
+      {/* Messages + Notes Timeline */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-10 space-y-8 bg-zinc-50/30">
-        {localMessages.map((msg: any) => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-            <div className="max-w-[70%] group">
-              <div className={`p-4 rounded-3xl text-sm leading-relaxed ${
-                msg.role === 'user' 
-                  ? 'bg-white border border-zinc-100 text-zinc-800 rounded-bl-none shadow-sm' 
-                  : 'bg-primary text-white rounded-br-none shadow-lg shadow-primary/10'
-              }`}>
-                {msg.content}
+        {timeline.map((item: any) => {
+          if (item._type === "note") {
+            return (
+              <div key={item.id} className="flex justify-center">
+                <div className="max-w-[80%] bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 shadow-sm">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <StickyNote className="w-3 h-3 text-amber-500" />
+                    <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
+                      Internal Note
+                    </span>
+                  </div>
+                  <p className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                  <p className="text-[10px] mt-1.5 text-amber-400 font-bold">
+                    {format(new Date(item.createdAt), "MMM d, h:mm a")}
+                  </p>
+                </div>
               </div>
-              <p className={`text-[10px] mt-2 font-bold text-zinc-300 ${msg.role === 'user' ? 'text-left' : 'text-right'}`}>
-                {format(new Date(msg.createdAt), "MMM d, h:mm a")}
-              </p>
+            );
+          }
+
+          return (
+            <div key={item.id} className={`flex ${item.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+              <div className="max-w-[70%] group">
+                <div className={`p-4 rounded-3xl text-sm leading-relaxed ${
+                  item.role === 'user'
+                    ? 'bg-white border border-zinc-100 text-zinc-800 rounded-bl-none shadow-sm'
+                    : 'bg-primary text-white rounded-br-none shadow-lg shadow-primary/10'
+                }`}>
+                  {item.content}
+                </div>
+                <p className={`text-[10px] mt-2 font-bold text-zinc-300 ${item.role === 'user' ? 'text-left' : 'text-right'}`}>
+                  {format(new Date(item.createdAt), "MMM d, h:mm a")}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Reply Area */}
+      {/* Reply / Note Area */}
       <div className="p-6 bg-white border-t border-zinc-50">
         {session.mode === 'human' ? (
           <div>
+            {/* Mode tabs */}
+            <div className="flex items-center gap-1 mb-3">
+              <button
+                type="button"
+                onClick={() => setReplyMode("reply")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
+                  replyMode === "reply"
+                    ? "bg-primary/10 text-primary"
+                    : "text-zinc-400 hover:text-zinc-600"
+                }`}
+              >
+                Reply
+              </button>
+              <button
+                type="button"
+                onClick={() => setReplyMode("note")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1 ${
+                  replyMode === "note"
+                    ? "bg-amber-100 text-amber-600"
+                    : "text-zinc-400 hover:text-zinc-600"
+                }`}
+              >
+                <StickyNote className="w-3 h-3" /> Note
+              </button>
+
+              {/* Canned responses picker */}
+              {cannedResponses.length > 0 && replyMode === "reply" && (
+                <div className="relative ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowCannedPicker(!showCannedPicker)}
+                    className="flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-primary transition-colors px-2 py-1.5 rounded-lg hover:bg-zinc-50"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Canned
+                    <ChevronDown className={`w-3 h-3 transition-transform ${showCannedPicker ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showCannedPicker && (
+                    <div className="absolute bottom-full right-0 mb-1 w-72 bg-white border border-zinc-100 rounded-2xl shadow-xl z-20 max-h-52 overflow-y-auto">
+                      {cannedResponses.map((cr) => (
+                        <button
+                          key={cr.id}
+                          type="button"
+                          onClick={() => {
+                            setReplyText(cr.body);
+                            setShowCannedPicker(false);
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-zinc-50 transition-colors border-b border-zinc-50 last:border-0"
+                        >
+                          <p className="text-xs font-bold text-zinc-700 mb-0.5">{cr.title}</p>
+                          <p className="text-[11px] text-zinc-400 truncate">{cr.body}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <form ref={formRef as any} onSubmit={handleAgentReplySubmit} className="relative">
-              <textarea 
-                name="content" 
-                placeholder="Type your live response to the visitor..." 
+              <textarea
+                name="content"
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder={
+                  replyMode === "note"
+                    ? "Write an internal note (not visible to customer)…"
+                    : "Type your live response to the visitor..."
+                }
                 rows={3}
                 required
-                className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none pr-20 text-sm font-medium"
+                className={`w-full px-5 py-4 border rounded-2xl focus:ring-2 outline-none transition-all resize-none pr-20 text-sm font-medium ${
+                  replyMode === "note"
+                    ? "bg-amber-50 border-amber-100 focus:ring-amber-200 text-amber-900 placeholder:text-amber-400"
+                    : "bg-zinc-50 border-zinc-100 focus:ring-primary/20"
+                }`}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     e.currentTarget.form?.requestSubmit();
                   }
                 }}
-              ></textarea>
-              <button 
-                type="submit" 
-                disabled={isSending}
-                className="absolute bottom-4 right-4 p-3 bg-primary text-white rounded-xl shadow-lg shadow-primary/30 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+              />
+              <button
+                type="submit"
+                disabled={!replyText.trim() || isSending || noteFetcher.state === "submitting"}
+                className={`absolute bottom-4 right-4 p-3 text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 cursor-pointer ${
+                  replyMode === "note"
+                    ? "bg-amber-400 shadow-amber-200"
+                    : "bg-primary shadow-primary/30"
+                }`}
               >
-                {isSending ? <Clock className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                <Send className="w-5 h-5" />
               </button>
             </form>
-            
+
             <div className="flex items-center justify-between mt-4">
-              <p className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase">
-                🔴 You are manually responding • Live chat active
-              </p>
-              
+              <div className="flex items-center gap-3">
+                <p className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase">
+                  🔴 You are manually responding • Live chat active
+                </p>
+                {cannedResponses.length === 0 && (
+                  <Link
+                    to={`/dashboard/projects/${session.project.id}/canned-responses`}
+                    className="text-[10px] text-primary font-bold hover:underline uppercase tracking-widest"
+                  >
+                    + Add canned responses
+                  </Link>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={handleResolveSession}
@@ -462,7 +607,7 @@ export default function SessionDetail() {
             <p className="text-xs text-text-muted mb-4 max-w-md mx-auto">The chatbot is responding to user questions automatically using your knowledge sources.</p>
             <Form method="post" className="inline-block">
               <input type="hidden" name="_action" value="toggle_mode" />
-              <button 
+              <button
                 type="submit"
                 className="px-5 py-2.5 bg-primary text-white rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-md shadow-primary/10 flex items-center gap-2 cursor-pointer"
               >

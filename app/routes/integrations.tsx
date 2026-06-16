@@ -1,4 +1,20 @@
+import type { MetaFunction } from "@remix-run/node";
 import { Header } from "~/frontend/components/Header";
+
+export const meta: MetaFunction = () => [
+  { title: "Integrations — Connect Your AI Chatbot | SiteGist" },
+  {
+    name: "description",
+    content:
+      "Connect SiteGist to Notion, Google Drive, Slack, Zapier, Freshdesk, Crisp, Intercom, and 5,000+ apps. Sync your knowledge base automatically and route escalations to the right tool.",
+  },
+  { property: "og:title", content: "Integrations — Connect Your AI Chatbot | SiteGist" },
+  {
+    property: "og:description",
+    content:
+      "Notion, Google Drive, Slack, Zapier, Crisp, Intercom, Freshdesk, and 5,000+ more. Connect everything to your AI chatbot.",
+  },
+];
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { CTAButton } from "~/frontend/components/CTAButton";

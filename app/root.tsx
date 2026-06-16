@@ -47,25 +47,30 @@ export const links: LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const canonical = `https://sitegist.co${location.pathname}`;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>SiteGist — AI-Powered Customer Support</title>
-        <meta name="description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7. No humans required." />
+        <title>SiteGist — AI Chatbot for Your Website</title>
+        <meta name="description" content="Train an AI chatbot on your website in minutes. SiteGist answers customer questions instantly, captures leads, and provides 24/7 support in 95+ languages. Free trial." />
         <meta name="theme-color" content="#155DEE" />
+        <link rel="canonical" href={canonical} />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="SiteGist" />
-        <meta property="og:title" content="SiteGist — AI-Powered Customer Support" />
-        <meta property="og:description" content="SiteGist understands your site and delivers instant, accurate answers to your customers — 24/7." />
+        <meta property="og:title" content="SiteGist — AI Chatbot for Your Website" />
+        <meta property="og:description" content="Train an AI chatbot on your website in minutes. SiteGist answers customer questions instantly, captures leads, and provides 24/7 support in 95+ languages." />
         <meta property="og:image" content="/images/hero.png" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:url" content="https://sitegist.co" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="SiteGist — AI-Powered Customer Support" />
-        <meta name="twitter:description" content="SiteGist understands your site and delivers instant, accurate answers — 24/7." />
+        <meta name="twitter:site" content="@sitegist" />
+        <meta name="twitter:title" content="SiteGist — AI Chatbot for Your Website" />
+        <meta name="twitter:description" content="Train an AI chatbot on your website in minutes. 24/7 support in 95+ languages. Free trial." />
         <meta name="twitter:image" content="/images/hero.png" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <script
@@ -112,7 +117,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <script
           defer
           data-website-id="dfid_jdhKNHuiQeBJuwVkakfYd"
-          data-domain="stegist.co"
+          data-domain="sitegist.co"
           src="https://datafa.st/js/script.js"
         ></script>
         <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>

@@ -4,8 +4,35 @@ import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { hasRemoveBrandingAccess } from "~/lib/plans";
-import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock } from "lucide-react";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Bell, Clock } from "lucide-react";
 import { useState } from "react";
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function BusinessHoursDayPicker({ defaultDays }: { defaultDays: number[] }) {
+  const [selected, setSelected] = useState<number[]>(defaultDays);
+  const toggle = (d: number) =>
+    setSelected(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort());
+  return (
+    <div className="flex gap-2 flex-wrap">
+      <input type="hidden" name="businessHoursDays" value={JSON.stringify(selected)} />
+      {DAY_LABELS.map((label, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={() => toggle(i)}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
+            selected.includes(i)
+              ? "bg-primary text-white shadow-sm shadow-primary/20"
+              : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const PERSONAS = [
   {
@@ -132,7 +159,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
   
   const slackWebhookUrl = formData.get("slackWebhookUrl") as string || "";
-  
+
+  // Proactive trigger
+  const proactiveEnabled = formData.get("proactiveEnabled") === "true";
+  const proactiveDelay = Math.min(300, Math.max(1, parseInt(formData.get("proactiveDelay") as string || "5", 10)));
+  const proactiveMessage = (formData.get("proactiveMessage") as string || "").trim();
+
+  // Business hours
+  const businessHoursEnabled = formData.get("businessHoursEnabled") === "true";
+  const businessHoursTimezone = (formData.get("businessHoursTimezone") as string || "UTC").trim();
+  const businessHoursStartTime = (formData.get("businessHoursStartTime") as string || "09:00").trim();
+  const businessHoursEndTime = (formData.get("businessHoursEndTime") as string || "17:00").trim();
+  const businessHoursDaysRaw = formData.get("businessHoursDays") as string;
+  let businessHoursDays: number[] = [1, 2, 3, 4, 5]; // Mon-Fri default
+  try { businessHoursDays = JSON.parse(businessHoursDaysRaw || "[1,2,3,4,5]"); } catch {}
+  const businessHoursOfflineMessage = (formData.get("businessHoursOfflineMessage") as string || "").trim();
+
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
@@ -145,6 +187,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
     rateLimitWindow,
     leadFields,
     slackWebhookUrl,
+    proactiveTrigger: {
+      enabled: proactiveEnabled,
+      delay: proactiveDelay,
+      message: proactiveMessage || "👋 Hi there! Can I help you with anything?",
+    },
+    businessHours: {
+      enabled: businessHoursEnabled,
+      timezone: businessHoursTimezone,
+      startTime: businessHoursStartTime,
+      endTime: businessHoursEndTime,
+      days: businessHoursDays,
+      offlineMessage: businessHoursOfflineMessage || "We're currently offline. Leave a message and we'll get back to you.",
+    },
     branding: {
       primaryColor,
       assistantName,
@@ -770,6 +825,124 @@ export default function ProjectSettings() {
                     <option value="day">Day</option>
                   </select>
                   <p className="mt-2 text-xs text-zinc-400 font-medium">Reset interval for visitor rate limit count.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Proactive Triggers */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-2 flex items-center gap-3">
+                <Bell className="text-primary w-5 h-5" /> Proactive Trigger
+              </h2>
+              <p className="text-sm text-zinc-400 mb-6">Automatically show a message bubble after a visitor has been on the page for a set time — without opening the full chat.</p>
+              <div className="space-y-5">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      name="proactiveEnabled"
+                      value="true"
+                      id="proactiveEnabled"
+                      defaultChecked={!!currentSettings.proactiveTrigger?.enabled}
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-6 bg-zinc-200 rounded-full peer peer-checked:bg-primary transition-colors cursor-pointer" />
+                    <div className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                  </div>
+                  <span className="text-sm font-bold">Enable proactive trigger</span>
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Delay (seconds)</label>
+                    <input
+                      type="number"
+                      name="proactiveDelay"
+                      min="1"
+                      max="300"
+                      defaultValue={currentSettings.proactiveTrigger?.delay ?? 5}
+                      className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
+                    />
+                    <p className="mt-1 text-xs text-zinc-400">Show after this many seconds on page.</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2">Proactive message</label>
+                  <textarea
+                    name="proactiveMessage"
+                    rows={2}
+                    defaultValue={currentSettings.proactiveTrigger?.message || "👋 Hi there! Can I help you with anything?"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all resize-none text-sm"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* Business Hours */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-2 flex items-center gap-3">
+                <Clock className="text-primary w-5 h-5" /> Business Hours
+              </h2>
+              <p className="text-sm text-zinc-400 mb-6">Outside these hours the widget shows an offline message instead of the chat interface.</p>
+              <div className="space-y-5">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      name="businessHoursEnabled"
+                      value="true"
+                      id="businessHoursEnabled"
+                      defaultChecked={!!currentSettings.businessHours?.enabled}
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-6 bg-zinc-200 rounded-full peer peer-checked:bg-primary transition-colors cursor-pointer" />
+                    <div className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
+                  </div>
+                  <span className="text-sm font-bold">Enable business hours</span>
+                </label>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Opens at</label>
+                    <input
+                      type="time"
+                      name="businessHoursStartTime"
+                      defaultValue={currentSettings.businessHours?.startTime || "09:00"}
+                      className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/10 transition-all text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Closes at</label>
+                    <input
+                      type="time"
+                      name="businessHoursEndTime"
+                      defaultValue={currentSettings.businessHours?.endTime || "17:00"}
+                      className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/10 transition-all text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Timezone</label>
+                    <select
+                      name="businessHoursTimezone"
+                      defaultValue={currentSettings.businessHours?.timezone || "UTC"}
+                      className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/10 transition-all text-sm"
+                    >
+                      {["UTC","America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Toronto","America/Vancouver","Europe/London","Europe/Paris","Europe/Berlin","Europe/Amsterdam","Asia/Kolkata","Asia/Dubai","Asia/Singapore","Asia/Tokyo","Australia/Sydney","Pacific/Auckland"].map(tz => (
+                        <option key={tz} value={tz}>{tz.replace("_", " ")}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-3">Open days</label>
+                  <BusinessHoursDayPicker defaultDays={currentSettings.businessHours?.days ?? [1,2,3,4,5]} />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold mb-2">Offline message</label>
+                  <textarea
+                    name="businessHoursOfflineMessage"
+                    rows={2}
+                    defaultValue={currentSettings.businessHours?.offlineMessage || "We're currently offline. Leave a message and we'll get back to you."}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all resize-none text-sm"
+                  />
                 </div>
               </div>
             </section>

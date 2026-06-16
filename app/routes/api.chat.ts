@@ -1,9 +1,10 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import OpenAI from "openai";
 import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions, analyzeSentiment } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { fireProjectWebhooks } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
@@ -285,8 +286,8 @@ export async function action({ request }: ActionFunctionArgs) {
                 data: { mode: 'human', isRead: false },
               });
 
-              if (project?.webhookUrl) {
-                await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+              if (project) {
+                await fireProjectWebhooks(project.id, project.webhookUrl, 'conversation.escalated', {
                   id: project.id,
                   name: project.name,
                 }, {
@@ -313,6 +314,141 @@ export async function action({ request }: ActionFunctionArgs) {
             return;
           }
 
+          // AI Actions — tool calling before RAG
+          if (projectId !== "demo-project" && project) {
+            const enabledActions = await prisma.aiAction.findMany({
+              where: { projectId, enabled: true },
+            });
+
+            if (enabledActions.length > 0) {
+              try {
+                const { default: OpenAI } = await import("openai");
+                const openaiKey =
+                  process.env.OPENAI_KEY ||
+                  process.env.OPENAI_API_KEY ||
+                  process.env.OpenAI_API_KEY ||
+                  process.env.VITE_OPENAI_API_KEY || "";
+
+                if (openaiKey) {
+                  const oai = new OpenAI({ apiKey: openaiKey });
+
+                  const tools: OpenAI.Chat.ChatCompletionTool[] = enabledActions.map((a) => {
+                    const params = (a.parameters as any[]) || [];
+                    const properties: Record<string, any> = {};
+                    const required: string[] = [];
+                    for (const p of params) {
+                      properties[p.name] = { type: p.type || "string", description: p.description || "" };
+                      if (p.required) required.push(p.name);
+                    }
+                    return {
+                      type: "function" as const,
+                      function: {
+                        name: a.name,
+                        description: a.description,
+                        parameters: { type: "object", properties, required },
+                      },
+                    };
+                  });
+
+                  const toolMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+                    { role: "system", content: systemPrompt },
+                    ...formattedHistory.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
+                    { role: "user", content: message },
+                  ];
+
+                  const toolResponse = await oai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: toolMessages,
+                    tools,
+                    tool_choice: "auto",
+                    max_tokens: 512,
+                  });
+
+                  const firstChoice = toolResponse.choices[0];
+                  if (firstChoice?.finish_reason === "tool_calls" && firstChoice.message.tool_calls?.length) {
+                    for (const toolCall of firstChoice.message.tool_calls) {
+                      const actionDef = enabledActions.find((a) => a.name === toolCall.function.name);
+                      if (!actionDef) continue;
+
+                      let callArgs: Record<string, any> = {};
+                      try { callArgs = JSON.parse(toolCall.function.arguments || "{}"); } catch {}
+
+                      let toolResult = "";
+                      try {
+                        const isBodyMethod = ["POST", "PUT", "PATCH"].includes(actionDef.method.toUpperCase());
+                        const fetchUrl = isBodyMethod
+                          ? actionDef.endpoint
+                          : actionDef.endpoint + (Object.keys(callArgs).length
+                              ? "?" + new URLSearchParams(Object.fromEntries(Object.entries(callArgs).map(([k, v]) => [k, String(v)]))).toString()
+                              : "");
+
+                        const fetchHeaders: Record<string, string> = {
+                          "Content-Type": "application/json",
+                          ...(typeof actionDef.headers === "object" && actionDef.headers ? actionDef.headers as Record<string, string> : {}),
+                        };
+
+                        const actionRes = await fetch(fetchUrl, {
+                          method: actionDef.method.toUpperCase(),
+                          headers: fetchHeaders,
+                          ...(isBodyMethod ? { body: JSON.stringify(callArgs) } : {}),
+                          signal: AbortSignal.timeout(8000),
+                        });
+
+                        const rawText = await actionRes.text();
+                        toolResult = rawText.slice(0, 2000);
+                        console.log(`[AI Action] ${actionDef.name} → ${actionRes.status}`);
+                      } catch (fetchErr) {
+                        toolResult = `Error calling action: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`;
+                        console.error(`[AI Action] ${actionDef.name} fetch failed:`, fetchErr);
+                      }
+
+                      // Build follow-up messages with tool result and stream the final answer
+                      const followUpMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+                        ...toolMessages,
+                        firstChoice.message,
+                        { role: "tool", tool_call_id: toolCall.id, content: toolResult },
+                      ];
+
+                      const finalStream = await oai.chat.completions.create({
+                        model: modelPreference || "gpt-4o-mini",
+                        messages: followUpMessages,
+                        stream: true,
+                        max_tokens: 1024,
+                      });
+
+                      for await (const chunk of finalStream) {
+                        const delta = chunk.choices[0]?.delta?.content;
+                        if (delta) {
+                          fullAnswer += delta;
+                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: delta })}\n\n`));
+                        }
+                      }
+
+                      // After action response, skip regular RAG
+                      if (projectId !== "demo-project" && session && project && fullAnswer) {
+                        try {
+                          const assistantMsg = await prisma.message.create({
+                            data: { sessionId: session.id, role: "assistant", content: fullAnswer },
+                          });
+                          controller.enqueue(encoder.encode(`event: messageId\ndata: ${JSON.stringify({ messageId: assistantMsg.id })}\n\n`));
+                          await prisma.usageRecord.create({
+                            data: { userId: project.userId, type: "chat_message", amount: 1 },
+                          });
+                        } catch (saveErr) {
+                          console.error("[Chat] Error saving action response:", saveErr);
+                        }
+                      }
+                      controller.close();
+                      return;
+                    }
+                  }
+                }
+              } catch (toolErr) {
+                console.error("[AI Actions] Tool calling failed, falling back to RAG:", toolErr);
+              }
+            }
+          }
+
           console.log(`[Chat] Initiating RAG for project: ${projectId}`);
           const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference, undefined, responseLanguage);
           
@@ -320,9 +456,9 @@ export async function action({ request }: ActionFunctionArgs) {
           const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
           const isHandoffRequested = handoffKeywords.some(keyword => message.toLowerCase().includes(keyword));
 
-          if (isHandoffRequested && project?.webhookUrl) {
-            console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhook.`);
-            await sendWebhook(project.webhookUrl, 'conversation.escalated', {
+          if (isHandoffRequested && project) {
+            console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhooks.`);
+            await fireProjectWebhooks(project.id, project.webhookUrl, 'conversation.escalated', {
               id: project.id,
               name: project.name,
             }, {
