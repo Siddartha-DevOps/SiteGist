@@ -9,47 +9,60 @@ import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const user = await getUser(request);
-  const findProject = () => prisma.project.findFirst({
-    where: {
-      id: params.projectId,
-      OR: [
-        { userId },
-        { members: { some: { email: user?.email || "" } } }
-      ]
-    },
-    include: {
-      knowledgeSources: true,
-      _count: { select: { sessions: true, leads: true } }
-    },
-  });
+  try {
+    const findProject = () => prisma.project.findFirst({
+      where: {
+        id: params.projectId,
+        OR: [
+          { userId },
+          { members: { some: { email: user?.email || "" } } }
+        ]
+      },
+      include: {
+        knowledgeSources: true,
+        _count: { select: { sessions: true, leads: true } }
+      },
+    });
 
-  let project = await findProject();
+    let project = await findProject();
 
-  // Retry once after a short delay to handle Prisma Accelerate read-after-write lag
-  if (!project) {
-    await new Promise(r => setTimeout(r, 600));
-    project = await findProject();
+    // Retry once after a short delay to handle Prisma Accelerate read-after-write lag
+    if (!project) {
+      await new Promise(r => setTimeout(r, 600));
+      project = await findProject();
+    }
+
+    if (!project) return redirect("/dashboard");
+
+    const messageCount = await prisma.message.count({
+      where: { session: { projectId: params.projectId } }
+    });
+
+    const unanswered = await prisma.unansweredQuestion.findMany({
+      where: { projectId: params.projectId },
+      orderBy: { createdAt: "desc" },
+      take: 5
+    });
+
+    const host =
+      request.headers.get("x-forwarded-host") ??
+      request.headers.get("host") ??
+      "app.sitegist.co";
+    const baseUrl = `https://${host}`;
+
+    return json({ project, messageCount, unanswered, baseUrl });
+  } catch (error: any) {
+    // Surface DB failures (e.g. schema drift on a db-push'd prod that is missing
+    // migrated columns) through the root ErrorBoundary's "Database Connection
+    // Offline" screen WITH the real message, instead of Remix's opaque
+    // production-scrubbed "Unexpected Server Error".
+    if (error instanceof Response) throw error; // preserve redirects / auth responses
+    console.error("[Project detail] loader DB error:", error?.message);
+    throw json(
+      { dbError: true, message: error?.message || "Failed to load this project from the database." },
+      { status: 503 }
+    );
   }
-
-  if (!project) return redirect("/dashboard");
-
-  const messageCount = await prisma.message.count({
-    where: { session: { projectId: params.projectId } }
-  });
-
-  const unanswered = await prisma.unansweredQuestion.findMany({
-    where: { projectId: params.projectId },
-    orderBy: { createdAt: "desc" },
-    take: 5
-  });
-
-  const host =
-    request.headers.get("x-forwarded-host") ??
-    request.headers.get("host") ??
-    "app.sitegist.co";
-  const baseUrl = `https://${host}`;
-
-  return json({ project, messageCount, unanswered, baseUrl });
 }
 
 export default function ProjectDetails() {

@@ -132,16 +132,29 @@ export function ErrorBoundary() {
   const error = useRouteError();
   console.error("ErrorBoundary caught an unhandled exception:", error);
 
-  const errorString = error instanceof Error 
-    ? error.message 
-    : typeof error === "object" && error !== null 
-      ? JSON.stringify(error) 
-      : String(error);
+  // Loaders/actions can `throw json({ dbError: true, message }, { status: 503 })`
+  // to surface a real database error. Thrown Responses (unlike thrown Errors) are
+  // NOT scrubbed to "Unexpected Server Error" by Remix in production, so the real
+  // message survives to here for the operator to diagnose.
+  const routeErrorData =
+    isRouteErrorResponse(error) && error.data && typeof error.data === "object"
+      ? (error.data as { dbError?: boolean; message?: string })
+      : null;
+  const isThrownDbError = !!routeErrorData?.dbError;
+
+  const errorString = isThrownDbError
+    ? String(routeErrorData?.message || "Database error")
+    : error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null
+        ? JSON.stringify(error)
+        : String(error);
 
   const isPrismaAuthError = errorString.includes("P6002") || errorString.includes("API key is invalid") || (errorString.includes("Unauthorized") && errorString.toLowerCase().includes("accelerate"));
   const isGenericDbError = !isPrismaAuthError && (
-    errorString.includes("Can't reach database") || 
-    errorString.toLowerCase().includes("prisma") || 
+    isThrownDbError ||
+    errorString.includes("Can't reach database") ||
+    errorString.toLowerCase().includes("prisma") ||
     errorString.toLowerCase().includes("database")
   );
 
