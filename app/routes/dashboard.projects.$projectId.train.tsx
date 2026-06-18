@@ -258,7 +258,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       queued++;
     }
 
-    await enqueueManySourceIngestions(toEnqueue);
+    await enqueueManySourceIngestions(toEnqueue, { maxInline: 3 });
 
     const isMulti = urlType !== "video";
     const cappedNote = videos.length >= VIDEO_CAP
@@ -417,9 +417,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "No URLs found in this sitemap" }, { status: 400 });
     }
 
-    // With async ingestion the per-request crawl cap is no longer needed for
-    // timeout safety; keep a generous bound to avoid unbounded fan-out per click.
-    const maxToQueue = Math.min(urls.length, 200);
+    // Drain handles the rest in the background; process a few inline for instant
+    // feedback so the user sees progress immediately on click.
+    const maxToQueue = Math.min(urls.length, 1000);
     const targetUrls = urls.slice(0, maxToQueue);
 
     const toEnqueue: { projectId: string; sourceId: string }[] = [];
@@ -438,7 +438,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       toEnqueue.push({ projectId: params.projectId!, sourceId: src.id });
     }
 
-    await enqueueManySourceIngestions(toEnqueue);
+    await enqueueManySourceIngestions(toEnqueue, { maxInline: 3 });
 
     const cappedNote = urls.length > maxToQueue ? ` (first ${maxToQueue} of ${urls.length})` : "";
     return json({
@@ -486,16 +486,29 @@ export default function TrainProject() {
   // Poll the loader while any source is still being ingested so the status badges
   // update live (queued → processing → indexed/failed) without a manual refresh.
   const revalidator = useRevalidator();
-  const sourcesInFlight = ((project as any).knowledgeSources || []).some(
+  const sources = ((project as any).knowledgeSources || []);
+  const sourcesInFlight = sources.some(
     (s: any) => ["queued", "processing", "crawling", "embedding"].includes(s.status)
   );
+  const hasQueued = sources.some((s: any) => s.status === "queued");
   useEffect(() => {
     if (!sourcesInFlight) return;
-    const t = setInterval(() => {
+    const t = setInterval(async () => {
+      // Drain a few queued pages per tick so large sitemap crawls finish without
+      // ever blocking a single request, then refresh the status badges.
+      if (hasQueued) {
+        try {
+          await fetch("/api/ingest/drain", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId: project.id }),
+          });
+        } catch { /* transient; next tick retries */ }
+      }
       if (revalidator.state === "idle") revalidator.revalidate();
     }, 4000);
     return () => clearInterval(t);
-  }, [sourcesInFlight, revalidator]);
+  }, [sourcesInFlight, hasQueued, revalidator, project.id]);
 
   const [connecting, setConnecting] = useState<string | null>(null);
 
