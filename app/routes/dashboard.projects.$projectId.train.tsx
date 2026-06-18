@@ -12,16 +12,27 @@ import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-    include: { 
-      integrations: true,
-      knowledgeSources: { orderBy: { createdAt: 'desc' } },
-      knowledgeQAs: { orderBy: { createdAt: 'desc' } }
-    }
-  });
-  if (!project) return redirect("/dashboard");
-  return json({ project });
+  try {
+    const project = await prisma.project.findFirst({
+      where: { id: params.projectId, userId },
+      include: {
+        integrations: true,
+        knowledgeSources: { orderBy: { createdAt: 'desc' } },
+        knowledgeQAs: { orderBy: { createdAt: 'desc' } }
+      }
+    });
+    if (!project) return redirect("/dashboard");
+    return json({ project });
+  } catch (error: any) {
+    // See the project-detail loader: surface real DB errors (schema drift, etc.)
+    // via the root ErrorBoundary instead of the opaque scrubbed 500.
+    if (error instanceof Response) throw error;
+    console.error("[Train] loader DB error:", error?.message);
+    throw json(
+      { dbError: true, message: error?.message || "Failed to load training data from the database." },
+      { status: 503 }
+    );
+  }
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {

@@ -347,6 +347,16 @@ export async function action({ request }: ActionFunctionArgs) {
           }
 
           for await (const chunk of ragStream) {
+            if (chunk.startsWith("ACTION:")) {
+              // Agentic action(s) ran server-side; surface which ones to the widget.
+              try {
+                const payload = JSON.parse(chunk.slice(7).trim());
+                controller.enqueue(encoder.encode(`event: action\ndata: ${JSON.stringify(payload)}\n\n`));
+              } catch {
+                /* ignore malformed action metadata */
+              }
+              continue;
+            }
             if (chunk.startsWith("METADATA:")) {
               const raw = chunk.slice(9).trim();
               let sources: { source: string; title?: string; type?: string }[] = [];
