@@ -26,8 +26,16 @@ function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
 }
 
-/** Async ingestion is used when Inngest is wired up; otherwise we run inline. */
+/**
+ * Async ingestion is used only when explicitly opted in via INGEST_ASYNC=1 AND
+ * Inngest is configured. Merely having INNGEST_EVENT_KEY present is NOT enough:
+ * if the Inngest app isn't synced to /api/inngest (or the signing key is missing),
+ * events are accepted but never processed, leaving every source stuck in "queued".
+ * Defaulting to the inline path makes ingestion work reliably out of the box;
+ * flip INGEST_ASYNC=1 once Inngest is fully wired and verified for scale.
+ */
 export function isAsyncIngestionEnabled(): boolean {
+  if (process.env.INGEST_ASYNC?.trim() !== "1") return false;
   return !!(process.env.INNGEST_EVENT_KEY?.trim() || process.env.INNGEST_DEV?.trim());
 }
 
