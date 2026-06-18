@@ -986,6 +986,36 @@ How it works:
     yield `METADATA:${JSON.stringify({ citations: citationMetadata })}`;
   }
 
+  // AGENTIC AI ACTIONS: let the project's configured tools fetch live data or
+  // perform a task (lookup order, book demo, hit your API), then ground the answer
+  // on the result. Best-effort — any failure leaves the normal RAG answer intact.
+  if (!isDemo) {
+    try {
+      const { getEnabledActions, runAgenticActions } = await import("./actions.server");
+      const projectActions = await getEnabledActions(projectId);
+      if (projectActions.length > 0) {
+        const wantsOpenAIForActions = !!modelPreference && modelPreference.startsWith("gpt");
+        const wantsGeminiForActions = !!modelPreference && modelPreference.startsWith("gemini");
+        const outcome = await runAgenticActions({
+          projectId,
+          query,
+          history,
+          actions: projectActions,
+          openai: getOpenAI(),
+          gemini: getGemini(),
+          openaiModel: wantsOpenAIForActions ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini"),
+          geminiModel: wantsGeminiForActions ? modelPreference! : "gemini-2.0-flash",
+        });
+        if (outcome && outcome.ran.length > 0) {
+          yield `ACTION:${JSON.stringify({ actions: outcome.ran })}`;
+          context = `${context}\n\n${outcome.resultsText}`;
+        }
+      }
+    } catch (actErr) {
+      console.error("[Agentic Actions] Skipped (continuing with standard RAG):", actErr);
+    }
+  }
+
   const promptHistory = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
 
   const personaPreamble = isDemo

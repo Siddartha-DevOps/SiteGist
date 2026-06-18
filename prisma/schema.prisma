@@ -70,6 +70,27 @@ model Project {
   integrations         Integration[]
   knowledgeQAs         KnowledgeQA[]
   members              ProjectMember[]
+  actions              ProjectAction[]
+}
+
+model ProjectAction {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String   // function name exposed to the LLM, e.g. "lookup_order"
+  description  String   @db.Text // LLM-facing: when to use this action
+  parameters   Json?    // JSON Schema describing the action's arguments
+  method       String   @default("GET") // GET | POST | PUT | PATCH | DELETE
+  urlTemplate  String   @db.Text // e.g. https://api.shop.com/orders/{orderId}
+  headers      Json?    // static request headers incl. auth (server-side only — never exposed to the LLM/client)
+  bodyTemplate String?  @db.Text // optional request body with {param} placeholders
+  timeoutMs    Int      @default(8000)
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([projectId, name])
+  @@index([projectId])
 }
 
 model Integration {

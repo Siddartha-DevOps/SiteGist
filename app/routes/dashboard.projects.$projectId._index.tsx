@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare, Users, Share2, BarChart3 } from "lucide-react";
+import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare, Users, Share2, BarChart3, Zap } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -103,6 +103,9 @@ export default function ProjectDetails() {
             </Link>
             <Link to={`/dashboard/projects/${project.id}/insights`} className="btn-outline flex items-center gap-2">
               <BarChart3 className="w-4 h-4" /> Insights
+            </Link>
+            <Link to={`/dashboard/projects/${project.id}/actions`} className="btn-outline flex items-center gap-2">
+              <Zap className="w-4 h-4" /> AI Actions
             </Link>
             <Link id="nav-members-btn" to={`/dashboard/projects/${project.id}/members`} className="btn-outline flex items-center gap-2">
               <Users className="w-4 h-4" /> Members
