@@ -49,7 +49,7 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
     { label: "Profile", icon: User, href: "/dashboard/settings" },
     { label: "Docs", icon: BookOpen, href: "/docs" },
     { label: "Support", icon: LifeBuoy, href: "mailto:support@sitegist.co", external: true },
-    { label: "Feedback", icon: MessageSquare, href: "/dashboard/feedback" },
+    { label: "Feedback", icon: MessageSquare, href: "mailto:support@sitegist.co?subject=SiteGist%20Feedback", external: true },
     { label: "Admin", icon: Database, href: "/dashboard/admin" },
   ];
 
@@ -162,15 +162,15 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
         </div>
       </main>
 
-      {/* Vertical Feedback Button */}
-      <button 
-        type="button"
+      {/* Vertical Feedback Button — opens a feedback email (was a dead button). */}
+      <a
+        href="mailto:support@sitegist.co?subject=SiteGist%20Feedback"
         className="fixed right-0 top-1/2 -translate-y-1/2 translate-x-[calc(50%-12px)] hover:translate-x-0 transition-all duration-300 z-40 bg-brand-dark text-white px-5 py-2.5 rounded-l-2xl font-bold text-xs uppercase tracking-widest flex items-center gap-3 shadow-2xl vertical-rl rotate-180"
         style={{ writingMode: 'vertical-rl' }}
       >
         <MessageSquare className="w-4 h-4 rotate-90" />
         Feedback
-      </button>
+      </a>
 
       {/* Floating support chat widget — the real, functional ChatWidget so it
           actually opens and matches the rest of the site (was a dead decorative

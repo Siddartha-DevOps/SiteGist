@@ -58,20 +58,56 @@ export async function enqueueSourceIngestion(projectId: string, sourceId: string
 
 /** Enqueue many sources at once (fan-out). */
 export async function enqueueManySourceIngestions(
-  items: { projectId: string; sourceId: string }[]
+  items: { projectId: string; sourceId: string }[],
+  opts: { maxInline?: number } = {}
 ): Promise<void> {
   if (items.length === 0) return;
   if (isAsyncIngestionEnabled()) {
     await inngest.send(items.map(i => ({ name: INGEST_SOURCE_EVENT, data: i })));
     return;
   }
-  for (const i of items) {
+  // Inline mode: process up to `maxInline` now for instant feedback; the rest stay
+  // "queued" for the client-driven drain (/api/ingest/drain) to pick up. This keeps
+  // large batches (e.g. a whole sitemap) from blocking/timing-out a single request.
+  // Background callers (scheduled sync) omit maxInline to process everything.
+  const limit = opts.maxInline ?? items.length;
+  for (let i = 0; i < items.length && i < limit; i++) {
     try {
-      await ingestKnowledgeSource(i.sourceId);
+      await ingestKnowledgeSource(items[i].sourceId);
     } catch (err) {
-      console.error(`[Ingestion] Inline fallback failed for source ${i.sourceId}:`, err);
+      console.error(`[Ingestion] Inline fallback failed for source ${items[i].sourceId}:`, err);
     }
   }
+}
+
+/**
+ * Process a bounded batch of "queued" sources for a project. Claims each row
+ * atomically (queued → crawling) so concurrent drainers never double-process the
+ * same source, then ingests the claimed ones. Returns how many it processed and
+ * how many remain queued, so a client can keep calling until the queue drains.
+ */
+export async function drainQueuedSources(projectId: string, batch = 4): Promise<{ processed: number; remaining: number }> {
+  const candidates = await prisma.knowledgeSource.findMany({
+    where: { projectId, status: "queued" },
+    take: batch,
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+
+  const claimed: string[] = [];
+  for (const c of candidates) {
+    // Atomic claim: only one drainer can flip queued → crawling.
+    const res = await prisma.knowledgeSource.updateMany({
+      where: { id: c.id, status: "queued" },
+      data: { status: "crawling" },
+    });
+    if (res.count === 1) claimed.push(c.id);
+  }
+
+  await Promise.allSettled(claimed.map(id => ingestKnowledgeSource(id)));
+
+  const remaining = await prisma.knowledgeSource.count({ where: { projectId, status: "queued" } });
+  return { processed: claimed.length, remaining };
 }
 
 async function setStatus(
