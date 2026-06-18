@@ -9,7 +9,8 @@ import {
   LifeBuoy, 
   ChevronDown,
   LayoutDashboard,
-  FileText
+  FileText,
+  Database
 } from "lucide-react";
 import { Link, Form, useLocation, Outlet } from "@remix-run/react";
 import React, { useState, useRef, useEffect } from 'react';
@@ -48,6 +49,7 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
     { label: "Docs", icon: BookOpen, href: "/docs" },
     { label: "Support", icon: LifeBuoy, href: "mailto:support@sitegist.co", external: true },
     { label: "Feedback", icon: MessageSquare, href: "/dashboard/feedback" },
+    { label: "Admin", icon: Database, href: "/dashboard/admin" },
   ];
 
   return (

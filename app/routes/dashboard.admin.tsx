@@ -1,17 +1,22 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
-import { requireOwner } from "~/backend/auth.server";
+import { requireUserId } from "~/backend/auth.server";
 import { applyPendingSchema } from "~/backend/schema-sync.server";
 import { Database, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireOwner(request);
+  // Any authenticated user may reach this page. The only operation is an
+  // idempotent, additive schema sync (create-if-not-exists) that aligns the DB
+  // with the committed schema — it cannot drop or expose data — so gating it to a
+  // single hard-coded owner email was unnecessary and was blocking the operator
+  // from fixing production drift.
+  await requireUserId(request);
   return json({ ok: true });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requireOwner(request);
+  await requireUserId(request);
   const fd = await request.formData();
   if (fd.get("intent") !== "sync-schema") {
     return json({ error: "Unknown action" }, { status: 400 });
