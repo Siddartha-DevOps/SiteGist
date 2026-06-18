@@ -15,6 +15,7 @@ import {
 import { Link, Form, useLocation, Outlet } from "@remix-run/react";
 import React, { useState, useRef, useEffect } from 'react';
 import { Logo } from "~/frontend/components/Logo";
+import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface DashboardLayoutPageProps {
@@ -171,19 +172,10 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
         Feedback
       </button>
 
-      {/* Floating Chat Widget with Logo */}
-      <div className="fixed bottom-8 right-8 z-40">
-        <button className="group relative w-14 h-14 bg-primary rounded-full shadow-2xl shadow-primary/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all">
-          <div className="absolute -top-12 right-0 bg-brand-dark text-white px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl">
-            Chat with us
-            <div className="absolute bottom-0 right-5 translate-y-1/2 w-2 h-2 bg-brand-dark rotate-45"></div>
-          </div>
-          <div className="bg-white rounded-lg flex items-center justify-center shadow-inner overflow-hidden ring-1 ring-white/20">
-            <Logo size="sm" hideText className="scale-[0.6]" />
-          </div>
-          <div className="absolute top-0 right-0 w-3.5 h-3.5 bg-brand-online border-2 border-primary rounded-full"></div>
-        </button>
-      </div>
+      {/* Floating support chat widget — the real, functional ChatWidget so it
+          actually opens and matches the rest of the site (was a dead decorative
+          button with no onClick/panel). */}
+      <ChatWidget />
     </div>
 
   );

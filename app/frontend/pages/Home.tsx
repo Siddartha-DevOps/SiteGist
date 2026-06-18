@@ -17,7 +17,6 @@ import {
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { Logo } from "~/frontend/components/Logo";
-import { ChatWidget } from "~/frontend/components/ChatWidget";
 import { Footer } from "~/frontend/components/Footer";
 import { Header } from "~/frontend/components/Header";
 import { CTAButton } from "~/frontend/components/CTAButton";
@@ -39,7 +38,6 @@ export function HomePage() {
       </main>
 
       <Footer />
-      <ChatWidget />
     </div>
   );
 }
