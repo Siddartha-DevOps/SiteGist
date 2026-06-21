@@ -249,7 +249,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
   if (!portkeyApiKey || !cohereVirtualKey) {
     console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
-    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 
   // Diagnostic (masked)
@@ -279,11 +279,11 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     }
 
     const data = await response.json();
-    const rerankedMatches = data.results.map((result: any) => documents[result.index]);
+    const rerankedMatches = data.results.map((result: any) => ({ ...documents[result.index], relevanceScore: result.relevance_score ?? 0 }));
     return rerankedMatches;
   } catch (error) {
     console.error("Portkey Rerank error:", error);
-    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 }
 
@@ -925,6 +925,21 @@ export async function* streamRAG(
         return;
       }
 
+      // Grounding / faithfulness gate: if even the best retrieved document is only
+      // weakly relevant to the question, abstain instead of answering from thin
+      // context (anti-hallucination). Tunable + off by default — set
+      // RAG_MIN_RELEVANCE (e.g. 0.3 for vector scores, ~0.05 for Cohere rerank
+      // scores) after watching the logged values for your data.
+      const topRelevance = Math.max(0, ...rankedSources.map((s: any) => s.relevanceScore ?? s.score ?? 0));
+      const minRelevance = parseFloat(process.env.RAG_MIN_RELEVANCE || "0");
+      console.log(`[Grounding] top relevance=${topRelevance.toFixed(4)} (abstain threshold=${minRelevance})`);
+      if (minRelevance > 0 && topRelevance < minRelevance) {
+        console.log(`[Grounding] top relevance ${topRelevance.toFixed(4)} < ${minRelevance} — abstaining to avoid a low-confidence answer.`);
+        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
+        yield fallbackMessage;
+        return;
+      }
+
       citationMetadata = rankedSources
         .filter((s: any) => s.url)
         .map((s: any) => ({ url: s.url, title: s.title }))
@@ -1040,7 +1055,7 @@ How it works:
 
   STRICT RULES:
   1. BASE YOUR ANSWER ONLY ON THE "KNOWLEDGE CONTEXT" ABOVE AND THE SYSTEM INSTRUCTIONS.
-  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER, say (translated into the required language): "${fallbackLine}"
+  2. IF THE CONTEXT DOES NOT CONTAIN THE ANSWER — or is only loosely/weakly related to the question — DO NOT GUESS or use outside knowledge; say (translated into the required language): "${fallbackLine}"
   3. DO NOT HALLUCINATE OR INVENT FACTS THAT ARE NOT PRESENT IN THE CONTEXT.
   4. Use professional, concise PLAIN TEXT.
   5. DO NOT use markdown symbols. NO stars (*), NO bolding (**), NO highlights.
