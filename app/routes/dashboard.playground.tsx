@@ -124,8 +124,8 @@ export default function Playground() {
   };
 
   return (
-    <div className="h-[calc(100vh-12rem)] flex flex-col">
-      <div className="flex items-center justify-between mb-8">
+    <div className="h-[calc(100vh-7rem)] flex flex-col">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <Link to={`/dashboard/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-2">
             <ChevronLeft className="w-4 h-4" /> Back to project
@@ -140,7 +140,8 @@ export default function Playground() {
 
       <div className="flex-1 bg-white border border-zinc-100 rounded-[40px] flex flex-col overflow-hidden shadow-xl shadow-zinc-200/20">
         {/* Chat Area */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-10 space-y-8">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-8">
+          <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
             <div className="text-center py-20 bg-zinc-50/50 rounded-[32px] border border-zinc-100 border-dashed">
               <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
@@ -155,14 +156,14 @@ export default function Playground() {
           
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex gap-4 max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className={`flex gap-4 max-w-[90%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
                   msg.role === 'user' ? 'bg-zinc-900' : 'bg-primary'
                 }`}>
                   {msg.role === 'user' ? <div className="text-white text-xs font-bold">ME</div> : <Bot className="text-white w-5 h-5" />}
                 </div>
                 <div className="flex flex-col">
-                  <div className={`p-6 rounded-[32px] text-base leading-relaxed prose prose-zinc max-w-none ${
+                  <div className={`p-6 rounded-[32px] text-lg leading-relaxed prose prose-zinc max-w-none ${
                     msg.role === 'user' 
                       ? 'bg-zinc-900 text-white rounded-tr-none' 
                       : 'bg-zinc-100 text-zinc-800 rounded-tl-none'
@@ -212,6 +213,7 @@ export default function Playground() {
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Input Area */}
