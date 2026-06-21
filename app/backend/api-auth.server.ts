@@ -1,6 +1,7 @@
 import { json } from "@remix-run/node";
 import crypto from "crypto";
 import { prisma } from "~/database/db.server";
+import { getRedis } from "~/lib/redis.server";
 
 const API_KEY_PREFIX = "sk_live_";
 
@@ -41,4 +42,32 @@ export async function requireApiKey(request: Request) {
     .catch(() => {});
 
   return apiKey.user;
+}
+
+/**
+ * Per-user, fixed-window API rate limit (default 120 req/min, override via
+ * API_RATE_LIMIT_PER_MIN). THROWS a JSON 429 Response when exceeded. Fails open
+ * if Redis isn't configured/reachable so the API never goes down on a cache blip.
+ */
+export async function enforceApiRateLimit(userId: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return; // no limiter configured → fail open
+  const limit = parseInt(process.env.API_RATE_LIMIT_PER_MIN || "120", 10);
+  const bucket = Math.floor(Date.now() / 60000);
+  const key = `apilimit:${userId}:${bucket}`;
+
+  let count: number;
+  try {
+    count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 70);
+  } catch {
+    return; // Redis error → fail open
+  }
+
+  if (count > limit) {
+    throw json(
+      { error: "rate_limited", message: `API rate limit of ${limit} requests/min exceeded.` },
+      { status: 429, headers: { "Retry-After": "60" } }
+    );
+  }
 }

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
-import { requireApiKey } from "~/backend/api-auth.server";
+import { requireApiKey, enforceApiRateLimit } from "~/backend/api-auth.server";
 import { streamRAG } from "~/ai-layer/ai.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -10,6 +10,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const user = await requireApiKey(request);
+  await enforceApiRateLimit(user.id);
 
   const body = await request.json().catch(() => null);
   if (!body) return json({ error: "Invalid JSON body." }, { status: 400 });

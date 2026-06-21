@@ -27,17 +27,43 @@ export async function sendWebhook(
   };
 
   const body = JSON.stringify(payload);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-SiteGist-Event': event,
+    'X-SiteGist-Timestamp': payload.timestamp,
+  };
 
   // HMAC signature — lets advanced users verify the request is from SiteGist
-  // Zapier ignores this header; custom integrations can validate it
+  // Zapier ignores this header; custom integrations can validate it.
   const secret = process.env.WEBHOOK_SECRET;
   if (secret) {
     const sig = createHmac('sha256', secret).update(body).digest('hex');
     headers['X-SiteGist-Signature'] = `sha256=${sig}`;
   }
 
-  await fetch(webhookUrl, { method: 'POST', headers, body }).catch(err =>
-    console.error(`[Webhook] Failed to deliver ${event}:`, err)
-  );
+  // Deliver with retries + exponential backoff. 4xx (except 429) are permanent
+  // client errors and are not retried; 5xx / 429 / network errors are.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) return;
+      if (res.status < 500 && res.status !== 429) {
+        console.error(`[Webhook] ${event} rejected with ${res.status} (no retry).`);
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        console.error(`[Webhook] Failed to deliver ${event} after ${maxAttempts} attempts:`, err);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, attempt * 500)); // 0.5s, 1s
+    }
+  }
 }

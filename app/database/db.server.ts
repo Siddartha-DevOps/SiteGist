@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { withAccelerate } from "@prisma/extension-accelerate";
+import { integrationCryptoExtension } from "~/lib/crypto.server";
 import fs from "fs";
 import path from "path";
 
@@ -568,8 +569,12 @@ function getClient(useFallback = false): any {
     }
   });
 
+  // Encrypt/decrypt Integration secrets at rest (outermost so it wraps the
+  // failover layer): no-op unless ENCRYPTION_KEY is set.
+  const cryptoClient = (client as any).$extends(integrationCryptoExtension);
+
   // Skip early eager logging. Active query endpoints and startup config hooks handle the connection check.
-  return client as any;
+  return cryptoClient as any;
 }
 
 type ExtendedPrismaClient = PrismaClient;
