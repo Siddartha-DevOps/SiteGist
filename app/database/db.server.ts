@@ -492,7 +492,8 @@ function getClient(useFallback = false): any {
 
           const maxAttempts = 2;
           let attempt = 0;
-          
+          let triedSchemaHeal = false;
+
           while (attempt < maxAttempts) {
             attempt++;
             try {
@@ -553,7 +554,28 @@ function getClient(useFallback = false): any {
                 await new Promise((resolve) => setTimeout(resolve, backoffMs));
                 continue;
               }
-              
+
+              // Schema-drift self-heal: if a column/table is missing (e.g. the DB
+              // hasn't received the latest migrations), apply the idempotent,
+              // additive pending migrations ONCE and retry — so the app recovers
+              // automatically instead of failing with "column ... does not exist".
+              const isUndefinedSchema =
+                errMsg.includes("42703") || errMsg.includes("42P01") ||
+                (errMsg.includes("does not exist") && (errMsg.includes("column") || errMsg.includes("relation")));
+              if (isUndefinedSchema && !triedSchemaHeal) {
+                triedSchemaHeal = true;
+                try {
+                  const { ensureSchemaApplied, isSchemaSyncing } = await import("~/backend/ensure-schema.server");
+                  if (!isSchemaSyncing()) {
+                    await ensureSchemaApplied();
+                    attempt = 0; // give the healed query a fresh retry
+                    continue;
+                  }
+                } catch (healErr: any) {
+                  console.error("[Database Connection] Schema auto-heal failed:", healErr?.message);
+                }
+              }
+
               // Transient/unknown error after retries: do NOT permanently latch
               // the whole instance into offline mock mode — that makes real data
               // (e.g. the user's projects) vanish on every subsequent query until
