@@ -1089,86 +1089,75 @@ How it works:
 
   try {
     yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-    if (gemini && !(wantsOpenAI && openai)) {
+    // Each provider as a local async generator so we can run them in a preference
+    // order and fall back cleanly. OpenAI is preferred by default because a
+    // free-tier Gemini key can be quota-exhausted (HTTP 429); only an explicit
+    // Gemini model choice tries Gemini first.
+    async function* runGemini(): AsyncGenerator<string> {
+      if (!gemini || (wantsOpenAI && openai)) return;
       try {
-        console.log(`[RAG Audit] Stage 6: Calling Gemini ${geminiModel} stream...`);
-        
+        console.log(`[RAG Audit] Calling Gemini ${geminiModel} stream...`);
         const result = await gemini.models.generateContentStream({
           model: geminiModel,
           contents: prompt,
-          config: {
-            maxOutputTokens: GEMINI_CHAT_MAX_TOKENS
-          }
+          config: { maxOutputTokens: GEMINI_CHAT_MAX_TOKENS },
         });
-        
         for await (const chunk of result) {
           try {
             const chunkText = chunk.text;
-            if (chunkText) {
-              fullAnswer += chunkText;
-              yield chunkText;
-            }
+            if (chunkText) { fullAnswer += chunkText; yield chunkText; }
           } catch (chunkError: any) {
-            console.warn("[RAG Audit] Stage 7: Error parsing Gemini chunk:", chunkError);
+            console.warn("[RAG Audit] Error parsing Gemini chunk:", chunkError);
           }
         }
       } catch (e: any) {
-        console.error("[RAG Audit] Stage 6/7 Gemini Error Detail:", e);
+        console.error("[RAG Audit] Gemini Error Detail:", e);
         let errorMsg = e.message || String(e);
         const diag = getDiagnosticInfo(process.env[_geminiFoundVar]);
-        
         if (errorMsg.includes("API key not valid") || errorMsg.includes("API key expired") || errorMsg.includes("400") || errorMsg.includes("INVALID_ARGUMENT") || errorMsg.includes("key expired")) {
-           errorMsg = `[API_KEY_ERROR] Key rejected (EXPIRED or INVALID).
-           Diagnostic: ${diag}. 
-           
-           Action: Create a NEW key at aistudio.google.com/app/apikey and paste it into Settings. Ensure you copy the FULL secret (no stars).`;
-        } else if (errorMsg.includes("quota")) {
-           errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached. Please wait a few minutes or use OpenAI.`;
+          errorMsg = `[API_KEY_ERROR] Gemini key rejected (EXPIRED or INVALID). Diagnostic: ${diag}. Create a NEW key at aistudio.google.com/app/apikey.`;
+        } else if (errorMsg.includes("quota") || errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+          errorMsg = `[QUOTA_EXCEEDED] Gemini API quota reached (free tier). Falling back to OpenAI or enable billing on the Gemini project.`;
         }
         lastError = { message: errorMsg || "Gemini connection failed" };
       }
     }
 
-    if (openai && !fullAnswer) {
+    async function* runOpenAI(): AsyncGenerator<string> {
+      if (!openai) return;
       try {
         const model = openaiModelPref;
         const maxTokens = parseInt(process.env.PORTKEY_MAX_TOKENS || "2048", 10);
-        
-        console.log(`[RAG Audit] Stage 8: Calling OpenAI ${model}...`);
+        console.log(`[RAG Audit] Calling OpenAI ${model}...`);
         const stream = await (openai as any).chat.completions.create({
-          model: model,
+          model,
           stream: true,
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxTokens,
-        }, { timeout: 20000 }); // 20s timeout
-
+        }, { timeout: 20000 });
         for await (const chunk of stream) {
           const content = chunk.choices[0]?.delta?.content || "";
-          if (content) {
-            fullAnswer += content;
-            yield content;
-          }
+          if (content) { fullAnswer += content; yield content; }
         }
       } catch (e: any) {
-         console.error("[RAG Audit] OpenAI Error:", e);
-         let errorMsg = e.message || String(e);
-         const diag = getDiagnosticInfo(process.env[_openaiFoundVar]);
-         
-         if (errorMsg.includes("Invalid API Key") || errorMsg.includes("Incorrect API key") || errorMsg.includes("401") || errorMsg.includes("invalid_api_key")) {
-            errorMsg = `[API_KEY_INVALID] OpenAI rejected the key. 
-            Diagnostic: ${diag}. 
-            Action: 
-            1. Go to platform.openai.com/api-keys. 
-            2. Click "+ Create new secret key".
-            3. Copy the secret IMMEDIATELY. You only get ONE chance to see it!
-            4. If you see "sk-proj-****" in a list, it's MASKED. Create a new one.`;
-            if (diag.includes("MASKED") || diag.includes("*")) {
-              errorMsg += "\n\nCRITICAL: Your key has asterisks (*). You copied the MASKED version. You must click 'Create new secret key' and copy the text shown in the popup!";
-            }
-         }
-         lastError = { message: errorMsg || "OpenAI connection failed" };
+        console.error("[RAG Audit] OpenAI Error:", e);
+        let errorMsg = e.message || String(e);
+        const diag = getDiagnosticInfo(process.env[_openaiFoundVar]);
+        if (errorMsg.includes("Invalid API Key") || errorMsg.includes("Incorrect API key") || errorMsg.includes("401") || errorMsg.includes("invalid_api_key")) {
+          errorMsg = `[API_KEY_INVALID] OpenAI rejected the key. Diagnostic: ${diag}. Create a new secret key at platform.openai.com/api-keys and paste the FULL value (no asterisks).`;
+        } else if (errorMsg.includes("insufficient_quota") || errorMsg.includes("exceeded your current quota") || errorMsg.includes("billing")) {
+          errorMsg = `[OPENAI_QUOTA] OpenAI key has no credits/quota. Add billing at platform.openai.com/account/billing.`;
+        }
+        lastError = { message: errorMsg || "OpenAI connection failed" };
       }
-    } 
+    }
+
+    // OpenAI first unless the bot explicitly selected a Gemini model.
+    const sequence = (!!openai && !wantsGemini) ? [runOpenAI, runGemini] : [runGemini, runOpenAI];
+    for (const run of sequence) {
+      if (fullAnswer) break;
+      yield* run();
+    }
   } finally {
     clearTimeout(generationTimeout);
   }
