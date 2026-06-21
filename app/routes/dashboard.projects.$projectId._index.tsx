@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare, Users, Share2, BarChart3, Zap } from "lucide-react";
+import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare, Users, Share2, BarChart3, Zap, CheckCircle2, Circle, ArrowRight } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -69,6 +69,18 @@ export default function ProjectDetails() {
   const { project, messageCount, unanswered, baseUrl } = useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
 
+  // First-run onboarding checklist — derived from real project state; it disappears
+  // once the core steps (train, customize, test) are done.
+  const _settings = (project.settings as any) || {};
+  const onboardingSteps = [
+    { label: "Train your chatbot", desc: "Add a website, files, or text", done: project.knowledgeSources.length > 0, href: `/dashboard/projects/${project.id}/train`, cta: "Add sources" },
+    { label: "Customize appearance", desc: "Name, color, and greeting", done: !!(_settings.systemPrompt || _settings.branding?.assistantName || _settings.branding?.primaryColor), href: `/dashboard/projects/${project.id}/settings`, cta: "Customize" },
+    { label: "Test your AI", desc: "Try it in the Playground", done: messageCount > 0, href: `/dashboard/playground?projectId=${project.id}`, cta: "Open Playground" },
+    { label: "Add to your website", desc: "Copy the embed snippet", done: false, href: "#embed-script", cta: "Get code" },
+  ];
+  const coreDone = onboardingSteps.slice(0, 3).every((s) => s.done);
+  const doneCount = onboardingSteps.filter((s) => s.done).length;
+
   return (
     <div>
       <div className="mb-10">
@@ -116,6 +128,40 @@ export default function ProjectDetails() {
           </div>
         </div>
       </div>
+
+      {!coreDone && (
+        <div className="mb-12 bg-gradient-to-br from-primary/5 to-white border border-primary/15 rounded-[32px] p-8">
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <div>
+              <h2 className="text-xl font-black text-brand-dark flex items-center gap-2">
+                <Zap className="w-5 h-5 text-primary" /> Get your chatbot live
+              </h2>
+              <p className="text-sm text-text-muted mt-1">{doneCount} of {onboardingSteps.length} steps done</p>
+            </div>
+            <div className="w-40 h-2 bg-zinc-100 rounded-full overflow-hidden">
+              <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(doneCount / onboardingSteps.length) * 100}%` }} />
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {onboardingSteps.map((step, i) => (
+              <div key={i} className="flex items-center gap-4 p-4 rounded-2xl border bg-white border-zinc-100">
+                {step.done
+                  ? <CheckCircle2 className="w-6 h-6 text-green-500 shrink-0" />
+                  : <Circle className="w-6 h-6 text-zinc-300 shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <p className={`font-bold text-sm ${step.done ? "text-zinc-400 line-through" : "text-brand-dark"}`}>{step.label}</p>
+                  <p className="text-xs text-text-muted">{step.desc}</p>
+                </div>
+                {!step.done && (
+                  <Link to={step.href} className="text-xs font-bold text-primary whitespace-nowrap inline-flex items-center gap-1 hover:gap-2 transition-all">
+                    {step.cta} <ArrowRight className="w-3 h-3" />
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm transition-all hover:shadow-md">
@@ -178,7 +224,7 @@ export default function ProjectDetails() {
             </div>
           </div>
 
-          <div className="bg-white p-10 rounded-[40px] border border-zinc-100">
+          <div id="embed-script" className="bg-white p-10 rounded-[40px] border border-zinc-100 scroll-mt-24">
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
               <Code className="text-primary w-6 h-6" /> Embed Script
             </h2>
