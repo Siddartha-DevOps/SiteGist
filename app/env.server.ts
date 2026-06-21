@@ -2,6 +2,7 @@
  * Centralized Environment Manager and Configuration System
  * Validates and stores environment variables to ensure production safety and early failure.
  */
+import { z } from "zod";
 
 export interface EnvSchema {
   NODE_ENV: "development" | "production" | "test";
@@ -25,13 +26,29 @@ export interface EnvSchema {
 export const EMBEDDING_PROVIDER = (typeof process !== "undefined" && process.env.EMBEDDING_PROVIDER === "gemini" ? "gemini" : "openai") as "openai" | "gemini";
 export const EMBEDDING_DIMENSION = EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
 
-// Keep a clean list of required variables
-const REQUIRED_VARS: (keyof EnvSchema)[] = [
-  "DATABASE_URL",
-  "SESSION_SECRET",
-  "GEMINI_API_KEY",
-  "PINECONE_API_KEY",
-];
+// Zod schema for boot-time validation. Required vars must be non-empty; optional
+// vars are allowed to be undefined. The messages are surfaced verbatim at startup.
+const EnvZodSchema = z.object({
+  NODE_ENV: z.enum(["development", "production", "test"]),
+  DATABASE_URL: z.string().min(1, "required — Postgres connection string."),
+  SESSION_SECRET: z
+    .string()
+    .min(1, "required.")
+    .refine((v) => v !== "DEFAULT_SESSION_SECRET", "must be set to a strong random value (currently the insecure default)."),
+  GEMINI_API_KEY: z.string().min(1, "required (or GOOGLE_API_KEY) — default LLM + embeddings."),
+  PINECONE_API_KEY: z.string().min(1, "required — vector store."),
+  PINECONE_INDEX: z.string().min(1, "required — Pinecone index name."),
+  FIRECRAWL_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  PORTKEY_API_KEY: z.string().optional(),
+  PORTKEY_COHERE_VIRTUAL_KEY: z.string().optional(),
+  COHERE_RERANK_MODEL: z.string().optional(),
+  CLOUDFLARE_TURNSTILE_SECRET_KEY: z.string().optional(),
+  PADDLE_API_KEY: z.string().optional(),
+  UPSTASH_REDIS_REST_URL: z.string().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+  EMBEDDING_PROVIDER: z.enum(["openai", "gemini"]),
+});
 
 function cleanValue(val: string | undefined): string | undefined {
   if (!val) return undefined;
@@ -90,31 +107,25 @@ export const env = new Proxy({} as EnvSchema, {
  */
 export async function validateEnvAtStartup() {
   const currentEnv = getCleanEnv();
-  const missingKeys: string[] = [];
-
-  for (const key of REQUIRED_VARS) {
-    const val = currentEnv[key];
-    if (!val || val.trim() === "" || val.includes("placeholder")) {
-      missingKeys.push(key);
-    }
-  }
-
   const isProduction = currentEnv.NODE_ENV === "production";
 
-  if (missingKeys.length > 0) {
+  // Schema-validate via zod and surface precise, per-variable messages.
+  const parsed = EnvZodSchema.safeParse(currentEnv);
+  if (!parsed.success) {
     console.error("================================================================================");
-    console.error("CRITICAL CONFIGURATION ERROR: MISSING REQUIRED ENVIRONMENT VARIABLES");
-    console.error("The following environment variables are missing but required for operation:");
-    for (const key of missingKeys) {
-      console.error(` - ${key}`);
+    console.error("CONFIGURATION ERROR: invalid/missing environment variables");
+    for (const issue of parsed.error.issues) {
+      console.error(` - ${issue.path.join(".")}: ${issue.message}`);
     }
     console.error("--------------------------------------------------------------------------------");
-    console.error("Please navigate to Settings -> Environment Variables in AI Studio and define them.");
+    console.error("Set these in your host's Environment Variables and redeploy.");
     console.error("================================================================================");
 
-    if (isProduction) {
-      console.error("DEPLOYMENT WARNING: Startup validation failed. Logging warning but continuing boot to avoid healthcheck failure.");
-    }
+    console.error(
+      isProduction
+        ? "DEPLOYMENT WARNING: env validation failed. Continuing boot to avoid healthcheck failure — fix the above ASAP."
+        : "Fix the above before deploying to production."
+    );
   }
 
   // Retrieval-quality diagnostic: reranking is the single biggest answer-quality
