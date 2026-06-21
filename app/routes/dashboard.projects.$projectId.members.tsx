@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, Form, Link, useNavigation, useActionData } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { recordAudit } from "~/lib/audit.server";
 import { ArrowLeft, UserPlus, Trash2, Shield, Eye, Loader2, Bot, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
@@ -106,6 +107,7 @@ export async function action({ params, request }: ActionFunctionArgs) {
           role: roleInput === "ADMIN" ? "ADMIN" : "VIEWER"
         }
       });
+      recordAudit({ userId, action: "member.invite", projectId, target: email, metadata: { role: roleInput === "ADMIN" ? "ADMIN" : "VIEWER" }, request });
       return json({ success: "Member invited successfully" });
     } catch (err: any) {
       return json({ error: err?.message || "Failed to invite member" }, { status: 500 });
@@ -123,6 +125,7 @@ export async function action({ params, request }: ActionFunctionArgs) {
       await prisma.projectMember.delete({
         where: { id: memberId }
       });
+      recordAudit({ userId, action: "member.remove", projectId, target: memberId, request });
       return json({ success: "Member removed successfully" });
     } catch (err: any) {
       return json({ error: err?.message || "Failed to remove member" }, { status: 500 });

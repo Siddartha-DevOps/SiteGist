@@ -4,6 +4,7 @@ import { useLoaderData, Form, useNavigation, useActionData } from "@remix-run/re
 import { requireUserId, getUser, getUserSession, destroySession } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { generateApiKey, hashApiKey } from "~/backend/api-auth.server";
+import { recordAudit } from "~/lib/audit.server";
 import { 
   Save, 
   User, 
@@ -190,6 +191,7 @@ export async function action({ request }: ActionFunctionArgs) {
         last4: fullKey.slice(-4),
       },
     });
+    recordAudit({ userId, action: "apikey.create", target: name, metadata: { prefix: fullKey.slice(0, 12) }, request });
     // Return the plaintext key ONCE so the UI can show it
     return json({ success: true, newApiKey: fullKey, activeTab: "profile" });
   }
@@ -200,6 +202,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: keyId, userId },
       data: { revokedAt: new Date() },
     });
+    recordAudit({ userId, action: "apikey.revoke", target: keyId, request });
     return json({ success: true, message: "API key revoked.", activeTab: "profile" });
   }
 

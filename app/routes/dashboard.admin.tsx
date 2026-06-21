@@ -1,9 +1,10 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
+import { prisma } from "~/database/db.server";
 import { applyPendingSchema } from "~/backend/schema-sync.server";
-import { Database, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Database, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, ShieldCheck, ScrollText } from "lucide-react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // Any authenticated user may reach this page. The only operation is an
@@ -11,8 +12,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // with the committed schema — it cannot drop or expose data — so gating it to a
   // single hard-coded owner email was unnecessary and was blocking the operator
   // from fixing production drift.
-  await requireUserId(request);
-  return json({ ok: true });
+  const userId = await requireUserId(request);
+
+  // Recent audit-log entries for the operator's own actions + their projects.
+  // Defensive: the AuditLog table may not exist yet (run the schema sync first).
+  let auditLogs: Array<{ id: string; action: string; target: string | null; projectId: string | null; ip: string | null; createdAt: string }> = [];
+  try {
+    const projects = await prisma.project.findMany({ where: { userId }, select: { id: true } });
+    const projectIds = projects.map((p) => p.id);
+    const rows = await prisma.auditLog.findMany({
+      where: { OR: [{ userId }, { projectId: { in: projectIds } }] },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    auditLogs = rows as any;
+  } catch (e: any) {
+    console.error("[Admin] audit fetch failed (table may not exist yet):", e?.message);
+  }
+
+  return json({ ok: true, auditLogs });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -34,6 +52,7 @@ export default function AdminPage() {
   const data = useActionData<typeof action>() as
     | { result?: Awaited<ReturnType<typeof applyPendingSchema>>; error?: string }
     | undefined;
+  const { auditLogs } = useLoaderData<typeof loader>();
   const nav = useNavigation();
   const busy = nav.state !== "idle";
   const result = data?.result;
@@ -107,6 +126,44 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6">
+        <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+          <ScrollText className="w-5 h-5 text-gray-700" /> Audit log
+        </h2>
+        <p className="text-sm text-gray-600 mt-2">
+          Recent security-relevant actions — API keys, team members, integrations, settings, and deletions.
+        </p>
+
+        {auditLogs.length === 0 ? (
+          <div className="mt-4 text-sm text-gray-400 text-center py-8 rounded-xl border border-dashed border-gray-300">
+            No audit entries yet. Actions you take (or your team takes) will appear here.
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="py-2 pr-4 font-semibold">When</th>
+                  <th className="py-2 pr-4 font-semibold">Action</th>
+                  <th className="py-2 pr-4 font-semibold">Target</th>
+                  <th className="py-2 font-semibold">IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.map((log) => (
+                  <tr key={log.id} className="border-b border-gray-50">
+                    <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{new Date(log.createdAt).toLocaleString()}</td>
+                    <td className="py-2 pr-4"><span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">{log.action}</span></td>
+                    <td className="py-2 pr-4 text-gray-700 truncate max-w-[220px]">{log.target || "—"}</td>
+                    <td className="py-2 text-gray-400 font-mono text-xs">{log.ip || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
