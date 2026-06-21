@@ -23,6 +23,22 @@ model User {
   blogPosts        BlogPost[]
   apiKeys          ApiKey[]
   addons           UserAddon[]
+  auditLogs        AuditLog[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  action    String   // e.g. "apikey.create", "member.invite", "integration.connect"
+  target    String?  // human-readable subject (email, key prefix, provider, ...)
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([projectId])
 }
 
 model VerificationToken {

@@ -3,6 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { recordAudit } from "~/lib/audit.server";
 import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle, Headphones } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -16,6 +17,13 @@ export async function action({ params, request }: ActionFunctionArgs) {
 
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
+
+  // Audit every integration connect/disconnect across all providers in one place.
+  if (_action?.startsWith("disconnect_")) {
+    recordAudit({ userId, action: "integration.disconnect", projectId: project.id, target: _action.replace("disconnect_", ""), request });
+  } else if (_action?.startsWith("connect_")) {
+    recordAudit({ userId, action: "integration.connect", projectId: project.id, target: _action.replace("connect_", ""), request });
+  }
 
   // --- SLACK ---
   if (_action === "connect_slack") {

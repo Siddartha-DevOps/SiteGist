@@ -4,6 +4,7 @@ import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { hasRemoveBrandingAccess } from "~/lib/plans";
+import { recordAudit } from "~/lib/audit.server";
 import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock } from "lucide-react";
 import { useState } from "react";
 
@@ -87,6 +88,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         console.error("[Settings Delete Project] Force fallback delete failed:", innerErr);
       }
     }
+    recordAudit({ userId, action: "project.delete", projectId: params.projectId, request });
     return redirect("/dashboard");
   }
 
@@ -174,6 +176,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     },
   });
 
+  recordAudit({ userId, action: "project.settings.update", projectId: params.projectId, request });
   return json({ success: true, message: "Bot settings updated successfully" });
 }
 
