@@ -624,27 +624,27 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
  */
 function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () => void }) {
   return (
-    <div className="flex flex-col items-end gap-2 group">
-      <button
-        onClick={onClick}
-        className={`relative flex items-center justify-center transition-all duration-500 hover:scale-110 active:scale-90 focus:outline-none ${
-          isOpen ? "opacity-100" : "opacity-90 hover:opacity-100"
-        }`}
-      >
-      <div className="relative p-2">
-        <Logo 
-          size="lg" 
-          hideText 
-          className={`transition-all duration-500 ${
-            isOpen ? "scale-110 drop-shadow-2xl" : "drop-shadow-xl group-hover:drop-shadow-[0_10px_20px_rgba(108,92,231,0.4)]"
-          }`} 
-        />
-        {!isOpen && (
-          <div className="absolute top-2 right-2 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white shadow-sm pointer-events-none animate-pulse" />
-        )}
-      </div>
-      </button>
-    </div>
+    <button
+      onClick={onClick}
+      aria-label={isOpen ? "Close chat" : "Chat with us"}
+      className="group relative w-16 h-16 bg-primary rounded-full shadow-2xl shadow-primary/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 focus:outline-none"
+    >
+      {!isOpen && (
+        <span className="absolute -top-11 right-0 bg-brand-dark text-white px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl">
+          Chat with us
+        </span>
+      )}
+      {isOpen ? (
+        <X className="w-7 h-7 text-white" />
+      ) : (
+        <span className="bg-white rounded-2xl p-1.5 flex items-center justify-center shadow-inner">
+          <Logo size="sm" hideText />
+        </span>
+      )}
+      {!isOpen && (
+        <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-primary shadow-sm animate-pulse pointer-events-none" />
+      )}
+    </button>
   );
 }
 
