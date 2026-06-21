@@ -5,7 +5,7 @@ import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { getSitemapUrls } from "~/ai-layer/crawler.server";
 import { enqueueSourceIngestion, enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
-import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen } from "lucide-react";
+import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen, Github } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
@@ -188,6 +188,53 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     await enqueueSourceIngestion(params.projectId!, src.id);
     return json({ success: true, message: "Text content added and queued for training." });
+  }
+
+  if (method === "add_github") {
+    const repoInput = (formData.get("repoUrl") as string || "").trim();
+    const branchInput = (formData.get("branch") as string || "").trim() || undefined;
+    const { parseGithubRepo, getGithubDocFiles } = await import("~/ai-layer/crawler.server");
+    const parsed = parseGithubRepo(repoInput);
+    if (!parsed) {
+      return json({ error: "Enter a GitHub repo URL (https://github.com/owner/repo) or owner/repo." }, { status: 400 });
+    }
+    let files: { path: string; rawUrl: string }[] = [];
+    try {
+      const result = await getGithubDocFiles(parsed.owner, parsed.repo, branchInput);
+      files = result.files;
+    } catch (e: any) {
+      return json({ error: e?.message || "Could not read that GitHub repo." }, { status: 400 });
+    }
+    if (files.length === 0) {
+      return json({ error: "No markdown/docs files (.md, .mdx, .rst, .txt) found in that repo." }, { status: 400 });
+    }
+
+    const cap = Math.min(files.length, 300);
+    const toEnqueue: { projectId: string; sourceId: string }[] = [];
+    for (const f of files.slice(0, cap)) {
+      const existing = await prisma.knowledgeSource.findFirst({
+        where: { projectId: params.projectId, source: f.rawUrl, type: "github" },
+      });
+      const src = existing
+        ? await prisma.knowledgeSource.update({ where: { id: existing.id }, data: { status: "queued", error: null } })
+        : await prisma.knowledgeSource.create({
+            data: {
+              projectId: params.projectId!,
+              type: "github",
+              source: f.rawUrl,
+              title: `${parsed.owner}/${parsed.repo}: ${f.path}`,
+              status: "queued",
+            },
+          });
+      toEnqueue.push({ projectId: params.projectId!, sourceId: src.id });
+    }
+
+    await enqueueManySourceIngestions(toEnqueue, { maxInline: 3 });
+    const note = files.length > cap ? ` (first ${cap} of ${files.length})` : "";
+    return json({
+      success: true,
+      message: `Queued ${toEnqueue.length} file${toEnqueue.length !== 1 ? "s" : ""} from ${parsed.owner}/${parsed.repo}${note}. They'll show as Trained as they finish.`,
+    });
   }
 
   if (method === "add_youtube") {
@@ -621,6 +668,47 @@ export default function TrainProject() {
                   Crawl & Train
                 </button>
               </Form>
+
+              <div className="mt-10 pt-8 border-t border-zinc-100">
+                <h2 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                  <Github className="text-primary w-6 h-6" /> GitHub Repo
+                </h2>
+                <p className="text-sm text-text-muted mb-6">
+                  Train on a public repo's docs — every Markdown / .rst / .txt file is imported automatically.
+                </p>
+                <Form method="post" className="space-y-6">
+                  <input type="hidden" name="_action" value="add_github" />
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-bold mb-2">Repository</label>
+                      <input
+                        type="text"
+                        name="repoUrl"
+                        placeholder="https://github.com/owner/repo"
+                        required
+                        className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold mb-2">Branch <span className="text-text-muted font-normal">(optional)</span></label>
+                      <input
+                        type="text"
+                        name="branch"
+                        placeholder="main"
+                        className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isCrawling}
+                    className="w-full py-5 bg-zinc-900 text-white rounded-2xl font-black shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                  >
+                    {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : <Github className="w-5 h-5" />}
+                    Import Repo Docs
+                  </button>
+                </Form>
+              </div>
             </>
           )}
 
@@ -1222,8 +1310,9 @@ export default function TrainProject() {
                   source.type === 'file' ? 'bg-orange-50 text-orange-500 border-orange-100' :
                   'bg-zinc-50 text-zinc-500 border-zinc-100'
                 }`}>
-                  {source.type === 'web' ? <Globe className="w-6 h-6" /> : 
-                   source.type === 'file' ? <FileText className="w-6 h-6" /> : <Type className="w-6 h-6" />}
+                  {source.type === 'web' ? <Globe className="w-6 h-6" /> :
+                   source.type === 'file' ? <FileText className="w-6 h-6" /> :
+                   source.type === 'github' ? <Github className="w-6 h-6" /> : <Type className="w-6 h-6" />}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">

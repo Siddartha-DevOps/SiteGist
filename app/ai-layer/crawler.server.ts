@@ -387,6 +387,71 @@ export function resolveDocsSitemapUrl(input: string): { sitemapUrl: string; type
   return { sitemapUrl: `${base}/sitemap.xml`, type: "web" };
 }
 
+// ---- GitHub connector --------------------------------------------------------
+
+/** Parse a GitHub repo from a URL (https://github.com/owner/repo) or "owner/repo". */
+export function parseGithubRepo(input: string): { owner: string; repo: string } | null {
+  if (!input) return null;
+  const s = input.trim();
+  const m = s.match(/github\.com\/([^/\s]+)\/([^/\s#?]+)/i);
+  if (m) return { owner: m[1], repo: m[2].replace(/\.git$/i, "") };
+  const m2 = s.match(/^([\w.-]+)\/([\w.-]+)$/);
+  if (m2) return { owner: m2[1], repo: m2[2].replace(/\.git$/i, "") };
+  return null;
+}
+
+const GITHUB_DOC_EXT = /\.(md|mdx|markdown|rst|txt)$/i;
+
+/**
+ * Discover documentation/text files in a GitHub repo via the GitHub API (one or
+ * two calls: repo info for the default branch + the recursive git tree). Raw file
+ * contents are fetched later, per file, during ingestion, so a big repo drains a
+ * few files at a time. Set GITHUB_TOKEN to lift rate limits / read private repos.
+ */
+export async function getGithubDocFiles(
+  owner: string,
+  repo: string,
+  branch?: string
+): Promise<{ branch: string; files: { path: string; rawUrl: string }[] }> {
+  const headers: Record<string, string> = {
+    "User-Agent": "SiteGist",
+    Accept: "application/vnd.github+json",
+  };
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let resolvedBranch = branch?.trim();
+  if (!resolvedBranch) {
+    const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+    if (repoRes.status === 404) throw new Error(`Repo ${owner}/${repo} not found (private repos need a GITHUB_TOKEN).`);
+    if (repoRes.status === 403) throw new Error("GitHub API rate limit reached — try again later or set GITHUB_TOKEN.");
+    if (!repoRes.ok) throw new Error(`GitHub error (HTTP ${repoRes.status}).`);
+    const info: any = await repoRes.json();
+    resolvedBranch = info.default_branch || "main";
+  }
+
+  const treeRes = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(resolvedBranch!)}?recursive=1`,
+    { headers }
+  );
+  if (treeRes.status === 403) throw new Error("GitHub API rate limit reached — try again later or set GITHUB_TOKEN.");
+  if (!treeRes.ok) throw new Error(`Could not read repo tree (HTTP ${treeRes.status}).`);
+  const tree: any = await treeRes.json();
+  const items: any[] = Array.isArray(tree.tree) ? tree.tree : [];
+
+  const files = items
+    .filter((it) => it.type === "blob" && typeof it.path === "string" && GITHUB_DOC_EXT.test(it.path))
+    .map((it) => ({
+      path: it.path as string,
+      rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${resolvedBranch}/${(it.path as string)
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    }));
+
+  return { branch: resolvedBranch!, files };
+}
+
 export function chunkText(text: string, size = 1200, overlap = 200): string[] {
   if (!text || !text.trim()) return [];
 

@@ -154,6 +154,12 @@ export async function ingestKnowledgeSource(
       if (!transcript) throw new Error("No transcript available (captions may be disabled).");
       content = transcript;
       await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { content } });
+    } else if (source.type === "github") {
+      await setStatus(sourceId, "crawling", { error: null });
+      const res = await fetch(source.source, { headers: { "User-Agent": "SiteGist" } });
+      if (!res.ok) throw new Error(`Failed to fetch GitHub file (HTTP ${res.status}).`);
+      content = await res.text();
+      await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { content } });
     }
     // 'text' and 'file' already carry their extracted content on the row.
 
