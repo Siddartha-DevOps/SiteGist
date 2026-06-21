@@ -132,6 +132,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
   
   const slackWebhookUrl = formData.get("slackWebhookUrl") as string || "";
+
+  // Response language: "auto" (mirror the visitor's detected language) or a forced
+  // language name consumed by languageDirective() in the RAG prompt.
+  const language = (formData.get("language") as string || "auto").trim();
   
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
@@ -139,6 +143,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const settings = {
     systemPrompt,
     model,
+    language,
     allowedDomains,
     chatMode,
     rateLimitPerUser,
@@ -396,6 +401,49 @@ export default function ProjectSettings() {
                   </select>
                   <p className="mt-2 text-xs text-zinc-400">
                     Controls how incoming conversations are handled.
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="language" className="block text-sm font-bold mb-2">
+                    Response Language
+                  </label>
+                  <select
+                    id="language"
+                    name="language"
+                    defaultValue={currentSettings.language || "auto"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                  >
+                    <option value="auto">Auto-detect — reply in the visitor's language (95+)</option>
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish — Español</option>
+                    <option value="French">French — Français</option>
+                    <option value="German">German — Deutsch</option>
+                    <option value="Portuguese">Portuguese — Português</option>
+                    <option value="Italian">Italian — Italiano</option>
+                    <option value="Dutch">Dutch — Nederlands</option>
+                    <option value="Russian">Russian — Русский</option>
+                    <option value="Japanese">Japanese — 日本語</option>
+                    <option value="Korean">Korean — 한국어</option>
+                    <option value="Chinese">Chinese — 中文</option>
+                    <option value="Arabic">Arabic — العربية</option>
+                    <option value="Hebrew">Hebrew — עברית</option>
+                    <option value="Hindi">Hindi — हिन्दी</option>
+                    <option value="Bengali">Bengali — বাংলা</option>
+                    <option value="Tamil">Tamil — தமிழ்</option>
+                    <option value="Telugu">Telugu — తెలుగు</option>
+                    <option value="Thai">Thai — ไทย</option>
+                    <option value="Greek">Greek — Ελληνικά</option>
+                    <option value="Turkish">Turkish — Türkçe</option>
+                    <option value="Polish">Polish — Polski</option>
+                    <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
+                    <option value="Indonesian">Indonesian — Bahasa Indonesia</option>
+                    <option value="Ukrainian">Ukrainian — Українська</option>
+                    <option value="Swedish">Swedish — Svenska</option>
+                    <option value="Filipino">Filipino — Tagalog</option>
+                    <option value="Urdu">Urdu — اردو</option>
+                  </select>
+                  <p className="mt-2 text-xs text-zinc-400">
+                    Auto-detect mirrors each visitor's language. Or force every reply into one language regardless of how visitors write.
                   </p>
                 </div>
               </div>
