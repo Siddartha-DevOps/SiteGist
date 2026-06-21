@@ -1,10 +1,11 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
-import { requireApiKey } from "~/backend/api-auth.server";
+import { requireApiKey, enforceApiRateLimit } from "~/backend/api-auth.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requireApiKey(request);
+  await enforceApiRateLimit(user.id);
 
   const url = new URL(request.url);
   const chatbotId = url.searchParams.get("chatbotId");
