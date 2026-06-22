@@ -45,7 +45,7 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
     { label: "Chatbots", icon: LayoutDashboard, href: "/dashboard" },
     hasActiveSub
       ? { label: "Billing", icon: Sparkles, href: "/dashboard/billing" }
-      : { label: "Upgrade Plan", icon: Sparkles, href: "/pricing" },
+      : { label: "Start Trial", icon: Sparkles, href: "/pricing" },
     { label: "Profile", icon: User, href: "/dashboard/settings" },
     { label: "Docs", icon: BookOpen, href: "/docs" },
     { label: "Support", icon: LifeBuoy, href: "mailto:support@sitegist.co", external: true },
