@@ -81,10 +81,12 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-12">
         <div className="flex items-center gap-4">
           <h1 className="text-3xl font-bold text-brand-dark">Chatbots</h1>
-          <div className="px-3 py-1 bg-primary/10 text-primary text-[10px] font-black uppercase tracking-widest rounded-full leading-none flex items-center gap-1.5 ring-1 ring-primary/20">
-            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
-            Pro Plan Active
-          </div>
+          <Link
+            to="/docs"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/30 text-primary text-sm font-bold hover:bg-primary/5 transition-all"
+          >
+            <PlayCircle className="w-4 h-4" /> Watch Video Tutorial
+          </Link>
         </div>
         
         <Link 
