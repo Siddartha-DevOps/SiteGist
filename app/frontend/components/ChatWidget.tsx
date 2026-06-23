@@ -1,6 +1,5 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
-import { Logo } from "./Logo";
 import { SGMark } from "./SGMark";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -351,9 +350,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       {/* Header */}
       <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
         <div className="flex items-center gap-3 relative z-10">
-          <div className="w-10 h-10 flex items-center justify-center">
-            <Logo size="sm" hideText />
-          </div>
+          <SGMark className="w-10 h-10 rounded-xl shadow-sm" />
           <div>
             <p className="text-[11px] uppercase tracking-[0.2em] font-black flex items-center gap-1.5 bg-clip-text text-transparent bg-gradient-to-r from-[#155DEE] to-[#7C6EF0]">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
@@ -373,7 +370,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
         <div className="flex items-end gap-2">
           <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1.5 mb-1">
-            <Logo size="sm" hideText className="scale-75" />
+            <SGMark className="w-full h-full rounded" />
           </div>
           <div className="flex flex-col max-w-[85%]">
             <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-900 shadow-sm leading-relaxed relative group/msg">
@@ -409,7 +406,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           <div key={i} className={`flex items-end gap-2 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
             {msg.role === "assistant" && (
               <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
-                <Logo size="sm" hideText className="scale-75" />
+                <SGMark className="w-full h-full rounded" />
               </div>
             )}
             <div className={`flex flex-col max-w-[85%] relative group/msg`}>
@@ -532,7 +529,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
           <div className="flex items-end gap-2 text-left">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
-              <Logo size="sm" hideText className="scale-75" />
+              <SGMark className="w-full h-full rounded" />
             </div>
             <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 shadow-sm flex gap-1">
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
@@ -609,7 +606,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         </form>
         <div className="flex items-center justify-center gap-1.5 mt-4 group cursor-default">
            <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400">Powered by</span>
-           <Logo size="sm" hideText className="scale-75 transition-all opacity-30 grayscale group-hover:opacity-100 group-hover:grayscale-0" />
+           <SGMark className="w-4 h-4 rounded transition-all opacity-40 group-hover:opacity-100" />
            <span className="text-[10px] font-black uppercase tracking-tight -ml-1">
              <span className="text-zinc-800">Site</span><span className="text-[#155DEE]">Gist</span>
            </span>
@@ -662,13 +659,13 @@ export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   }, []);
 
   if (!mounted) return (
-    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
+    <div className="fixed bottom-2 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
        {/* Placeholder to avoid hydration mismatch */}
     </div>
   );
 
   return (
-    <div className="fixed bottom-4 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
+    <div className="fixed bottom-2 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
       <AnimatePresence mode="wait">
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} suggestions={suggestions} />}
       </AnimatePresence>
