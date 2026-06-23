@@ -659,13 +659,13 @@ export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   }, []);
 
   if (!mounted) return (
-    <div className="fixed bottom-2 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
+    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
        {/* Placeholder to avoid hydration mismatch */}
     </div>
   );
 
   return (
-    <div className="fixed bottom-2 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
+    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
       <AnimatePresence mode="wait">
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} suggestions={suggestions} />}
       </AnimatePresence>
