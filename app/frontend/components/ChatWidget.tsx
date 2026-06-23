@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { Logo } from "./Logo";
+import { SGMark } from "./SGMark";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -627,7 +628,7 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
     <button
       onClick={onClick}
       aria-label={isOpen ? "Close chat" : "Chat with us"}
-      className="group relative w-16 h-16 bg-primary rounded-full shadow-2xl shadow-primary/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 focus:outline-none"
+      className="group relative w-16 h-16 rounded-[20px] shadow-2xl shadow-indigo-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 focus:outline-none"
     >
       {!isOpen && (
         <span className="absolute -top-11 right-0 bg-brand-dark text-white px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl">
@@ -635,14 +636,14 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
         </span>
       )}
       {isOpen ? (
-        <X className="w-7 h-7 text-white" />
-      ) : (
-        <span className="bg-white rounded-2xl p-1.5 flex items-center justify-center shadow-inner">
-          <Logo size="sm" hideText />
+        <span className="w-16 h-16 rounded-[20px] bg-brand-dark flex items-center justify-center">
+          <X className="w-7 h-7 text-white" />
         </span>
+      ) : (
+        <SGMark className="w-16 h-16" />
       )}
       {!isOpen && (
-        <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-primary shadow-sm animate-pulse pointer-events-none" />
+        <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm animate-pulse pointer-events-none" />
       )}
     </button>
   );
