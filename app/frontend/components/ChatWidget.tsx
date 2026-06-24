@@ -1,6 +1,7 @@
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { BotMark } from "./BotMark";
+import type { BotFace } from "./BotMark";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -65,6 +66,8 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
   const [reactions, setReactions] = useState<Record<string | number, 'like' | 'dislike' | null>>({});
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [rateLimit, setRateLimit] = useState<{ remaining: number; window: string } | null>(null);
+  const [botFace, setBotFace] = useState<BotFace>("idle");
+  const hasGeneratedRef = useRef(false);
 
   const [mode, setMode] = useState<'ai' | 'human'>('ai');
   const [escalated, setEscalated] = useState(false);
@@ -175,6 +178,23 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
     const el = document.getElementById("chat-messages");
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isTyping]);
+
+  // Live face: thinking while generating, a brief happy bounce after a reply,
+  // then back to idle.
+  useEffect(() => {
+    if (isTyping) {
+      hasGeneratedRef.current = true;
+      setBotFace("thinking");
+      return;
+    }
+    if (!hasGeneratedRef.current) {
+      setBotFace("idle");
+      return;
+    }
+    setBotFace("happy");
+    const t = setTimeout(() => setBotFace("idle"), 1800);
+    return () => clearTimeout(t);
+  }, [isTyping]);
 
   const handleSend = async (overrideInput?: string) => {
     const textToSend = overrideInput || input;
@@ -350,7 +370,10 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       {/* Header */}
       <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
         <div className="flex items-center gap-3 relative z-10">
-          <BotMark className="w-10 h-10 shadow-sm rounded-full" />
+          <BotMark
+            variant={botFace}
+            className={`w-10 h-10 shadow-sm rounded-full ${botFace === "thinking" ? "animate-pulse" : botFace === "happy" ? "animate-bounce" : ""}`}
+          />
           <div>
             <p className="text-[11px] uppercase tracking-[0.2em] font-black flex items-center gap-1.5 bg-clip-text text-transparent bg-gradient-to-r from-[#155DEE] to-[#7C6EF0]">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
@@ -529,7 +552,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
           <div className="flex items-end gap-2 text-left">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
-              <BotMark className="w-full h-full" />
+              <BotMark variant="thinking" className="w-full h-full" />
             </div>
             <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 shadow-sm flex gap-1">
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
