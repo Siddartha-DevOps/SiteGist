@@ -1,12 +1,23 @@
 import { useId } from "react";
 import type { CSSProperties } from "react";
 
+export type BotFace = "idle" | "thinking" | "happy";
+
 /**
  * SiteGist brand mark — a friendly robot face with headphones on a blue→indigo
- * gradient circle. Single source of truth for the logo icon (used by the Logo
- * wordmark and the chat widget). Size via `className` (e.g. "w-16 h-16") or `style`.
+ * gradient circle. Single source of truth for the logo icon (Logo wordmark + chat
+ * widget). The `variant` swaps the expression: idle (smile), thinking (O mouth),
+ * happy (closed eyes + grin). Size via `className` (e.g. "w-16 h-16") or `style`.
  */
-export function BotMark({ className = "", style }: { className?: string; style?: CSSProperties }) {
+export function BotMark({
+  className = "",
+  style,
+  variant = "idle",
+}: {
+  className?: string;
+  style?: CSSProperties;
+  variant?: BotFace;
+}) {
   const id = useId();
   return (
     <svg viewBox="0 0 100 100" className={className} style={style} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SiteGist">
@@ -24,11 +35,30 @@ export function BotMark({ className = "", style }: { className?: string; style?:
       <rect x="71" y="48" width="9" height="17" rx="4.5" fill="#fff" />
       {/* face */}
       <rect x="33" y="40" width="34" height="33" rx="12" fill="none" stroke="#fff" strokeWidth="3.4" />
-      {/* eyes */}
-      <circle cx="43" cy="54" r="2.1" fill="#fff" />
-      <circle cx="57" cy="54" r="2.1" fill="#fff" />
-      {/* smile */}
-      <path d="M42.5 61 q7.5 6 15 0" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" />
+
+      {variant === "happy" ? (
+        <>
+          {/* closed happy eyes */}
+          <path d="M40 55 q3 -3.5 6 0" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+          <path d="M54 55 q3 -3.5 6 0" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+          {/* big grin */}
+          <path d="M41 59 q9 9 18 0" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" />
+        </>
+      ) : variant === "thinking" ? (
+        <>
+          <circle cx="43" cy="53" r="2.1" fill="#fff" />
+          <circle cx="57" cy="53" r="2.1" fill="#fff" />
+          {/* surprised "O" mouth */}
+          <circle cx="50" cy="62" r="3.3" fill="none" stroke="#fff" strokeWidth="3" />
+        </>
+      ) : (
+        <>
+          <circle cx="43" cy="54" r="2.1" fill="#fff" />
+          <circle cx="57" cy="54" r="2.1" fill="#fff" />
+          {/* gentle smile */}
+          <path d="M42.5 61 q7.5 6 15 0" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" />
+        </>
+      )}
     </svg>
   );
 }
