@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
-import { SGMark } from "./SGMark";
+import { BotMark } from "./BotMark";
 import { X, Send, Bot, MessageSquare, Sparkles, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -350,7 +350,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       {/* Header */}
       <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
         <div className="flex items-center gap-3 relative z-10">
-          <SGMark className="w-10 h-10 rounded-xl shadow-sm" />
+          <BotMark className="w-10 h-10 shadow-sm rounded-full" />
           <div>
             <p className="text-[11px] uppercase tracking-[0.2em] font-black flex items-center gap-1.5 bg-clip-text text-transparent bg-gradient-to-r from-[#155DEE] to-[#7C6EF0]">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
@@ -370,7 +370,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
         <div className="flex items-end gap-2">
           <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1.5 mb-1">
-            <SGMark className="w-full h-full rounded" />
+            <BotMark className="w-full h-full" />
           </div>
           <div className="flex flex-col max-w-[85%]">
             <div className="bg-white p-4 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 text-[13px] font-medium text-zinc-900 shadow-sm leading-relaxed relative group/msg">
@@ -406,7 +406,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
           <div key={i} className={`flex items-end gap-2 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
             {msg.role === "assistant" && (
               <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
-                <SGMark className="w-full h-full rounded" />
+                <BotMark className="w-full h-full" />
               </div>
             )}
             <div className={`flex flex-col max-w-[85%] relative group/msg`}>
@@ -529,7 +529,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         {isTyping && messages[messages.length-1]?.role !== 'assistant' && (
           <div className="flex items-end gap-2 text-left">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-200 shadow-sm overflow-hidden p-1.5 mb-1">
-              <SGMark className="w-full h-full rounded" />
+              <BotMark className="w-full h-full" />
             </div>
             <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-none rounded-bl-none border border-zinc-100 shadow-sm flex gap-1">
               <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
@@ -606,7 +606,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         </form>
         <div className="flex items-center justify-center gap-1.5 mt-4 group cursor-default">
            <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400">Powered by</span>
-           <SGMark className="w-4 h-4 rounded transition-all opacity-40 group-hover:opacity-100" />
+           <BotMark className="w-4 h-4 transition-all opacity-40 group-hover:opacity-100" />
            <span className="text-[10px] font-black uppercase tracking-tight -ml-1">
              <span className="text-zinc-800">Site</span><span className="text-[#155DEE]">Gist</span>
            </span>
@@ -625,7 +625,7 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
     <button
       onClick={onClick}
       aria-label={isOpen ? "Close chat" : "Chat with us"}
-      className="group relative w-16 h-16 rounded-[20px] shadow-2xl shadow-indigo-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 focus:outline-none"
+      className="group relative w-16 h-16 rounded-full shadow-2xl shadow-indigo-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 focus:outline-none"
     >
       {!isOpen && (
         <span className="absolute -top-11 right-0 bg-brand-dark text-white px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl">
@@ -633,11 +633,11 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
         </span>
       )}
       {isOpen ? (
-        <span className="w-16 h-16 rounded-[20px] bg-brand-dark flex items-center justify-center">
+        <span className="w-16 h-16 rounded-full bg-brand-dark flex items-center justify-center">
           <X className="w-7 h-7 text-white" />
         </span>
       ) : (
-        <SGMark className="w-16 h-16" />
+        <BotMark className="w-16 h-16" />
       )}
       {!isOpen && (
         <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm animate-pulse pointer-events-none" />
