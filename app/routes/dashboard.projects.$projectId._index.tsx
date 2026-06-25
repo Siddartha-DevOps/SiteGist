@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Globe, Settings, Send, Code, Layers, Trash2, ChevronLeft, MessageSquare, Users, Share2, BarChart3, Zap, CheckCircle2, Circle, ArrowRight } from "lucide-react";
+import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -84,9 +84,6 @@ export default function ProjectDetails() {
   return (
     <div>
       <div className="mb-10">
-        <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand-gray transition-colors mb-6">
-          <ChevronLeft className="w-4 h-4" /> Back to projects
-        </Link>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-primary rounded-3xl flex items-center justify-center">
@@ -97,35 +94,10 @@ export default function ProjectDetails() {
               <p className="text-text-muted">Chatbot ID: <code className="bg-zinc-100 px-1.5 py-0.5 rounded font-mono text-xs">{project.id}</code></p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <Link to={`/dashboard/projects/${project.id}/train`} className="btn-primary flex items-center gap-2">
-              <Layers className="w-4 h-4" /> Train Chatbot
-            </Link>
-            <Link to={`/dashboard/projects/${project.id}/integrations`} className="btn-outline flex items-center gap-2">
-              <Share2 className="w-4 h-4" /> Integrations
-            </Link>
-            <Link to={`/dashboard/projects/${project.id}/leads`} className="btn-outline flex items-center gap-2">
-              <Users className="w-4 h-4" /> Leads
-              {project._count.leads > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 bg-primary/10 text-primary text-[10px] font-black rounded-full">
-                  {project._count.leads}
-                </span>
-              )}
-            </Link>
-            <Link to={`/dashboard/projects/${project.id}/insights`} className="btn-outline flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" /> Insights
-            </Link>
-            <Link to={`/dashboard/projects/${project.id}/actions`} className="btn-outline flex items-center gap-2">
-              <Zap className="w-4 h-4" /> AI Actions
-            </Link>
-            <Link id="nav-members-btn" to={`/dashboard/projects/${project.id}/members`} className="btn-outline flex items-center gap-2">
-              <Users className="w-4 h-4" /> Members
-            </Link>
-            <Link to={`/dashboard/projects/${project.id}/settings`} className="btn-outline flex items-center gap-2">
-              <Settings className="w-4 h-4" /> Settings
-            </Link>
-          </div>
+
+          <Link to={`/dashboard/projects/${project.id}/train`} className="btn-primary flex items-center gap-2 shrink-0">
+            <Layers className="w-4 h-4" /> Train Chatbot
+          </Link>
         </div>
       </div>
 

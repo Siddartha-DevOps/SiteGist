@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Form, useNavigation, useActionData, useRevalidator } from "@remix-run/react";
+import { useLoaderData, Form, useNavigation, useActionData, useRevalidator, useSearchParams } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { getSitemapUrls } from "~/ai-layer/crawler.server";
@@ -515,7 +515,20 @@ export default function TrainProject() {
   const actionData = useActionData<typeof action>() as any;
   const navigation = useNavigation();
   const isCrawling = navigation.state === "submitting";
-  const [activeTab, setActiveTab] = useState<"web" | "text" | "youtube" | "files" | "qa">("web");
+  const [searchParams, setSearchParams] = useSearchParams();
+  type TrainTab = "web" | "text" | "youtube" | "files" | "qa";
+  const tabParam = searchParams.get("tab") as TrainTab | null;
+  const validTabs: TrainTab[] = ["web", "text", "youtube", "files", "qa"];
+  const initialTab: TrainTab = tabParam && validTabs.includes(tabParam) ? tabParam : "web";
+  const [activeTab, setActiveTab] = useState<TrainTab>(initialTab);
+
+  // Keep the active tab in sync when the sidebar deep-links (?tab=...).
+  useEffect(() => {
+    if (tabParam && validTabs.includes(tabParam) && tabParam !== activeTab) {
+      setActiveTab(tabParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam]);
   const [qaSearch, setQaSearch] = useState("");
   const [qaPage, setQaPage] = useState(1);
   const [editingQa, setEditingQa] = useState<any | null>(null);
