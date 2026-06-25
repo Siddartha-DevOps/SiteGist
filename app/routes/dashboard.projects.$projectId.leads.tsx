@@ -53,8 +53,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const leadId = formData.get("leadId") as string;
 
   // Single lead actions
+  // Single-lead mutations are scoped to this project (via findFirst/…Many with
+  // projectId) so a lead belonging to another tenant can't be touched by id.
   if (_action === "toggle_star" && leadId) {
-    const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+    const lead = await prisma.lead.findFirst({ where: { id: leadId, projectId: params.projectId } });
     if (!lead) return json({ error: "Not found" }, { status: 404 });
     await prisma.lead.update({
       where: { id: leadId },
@@ -64,7 +66,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (_action === "toggle_archive" && leadId) {
-    const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+    const lead = await prisma.lead.findFirst({ where: { id: leadId, projectId: params.projectId } });
     if (!lead) return json({ error: "Not found" }, { status: 404 });
     await prisma.lead.update({
       where: { id: leadId },
@@ -75,12 +77,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (_action === "update_status" && leadId) {
     const status = formData.get("status") as string;
-    await prisma.lead.update({ where: { id: leadId }, data: { status } });
+    await prisma.lead.updateMany({ where: { id: leadId, projectId: params.projectId }, data: { status } });
     return json({ success: true });
   }
 
   if (_action === "delete" && leadId) {
-    await prisma.lead.delete({ where: { id: leadId } });
+    await prisma.lead.deleteMany({ where: { id: leadId, projectId: params.projectId } });
     return json({ success: true });
   }
 

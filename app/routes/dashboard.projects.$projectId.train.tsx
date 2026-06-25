@@ -38,6 +38,16 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
 
+  // Tenant isolation: confirm the caller owns this project before any branch
+  // runs. requireUserId only proves the caller is authenticated; without this
+  // gate any logged-in user could train/delete sources on another tenant's
+  // chatbot by POSTing to /dashboard/projects/<any-id>/train (IDOR).
+  const accessible = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+    select: { id: true },
+  });
+  if (!accessible) throw redirect("/dashboard");
+
   // Safety net: any unhandled error in the branches below is returned as a
   // friendly inline message instead of crashing to the generic 500 error page.
   try {
@@ -51,7 +61,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (method === "delete_source") {
     const sourceId = formData.get("id") as string;
-    const source = await prisma.knowledgeSource.findUnique({ where: { id: sourceId } });
+    const source = await prisma.knowledgeSource.findFirst({ where: { id: sourceId, projectId: params.projectId! } });
     if (source) {
       const { deleteSourceChunks } = await import("~/ai-layer/ai.server");
       await deleteSourceChunks(params.projectId!, source.type === 'web' ? source.source : source.title || source.source);
@@ -135,8 +145,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: "Another Q&A entry with this exact question already exists." }, { status: 400 });
     }
 
-    await prisma.knowledgeQA.update({
-      where: { id },
+    await prisma.knowledgeQA.updateMany({
+      where: { id, projectId: params.projectId! },
       data: { question, answer }
     });
 
@@ -147,8 +157,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const id = formData.get("id") as string;
     if (!id) return json({ error: "Missing Q&A entry ID." }, { status: 400 });
 
-    await prisma.knowledgeQA.delete({
-      where: { id }
+    await prisma.knowledgeQA.deleteMany({
+      where: { id, projectId: params.projectId! }
     });
 
     return json({ success: true, message: "Manual Q&A entry deleted successfully!" });

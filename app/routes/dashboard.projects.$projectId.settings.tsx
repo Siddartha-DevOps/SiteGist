@@ -58,6 +58,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
+
+  // Tenant isolation: confirm the caller owns this project before any mutation.
+  // Without this, requireUserId only proves the caller is logged in — they could
+  // POST to /dashboard/projects/<any-id>/settings and edit or delete another
+  // tenant's chatbot (IDOR).
+  const owned = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+    select: { id: true },
+  });
+  if (!owned) throw redirect("/dashboard");
+
   const formData = await request.formData();
 
   const actionType = formData.get("_action") as string;
