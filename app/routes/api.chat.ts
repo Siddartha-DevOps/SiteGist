@@ -175,7 +175,12 @@ export async function action({ request }: ActionFunctionArgs) {
     if (projectId !== "demo-project") {
       try {
         if (sessionId) {
-          session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+          // Scope the session to this project — a sessionId from another
+          // project must not be resumable here, or a visitor could replay/
+          // continue another tenant's conversation by supplying its id.
+          // If it doesn't match, session stays null and a fresh one is created
+          // for this project below.
+          session = await prisma.chatSession.findFirst({ where: { id: sessionId, projectId } });
         }
         
         if (!session) {

@@ -24,6 +24,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
   });
   if (!project) return redirect("/dashboard");
 
+  // Confirm the lead belongs to this project before any mutation. The loader
+  // enforces this for reads, but actions can be POSTed directly without it, so
+  // re-validate here or a project owner could edit another tenant's lead by id.
+  const lead = await prisma.lead.findFirst({
+    where: { id: params.leadId, projectId: params.projectId! },
+    select: { id: true, isStarred: true },
+  });
+  if (!lead) return redirect(`/dashboard/projects/${params.projectId}/leads`);
+
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
 
@@ -40,10 +49,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (_action === "toggle_star") {
-    const lead = await prisma.lead.findUnique({ where: { id: params.leadId } });
     await prisma.lead.update({
       where: { id: params.leadId },
-      data: { isStarred: !lead!.isStarred },
+      data: { isStarred: !lead.isStarred },
     });
     return json({ success: true });
   }
@@ -62,7 +70,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (_action === "remove_tag") {
     const tagId = formData.get("tagId") as string;
-    await prisma.leadTag.delete({ where: { id: tagId } });
+    // Scope to this lead so a tag on another tenant's lead can't be deleted by id.
+    await prisma.leadTag.deleteMany({ where: { id: tagId, leadId: params.leadId! } });
     return json({ success: true });
   }
 

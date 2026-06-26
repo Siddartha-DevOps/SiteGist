@@ -248,7 +248,9 @@ export async function rerankDocuments(query: string, documents: { text: string; 
   const cohereVirtualKey = cleanKey(process.env.PORTKEY_COHERE_VIRTUAL_KEY);
 
   if (!portkeyApiKey || !cohereVirtualKey) {
-    console.log("[RAG Audit] Skipping rerank - Portkey keys missing or empty.");
+    // Not silent: surface that quality is degraded. The fallback ranks by the
+    // RRF-fused score from hybrid retrieval (a real ranking signal), not a flat score.
+    console.warn("[RAG] Cohere rerank is OFF (Portkey keys absent) — using RRF-fused ranking. Set PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY to enable reranking.");
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 
@@ -282,7 +284,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     const rerankedMatches = data.results.map((result: any) => ({ ...documents[result.index], relevanceScore: result.relevance_score ?? 0 }));
     return rerankedMatches;
   } catch (error) {
-    console.error("Portkey Rerank error:", error);
+    console.error("Portkey Rerank error — falling back to RRF-fused ranking:", error);
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 }
@@ -868,43 +870,78 @@ export async function* streamRAG(
 
       console.log(`[Hybrid Search] Vector: ${vectorResults.matches?.length || 0}, Keyword: ${keywordResults?.length || 0}`);
 
-      // Merge and Deduplicate
-      const seen = new Set();
-      const initialMatches: any[] = [];
+      // Fuse the vector and keyword result sets with Reciprocal Rank Fusion (RRF).
+      // RRF combines *rankings* rather than raw scores: each list contributes
+      // 1/(k + rank) per document, summed across lists. This fixes two problems with
+      // the old concat+dedup approach — (a) Pinecone cosine and Postgres ts_rank live
+      // on different scales and can't be compared directly, and (b) keyword hits were
+      // given a flat 1.0 that always outranked vector hits. A document found by BOTH
+      // methods now accumulates both contributions (rank agreement = boost), and the
+      // fused score is a coherent ranking signal for the rerank-off fallback.
+      const RRF_K = 60; // standard damping constant
+      type Fused = { text: string; url?: string; title?: string; vectorScore: number; methods: Set<string>; rrf: number };
+      const fused = new Map<string, Fused>();
 
-      // Add keyword results first (high precision for specific queries)
-      keywordResults?.forEach(source => {
-        if (!source.content) return;
-        const key = source.content.substring(0, 100);
-        if (!seen.has(key)) {
-          seen.add(key);
-          initialMatches.push({
-            text: source.content,
-            url: source.source,
-            title: source.title,
-            score: 1.0, // High score for direct keyword match
-            method: "keyword"
-          });
+      const fuseList = (
+        items: any[],
+        toDoc: (item: any) => { text?: string; url?: string; title?: string; method: string; vectorScore?: number } | null
+      ) => {
+        const seenInList = new Set<string>();
+        let rank = 0;
+        for (const item of items) {
+          const doc = toDoc(item);
+          if (!doc?.text) continue;
+          const key = doc.text.substring(0, 100);
+          if (seenInList.has(key)) continue; // only the best rank within a single list counts
+          seenInList.add(key);
+          rank += 1;
+          const contribution = 1 / (RRF_K + rank);
+          const existing = fused.get(key);
+          if (existing) {
+            existing.rrf += contribution;
+            existing.methods.add(doc.method);
+            if (doc.vectorScore != null) existing.vectorScore = Math.max(existing.vectorScore, doc.vectorScore);
+          } else {
+            fused.set(key, {
+              text: doc.text,
+              url: doc.url,
+              title: doc.title,
+              vectorScore: doc.vectorScore ?? 0,
+              methods: new Set([doc.method]),
+              rrf: contribution,
+            });
+          }
         }
-      });
+      };
 
-      // Add vector results
-      vectorResults.matches?.forEach((match: any) => {
-        if ((match.score || 0) < VECTOR_SCORE_THRESHOLD) return;
-        const text = (match.metadata as any)?.text;
-        if (!text) return;
-        const key = text.substring(0, 100);
-        if (!seen.has(key)) {
-          seen.add(key);
-          initialMatches.push({
-            text,
-            url: (match.metadata as any)?.url,
-            title: (match.metadata as any)?.title,
-            score: match.score || 0,
-            method: "vector"
-          });
-        }
-      });
+      // Keyword list is already ordered by ts_rank (SQL ORDER BY rank DESC).
+      fuseList(keywordResults || [], (s: any) =>
+        s.content ? { text: s.content, url: s.source, title: s.title, method: "keyword" } : null
+      );
+
+      // Vector list: drop weak matches, then order by cosine score so RRF rank is
+      // meaningful (multi-query expansion may have appended matches out of order).
+      const vectorRanked = (vectorResults.matches || [])
+        .filter((m: any) => (m.score || 0) >= VECTOR_SCORE_THRESHOLD && (m.metadata as any)?.text)
+        .sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
+      fuseList(vectorRanked, (m: any) => ({
+        text: (m.metadata as any)?.text,
+        url: (m.metadata as any)?.url,
+        title: (m.metadata as any)?.title,
+        method: "vector",
+        vectorScore: m.score || 0,
+      }));
+
+      const initialMatches: any[] = [...fused.values()]
+        .sort((a, b) => b.rrf - a.rrf)
+        .map((c) => ({
+          text: c.text,
+          url: c.url,
+          title: c.title,
+          score: c.rrf,               // fused RRF score — the ranking signal when rerank is off
+          vectorScore: c.vectorScore, // retained for diagnostics / grounding
+          method: c.methods.size > 1 ? "hybrid" : [...c.methods][0],
+        }));
 
       if (initialMatches.length === 0) {
         console.warn(`[Hybrid Search] Stage 3 WARNING: Zero matches found for project ${projectId}.`);
@@ -928,8 +965,9 @@ export async function* streamRAG(
       // Grounding / faithfulness gate: if even the best retrieved document is only
       // weakly relevant to the question, abstain instead of answering from thin
       // context (anti-hallucination). Tunable + off by default — set
-      // RAG_MIN_RELEVANCE (e.g. 0.3 for vector scores, ~0.05 for Cohere rerank
-      // scores) after watching the logged values for your data.
+      // RAG_MIN_RELEVANCE after watching the logged values for your data. Scale
+      // depends on what produced the top score: ~0.05 for Cohere rerank scores,
+      // or ~0.015–0.03 for the RRF-fused fallback when rerank is off.
       const topRelevance = Math.max(0, ...rankedSources.map((s: any) => s.relevanceScore ?? s.score ?? 0));
       const minRelevance = parseFloat(process.env.RAG_MIN_RELEVANCE || "0");
       console.log(`[Grounding] top relevance=${topRelevance.toFixed(4)} (abstain threshold=${minRelevance})`);

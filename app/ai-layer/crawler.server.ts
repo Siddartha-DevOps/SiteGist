@@ -6,6 +6,117 @@ import { getFirecrawl } from "./firecrawl.server";
 import { parsePdf as parsePdfUtil } from "~/lib/pdf.server";
 import { YoutubeTranscript } from "youtube-transcript";
 
+const CRAWLER_UA = "Mozilla/5.0 (compatible; SiteGistBot/1.0; +https://sitegist.ai)";
+
+// Page-size guard: reject responses larger than this so a single huge page can't
+// exhaust serverless memory (the old code loaded the entire body into cheerio with
+// no ceiling). Extracted text is also capped before chunking.
+const MAX_PAGE_BYTES = 8 * 1024 * 1024;       // 8 MB raw HTML
+const MAX_CONTENT_CHARS = 500_000;            // ~125k tokens of extracted text
+// Below this many non-whitespace chars we treat the fetch as "no readable text"
+// — usually a JavaScript-rendered shell that needs a headless renderer (Firecrawl).
+const MIN_READABLE_CHARS = 30;
+
+/** robots.txt is respected by default; set RESPECT_ROBOTS=0 to disable. */
+function shouldRespectRobots(): boolean {
+  return process.env.RESPECT_ROBOTS?.trim() !== "0";
+}
+
+type RobotsRules = { disallow: string[]; allow: string[] };
+const robotsCache = new Map<string, RobotsRules>();
+
+/** Minimal robots.txt parser: collects Allow/Disallow for our bot (falling back to *). */
+function parseRobots(txt: string): RobotsRules {
+  const groups: { agents: Set<string>; disallow: string[]; allow: string[] }[] = [];
+  let current: { agents: Set<string>; disallow: string[]; allow: string[] } | null = null;
+  let lastWasAgent = false;
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const field = line.slice(0, idx).trim().toLowerCase();
+    const value = line.slice(idx + 1).trim();
+    if (field === "user-agent") {
+      // Consecutive user-agent lines share the next ruleset.
+      if (!current || !lastWasAgent) {
+        current = { agents: new Set(), disallow: [], allow: [] };
+        groups.push(current);
+      }
+      current.agents.add(value.toLowerCase());
+      lastWasAgent = true;
+    } else if (field === "disallow" && current) {
+      current.disallow.push(value);
+      lastWasAgent = false;
+    } else if (field === "allow" && current) {
+      current.allow.push(value);
+      lastWasAgent = false;
+    } else {
+      lastWasAgent = false;
+    }
+  }
+  const pick = (token: string) => groups.filter(g => g.agents.has(token));
+  const applicable = pick("sitegistbot").length ? pick("sitegistbot") : pick("*");
+  const disallow: string[] = [];
+  const allow: string[] = [];
+  for (const g of applicable) { disallow.push(...g.disallow); allow.push(...g.allow); }
+  return { disallow, allow };
+}
+
+async function getRobots(origin: string): Promise<RobotsRules> {
+  const cached = robotsCache.get(origin);
+  if (cached) return cached;
+  let rules: RobotsRules = { disallow: [], allow: [] };
+  try {
+    const res = await axios.get(`${origin}/robots.txt`, {
+      headers: { "User-Agent": CRAWLER_UA },
+      timeout: 5000,
+      maxContentLength: 512 * 1024,
+      maxBodyLength: 512 * 1024,
+      // Treat 4xx (no robots / forbidden) as "no rules"; only parse 2xx text.
+      validateStatus: (s) => s >= 200 && s < 300,
+    });
+    if (typeof res.data === "string") rules = parseRobots(res.data);
+  } catch {
+    // No robots.txt, unreachable, or oversized → fail open (allow).
+  }
+  robotsCache.set(origin, rules);
+  return rules;
+}
+
+/** Robots path matcher with `*` wildcard and `$` end-anchor support. */
+function robotsPathMatches(path: string, rule: string): boolean {
+  if (rule === "") return false;
+  let anchored = false;
+  let r = rule;
+  if (r.endsWith("$")) { anchored = true; r = r.slice(0, -1); }
+  const escaped = r.split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  try {
+    return new RegExp("^" + escaped + (anchored ? "$" : "")).test(path);
+  } catch {
+    return false;
+  }
+}
+
+/** Returns false only when robots.txt explicitly disallows this URL for our bot. */
+async function isAllowedByRobots(url: string): Promise<boolean> {
+  try {
+    const u = new URL(url);
+    const { disallow, allow } = await getRobots(u.origin);
+    const realDisallow = disallow.filter(r => r.length > 0);
+    if (realDisallow.length === 0) return true; // empty/absent Disallow = allow all
+    const path = u.pathname + u.search;
+    const longestMatch = (rules: string[]) =>
+      rules.reduce((m, r) => (robotsPathMatches(path, r) ? Math.max(m, r.length) : m), -1);
+    const dLen = longestMatch(realDisallow);
+    if (dLen === -1) return true;            // no Disallow rule matches
+    const aLen = longestMatch(allow);        // more-specific Allow overrides Disallow
+    return aLen >= dLen;
+  } catch {
+    return true; // malformed URL etc. → don't block
+  }
+}
+
 export async function getYoutubeTranscript(url: string) {
   try {
     const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([^& \n]+)/);
@@ -155,7 +266,15 @@ export async function parseDocx(buffer: Buffer) {
 
 export async function crawlUrl(url: string, recursive = false) {
   const firecrawl = getFirecrawl();
-  
+
+  // Respect robots.txt before any fetch (both Firecrawl and the basic path).
+  if (shouldRespectRobots() && !(await isAllowedByRobots(url))) {
+    throw new Error(
+      "Blocked by robots.txt — this URL is disallowed for crawling. Remove it, " +
+      "use a page the site permits, or set RESPECT_ROBOTS=0 if you own the site."
+    );
+  }
+
   if (firecrawl && !recursive) {
     try {
       let response: any;
@@ -183,22 +302,38 @@ export async function crawlUrl(url: string, recursive = false) {
   }
 
   // Fallback to basic axios/cheerio if firecrawl fails or is missing
+  let response: any;
   try {
-    const response = await axios.get(url, {
+    response = await axios.get(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SiteGistBot/1.0; +https://sitegist.ai)",
+        "User-Agent": CRAWLER_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
       },
       timeout: 15000,
+      // Page-size guard: abort oversized bodies before they hit memory/cheerio.
+      maxContentLength: MAX_PAGE_BYTES,
+      maxBodyLength: MAX_PAGE_BYTES,
     });
+  } catch (error: any) {
+    const msg = String(error?.message || "");
+    if (error?.code === "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED" || /maxContentLength|maxBodyLength/i.test(msg)) {
+      throw new Error(`Page is too large to crawl (over ${Math.round(MAX_PAGE_BYTES / (1024 * 1024))} MB). Add the key content as Text or a File instead.`);
+    }
+    console.error(`Error crawling ${url}:`, error);
+    return null;
+  }
+
+  let title = url;
+  let finalContent = "";
+  try {
     const $ = cheerio.load(response.data);
-    
+
     // Clean up unnecessary, non-content tags
     $("script, style, nav, footer, header, iframe, noscript, svg, .cookie-banner, #cookie-consent, .pop-up, .menu, .sidebar, [aria-hidden='true']").remove();
-    
-    const title = $("title").text().trim() || $("h1").first().text().trim() || url;
-    
+
+    title = $("title").text().trim() || $("h1").first().text().trim() || url;
+
     // Advanced HTML-to-Markdown parser built directly on cheerio
     let markdown = "";
     
@@ -306,15 +441,35 @@ export async function crawlUrl(url: string, recursive = false) {
       .replace(/ +/g, " ")
       .trim();
 
-    return { 
-      title, 
-      content: cleanedContent || $.text().replace(/\s+/g, " ").trim(), 
-      url 
-    };
+    finalContent = cleanedContent || $.text().replace(/\s+/g, " ").trim();
   } catch (error) {
-    console.error(`Error crawling ${url}:`, error);
+    console.error(`Error parsing ${url}:`, error);
     return null;
   }
+
+  // Cap extracted text so a pathologically large page can't blow up chunking/embedding.
+  if (finalContent.length > MAX_CONTENT_CHARS) {
+    console.warn(`[Crawler] Truncating ${url} from ${finalContent.length} to ${MAX_CONTENT_CHARS} chars`);
+    finalContent = finalContent.slice(0, MAX_CONTENT_CHARS);
+  }
+
+  // Empty / SPA detection: the basic fetcher can't run JavaScript, so a client-rendered
+  // app yields an empty shell. Fail loudly with an actionable message instead of silently
+  // indexing nothing (the previous behaviour surfaced only a generic "No content").
+  if (finalContent.replace(/\s+/g, "").length < MIN_READABLE_CHARS) {
+    const rawHtml = typeof response.data === "string" ? response.data : "";
+    const looksSpa = /enable JavaScript|id=["'](root|app|__next|___gatsby)["']/i.test(rawHtml);
+    if (firecrawl) {
+      throw new Error("This page returned almost no readable text and the Firecrawl scrape failed — retry shortly, or add the content as Text/File.");
+    }
+    throw new Error(
+      looksSpa
+        ? "This page rendered no readable text — it looks like a JavaScript app. Set FIRECRAWL_API_KEY to crawl JS-rendered sites, or paste the content via Text/File."
+        : "No readable text found on this page. If it needs JavaScript to render, set FIRECRAWL_API_KEY; otherwise add the content as Text/File."
+    );
+  }
+
+  return { title, content: finalContent, url };
 }
 
 export async function crawlRecursive(url: string, limit = 10) {
