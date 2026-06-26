@@ -158,7 +158,8 @@ export async function ingestKnowledgeSource(
       await setStatus(sourceId, "crawling", { error: null });
       const res = await fetch(source.source, { headers: { "User-Agent": "SiteGist" } });
       if (!res.ok) throw new Error(`Failed to fetch GitHub file (HTTP ${res.status}).`);
-      content = await res.text();
+      content = (await res.text()).slice(0, 500_000); // size guard
+
       await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { content } });
     }
     // 'text' and 'file' already carry their extracted content on the row.

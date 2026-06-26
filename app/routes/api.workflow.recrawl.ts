@@ -19,7 +19,15 @@ export const action = serve(async (context: any) => {
 
   for (const source of webSources) {
     await context.run(`recrawl-${source.id}`, async () => {
-      const data = await crawlUrl(source.source);
+      // crawlUrl can throw for robots-blocked / oversized / JS-only pages — skip
+      // those sources instead of failing the whole recrawl batch.
+      let data: Awaited<ReturnType<typeof crawlUrl>> = null;
+      try {
+        data = await crawlUrl(source.source);
+      } catch (err) {
+        console.warn(`[Recrawl] Skipping ${source.source}:`, err);
+        return;
+      }
       if (data && data.content) {
         const chunks = chunkText(data.content);
         await upsertChunks(projectId, chunks.map(c => ({ 
