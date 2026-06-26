@@ -20,27 +20,47 @@ const MAX_MESSAGE_CHARS = 8000;
  * Here a configured "example.com" matches only "example.com" and "*.example.com".
  * Allowlist entries may be written with a scheme/port/path — we normalise to host.
  */
+// Valid hostname: dot-separated labels of [a-z0-9-] (not starting/ending with a
+// hyphen), or the bare token "localhost". Anything else (spaces, empty labels,
+// junk) is rejected so a malformed allowlist entry can never match by accident.
+const HOSTNAME_RE = /^(localhost|([a-z0-9](-?[a-z0-9])*)(\.[a-z0-9](-?[a-z0-9])*)+)$/;
+
 function normalizeDomain(entry: string): string {
-  let d = entry.trim().toLowerCase();
+  let d = (entry || "").trim().toLowerCase();
   if (!d) return "";
   d = d.replace(/^https?:\/\//, "");   // strip scheme
   d = d.split("/")[0];                  // strip path
   d = d.split(":")[0];                  // strip port
-  return d.replace(/^\*\./, "");        // treat "*.example.com" as "example.com"
+  d = d.replace(/^\*\./, "");           // treat "*.example.com" as "example.com"
+  return HOSTNAME_RE.test(d) ? d : "";  // reject malformed entries
+}
+
+function originHost(origin: string | null): string | null {
+  if (!origin) return null;
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function isOriginAllowed(origin: string | null, allowedDomains: string[]): boolean {
-  if (!origin) return false; // allowlist is configured but request has no Origin/Referer → deny
-  let host: string;
-  try {
-    host = new URL(origin).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
+  const host = originHost(origin);
+  if (!host) return false; // allowlist is configured but request has no/invalid Origin → deny
   return allowedDomains.some((raw) => {
     const domain = normalizeDomain(raw);
     return !!domain && (host === domain || host.endsWith("." + domain));
   });
+}
+
+/**
+ * Strict (default-deny) mode is opt-in via WIDGET_STRICT_DOMAINS=1 (global) or a
+ * project's settings.strictDomains. When a chatbot has NO allowedDomains configured,
+ * strict mode denies all cross-origin callers and permits only same-origin requests
+ * (i.e. the SiteGist-hosted embed iframe), instead of the default allow-all.
+ */
+function isStrictDomainMode(settings: any): boolean {
+  return process.env.WIDGET_STRICT_DOMAINS === "1" || settings?.strictDomains === true;
 }
 
 // Score a user message's sentiment without blocking the chat response.
@@ -109,9 +129,18 @@ export async function action({ request }: ActionFunctionArgs) {
         chatMode = settings?.chatMode || 'ai-only';
 
         // Domain whitelisting check (exact host / subdomain match — see isOriginAllowed).
-        if (settings?.allowedDomains && settings.allowedDomains.length > 0) {
-          if (!isOriginAllowed(origin, settings.allowedDomains)) {
+        const allowedDomains: string[] = settings?.allowedDomains || [];
+        if (allowedDomains.length > 0) {
+          if (!isOriginAllowed(origin, allowedDomains)) {
             console.warn(`[Chat] Unauthorized domain access: ${origin || "(no origin)"}`);
+            return json({ error: "Unauthorized domain" }, { status: 403 });
+          }
+        } else if (isStrictDomainMode(settings)) {
+          // Default-deny: with no allowlist configured, permit only same-origin
+          // (the SiteGist-hosted embed) and reject external direct callers.
+          const reqHost = originHost(request.url);
+          if (originHost(origin) !== reqHost) {
+            console.warn(`[Chat] Strict mode blocked cross-origin request: ${origin || "(no origin)"}`);
             return json({ error: "Unauthorized domain" }, { status: 403 });
           }
         }

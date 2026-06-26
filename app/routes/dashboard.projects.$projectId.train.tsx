@@ -4,7 +4,7 @@ import { useLoaderData, Form, useNavigation, useActionData, useRevalidator, useS
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { getSitemapUrls } from "~/ai-layer/crawler.server";
-import { enqueueSourceIngestion, enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
+import { enqueueSourceIngestion, enqueueManySourceIngestions, cancelIngestion } from "~/ai-layer/ingestion.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen, Github } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
@@ -68,6 +68,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
       await prisma.knowledgeSource.delete({ where: { id: sourceId } });
     }
     return json({ success: true, message: "Source removed and vector data cleaned successfully" });
+  }
+
+  if (method === "cancel_source") {
+    const sourceId = formData.get("id") as string;
+    const { cancelled } = await cancelIngestion(params.projectId!, sourceId);
+    return json({
+      success: true,
+      message: cancelled ? "Ingestion cancelled." : "Nothing to cancel (already finished).",
+    });
   }
 
   if (method === "retry_source") {
