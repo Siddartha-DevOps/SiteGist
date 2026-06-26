@@ -3,6 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation, useActionData, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { enforceChatbotQuota } from "~/lib/usage.server";
 import { ChevronLeft, Bot, Loader2, Plus } from "lucide-react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -22,6 +23,9 @@ export async function action({ request }: ActionFunctionArgs) {
       { status: 400 }
     );
   }
+
+  const quotaError = await enforceChatbotQuota(userId);
+  if (quotaError) return quotaError;
 
   // Create the project in database with default settings
   const project = await prisma.project.create({
