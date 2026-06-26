@@ -93,12 +93,13 @@ export default function EmbedChat() {
   }, [primaryColor]);
 
   const handleFeedback = async (messageId: string, val: number) => {
+    if (!sessionId) return; // feedback is scoped to the visitor's session
     setFeedbackLoading(messageId);
     try {
       await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageId, feedback: val }),
+        body: JSON.stringify({ messageId, sessionId, feedback: val }),
       });
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, feedback: val } : m));
     } catch (e) {

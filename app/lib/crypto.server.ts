@@ -24,11 +24,23 @@ function getKey(): Buffer | null {
   return crypto.createHash("sha256").update(raw).digest();
 }
 
+let warnedNoEncryptionKey = false;
+
 export function encryptSecret<T extends string | null | undefined>(plain: T): T {
   if (typeof plain !== "string" || plain === "") return plain;
   if (plain.startsWith(PREFIX)) return plain; // already encrypted
   const key = getKey();
-  if (!key) return plain; // encryption disabled → store as-is
+  if (!key) {
+    // Surface (once) that we're persisting a real secret unencrypted in production.
+    if (!warnedNoEncryptionKey && process.env.NODE_ENV === "production") {
+      warnedNoEncryptionKey = true;
+      console.warn(
+        "[crypto] SECURITY: ENCRYPTION_KEY is not set — integration OAuth tokens are " +
+        "being stored in PLAINTEXT. Set ENCRYPTION_KEY to encrypt secrets at rest."
+      );
+    }
+    return plain; // encryption disabled → store as-is
+  }
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const ct = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);

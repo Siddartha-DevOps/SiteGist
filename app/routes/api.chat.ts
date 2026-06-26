@@ -9,6 +9,39 @@ import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
 
 const HISTORY_CHAR_BUDGET = 6000;
+// Reject oversized messages: bounds memory/storage and caps LLM token cost (a
+// single huge message could otherwise be a cheap DoS / cost-amplification vector).
+const MAX_MESSAGE_CHARS = 8000;
+
+/**
+ * Exact host / subdomain matching for the widget domain allowlist.
+ * The old check used `origin.includes(domain)`, so an allowlist entry of
+ * "example.com" also matched "example.com.attacker.com" or "notexample.com".
+ * Here a configured "example.com" matches only "example.com" and "*.example.com".
+ * Allowlist entries may be written with a scheme/port/path — we normalise to host.
+ */
+function normalizeDomain(entry: string): string {
+  let d = entry.trim().toLowerCase();
+  if (!d) return "";
+  d = d.replace(/^https?:\/\//, "");   // strip scheme
+  d = d.split("/")[0];                  // strip path
+  d = d.split(":")[0];                  // strip port
+  return d.replace(/^\*\./, "");        // treat "*.example.com" as "example.com"
+}
+
+function isOriginAllowed(origin: string | null, allowedDomains: string[]): boolean {
+  if (!origin) return false; // allowlist is configured but request has no Origin/Referer → deny
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return allowedDomains.some((raw) => {
+    const domain = normalizeDomain(raw);
+    return !!domain && (host === domain || host.endsWith("." + domain));
+  });
+}
 
 // Score a user message's sentiment without blocking the chat response.
 function scoreSentimentAsync(messageId: string, text: string) {
@@ -43,6 +76,10 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Missing required fields (projectId, message)" }, { status: 400 });
     }
 
+    if (typeof message !== "string" || message.length > MAX_MESSAGE_CHARS) {
+      return json({ error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` }, { status: 400 });
+    }
+
     // --- Domain Whitelisting ---
     const origin = request.headers.get("origin") || request.headers.get("referer");
     // ---------------------------
@@ -71,11 +108,10 @@ export async function action({ request }: ActionFunctionArgs) {
         responseLanguage = settings?.language || undefined;
         chatMode = settings?.chatMode || 'ai-only';
 
-        // Domain whitelisting check
-        if (settings?.allowedDomains && settings.allowedDomains.length > 0 && origin) {
-          const isAllowed = settings.allowedDomains.some((d: string) => origin.includes(d));
-          if (!isAllowed) {
-            console.warn(`[Chat] Unauthorized domain access: ${origin}`);
+        // Domain whitelisting check (exact host / subdomain match — see isOriginAllowed).
+        if (settings?.allowedDomains && settings.allowedDomains.length > 0) {
+          if (!isOriginAllowed(origin, settings.allowedDomains)) {
+            console.warn(`[Chat] Unauthorized domain access: ${origin || "(no origin)"}`);
             return json({ error: "Unauthorized domain" }, { status: 403 });
           }
         }
