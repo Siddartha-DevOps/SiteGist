@@ -164,7 +164,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, message: "Manual Q&A entry deleted successfully!" });
   }
 
-  if (!url && method !== "add_text" && method !== "upload_file") {
+  if (!url && method !== "add_text" && method !== "upload_file" && method !== "bulk_import") {
     return json({ error: "URL is required" }, { status: 400 });
   }
 
@@ -504,6 +504,108 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   }
 
+  if (method === "bulk_import") {
+    const BULK_URL_CAP = 100;
+    const raw = (formData.get("bulkUrls") as string) || "";
+
+    const isValidHttpUrl = (value: string): boolean => {
+      try {
+        const u = new URL(value);
+        return u.protocol === "http:" || u.protocol === "https:";
+      } catch {
+        return false;
+      }
+    };
+
+    // 1. Split by newlines, trim, drop blanks, and de-duplicate the input lines.
+    const lines = Array.from(
+      new Set(
+        raw
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (lines.length === 0) {
+      return json({ error: "Paste at least one URL (or a sitemap URL) to import." }, { status: 400 });
+    }
+
+    // 2. Expand sitemap URLs into their child <loc> URLs (reusing getSitemapUrls,
+    //    which parses the sitemap.xml); keep plain page URLs as-is.
+    const collected: string[] = [];
+    let invalidCount = 0;
+    let sitemapCount = 0;
+
+    for (const line of lines) {
+      if (!isValidHttpUrl(line)) {
+        invalidCount++;
+        continue;
+      }
+      if (line.toLowerCase().endsWith("sitemap.xml")) {
+        sitemapCount++;
+        const childUrls = await getSitemapUrls(line);
+        for (const child of childUrls) {
+          if (isValidHttpUrl(child)) collected.push(child);
+        }
+      } else {
+        collected.push(line);
+      }
+    }
+
+    // De-duplicate the final URL set and enforce the per-import cap.
+    const uniqueUrls = Array.from(new Set(collected));
+    const cappedUrls = uniqueUrls.slice(0, BULK_URL_CAP);
+
+    if (cappedUrls.length === 0) {
+      return json({
+        error: invalidCount > 0
+          ? "No valid http/https URLs found. Check the URLs and try again."
+          : "No URLs found to import.",
+      }, { status: 400 });
+    }
+
+    // 3 + 4. Create (or re-queue) a web KnowledgeSource per URL, then fan out to
+    //        the ingestion pipeline. Mirrors the sitemap crawl flow above.
+    const toEnqueue: { projectId: string; sourceId: string }[] = [];
+    for (const itemUrl of cappedUrls) {
+      const existing = await prisma.knowledgeSource.findFirst({
+        where: { projectId: params.projectId, source: itemUrl, type: "web" },
+      });
+      const src = existing
+        ? await prisma.knowledgeSource.update({
+            where: { id: existing.id },
+            data: { status: "queued", error: null },
+          })
+        : await prisma.knowledgeSource.create({
+            data: { projectId: params.projectId!, type: "web", source: itemUrl, title: itemUrl, status: "queued" },
+          });
+      toEnqueue.push({ projectId: params.projectId!, sourceId: src.id });
+    }
+
+    await enqueueManySourceIngestions(toEnqueue, { maxInline: 3 });
+
+    // 5. Report how many were queued, plus notes about caps/skips.
+    const queuedCount = toEnqueue.length;
+    const notes: string[] = [];
+    if (uniqueUrls.length > cappedUrls.length) {
+      notes.push(`capped at ${BULK_URL_CAP} (${uniqueUrls.length} found)`);
+    }
+    if (sitemapCount > 0) {
+      notes.push(`expanded ${sitemapCount} sitemap${sitemapCount !== 1 ? "s" : ""}`);
+    }
+    if (invalidCount > 0) {
+      notes.push(`skipped ${invalidCount} invalid line${invalidCount !== 1 ? "s" : ""}`);
+    }
+    const noteSuffix = notes.length > 0 ? ` (${notes.join(", ")})` : "";
+
+    return json({
+      success: true,
+      queuedCount,
+      message: `${queuedCount} source${queuedCount !== 1 ? "s" : ""} queued for training${noteSuffix}.`,
+    });
+  }
+
   return json({});
   } catch (error: any) {
     // Preserve Remix redirects / thrown Responses (e.g. auth) — only handle real errors.
@@ -526,9 +628,9 @@ export default function TrainProject() {
   const navigation = useNavigation();
   const isCrawling = navigation.state === "submitting";
   const [searchParams, setSearchParams] = useSearchParams();
-  type TrainTab = "web" | "text" | "youtube" | "files" | "qa";
+  type TrainTab = "web" | "bulk" | "text" | "youtube" | "files" | "qa";
   const tabParam = searchParams.get("tab") as TrainTab | null;
-  const validTabs: TrainTab[] = ["web", "text", "youtube", "files", "qa"];
+  const validTabs: TrainTab[] = ["web", "bulk", "text", "youtube", "files", "qa"];
   const initialTab: TrainTab = tabParam && validTabs.includes(tabParam) ? tabParam : "web";
   const [activeTab, setActiveTab] = useState<TrainTab>(initialTab);
 
@@ -630,7 +732,13 @@ export default function TrainProject() {
         >
           <Globe className="w-4 h-4" /> Website
         </button>
-        <button 
+        <button
+          onClick={() => setActiveTab("bulk")}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'bulk' ? 'bg-white shadow-sm text-primary' : 'text-text-muted'}`}
+        >
+          <List className="w-4 h-4" /> Bulk Import
+        </button>
+        <button
           onClick={() => setActiveTab("files")}
           className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'files' ? 'bg-white shadow-sm text-primary' : 'text-text-muted'}`}
         >
@@ -732,6 +840,42 @@ export default function TrainProject() {
                   </button>
                 </Form>
               </div>
+            </>
+          )}
+
+          {activeTab === "bulk" && (
+            <>
+              <h2 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                <List className="text-primary w-6 h-6" /> Bulk Import
+              </h2>
+              <p className="text-sm text-text-muted mb-8 leading-relaxed">
+                Paste up to 100 page URLs (one per line) or a sitemap URL — every page is queued for training in one click.
+              </p>
+
+              <Form method="post" className="space-y-6">
+                <input type="hidden" name="_action" value="bulk_import" />
+                <div>
+                  <label className="block text-sm font-bold mb-2">URLs</label>
+                  <textarea
+                    name="bulkUrls"
+                    rows={10}
+                    required
+                    placeholder={"Paste one URL per line, or enter a sitemap URL\n\nhttps://example.com/about\nhttps://example.com/pricing\nhttps://example.com/sitemap.xml"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-mono leading-relaxed"
+                  ></textarea>
+                  <p className="mt-2 text-xs text-zinc-400 font-medium leading-relaxed">
+                    Lines ending in <code>sitemap.xml</code> are expanded into all their pages. Up to 100 URLs are queued per import.
+                  </p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isCrawling}
+                  className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  {isCrawling ? <Loader2 className="w-5 h-5 animate-spin" /> : <List className="w-5 h-5" />}
+                  Import All
+                </button>
+              </Form>
             </>
           )}
 
