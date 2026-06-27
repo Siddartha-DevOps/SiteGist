@@ -10,7 +10,8 @@ import {
   ChevronDown,
   LayoutDashboard,
   FileText,
-  Database
+  Database,
+  ShieldCheck
 } from "lucide-react";
 import { Link, Form, useLocation, Outlet } from "@remix-run/react";
 import React, { useState, useRef, useEffect } from 'react';
@@ -134,6 +135,14 @@ export function DashboardLayoutPage({ user, subscriptionStatus }: DashboardLayou
                         onClick={() => setIsAccountOpen(false)}
                       >
                         <User className="w-4 h-4 text-brand-gray/60" /> Profile Settings
+                      </Link>
+
+                      <Link
+                        to="/dashboard/settings/privacy"
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-bold text-brand-gray hover:bg-brand-light hover:text-brand-dark transition-all"
+                        onClick={() => setIsAccountOpen(false)}
+                      >
+                        <ShieldCheck className="w-4 h-4 text-brand-gray/60" /> Privacy & Data
                       </Link>
 
                       <div className="h-[1px] bg-brand-border my-1.5" />
