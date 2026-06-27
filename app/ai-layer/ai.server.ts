@@ -26,6 +26,31 @@ const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
 
 const USER_FACING_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
 
+// Selectable OpenAI chat models for per-bot model routing. Maps the stored/UI
+// model id to the actual OpenAI model id sent to the API. The mapping is the
+// identity today, but keeping it as an explicit allow-list means an unknown or
+// typo'd preference can't be forwarded blindly to the provider.
+const OPENAI_CHAT_MODELS: Record<string, string> = {
+  "gpt-4.1": "gpt-4.1",
+  "gpt-4.1-mini": "gpt-4.1-mini",
+  "gpt-4o": "gpt-4o",
+  "gpt-4o-mini": "gpt-4o-mini",
+};
+
+// Default OpenAI model when a bot is on "auto" (or unset). Prefers GPT-4.1-mini
+// for its speed/cost, overridable via PORTKEY_MODEL.
+const AUTO_OPENAI_MODEL = process.env.PORTKEY_MODEL?.trim() || "gpt-4.1-mini";
+
+// Resolve a stored model preference to the OpenAI model id to call. Known ids map
+// through the allow-list; other "gpt-*" ids are forwarded for forward-compat with
+// future releases; anything else (e.g. "auto", a Gemini id, undefined) falls back
+// to the auto default.
+function resolveOpenAIModel(pref?: string): string {
+  if (pref && OPENAI_CHAT_MODELS[pref]) return OPENAI_CHAT_MODELS[pref];
+  if (pref && pref.startsWith("gpt")) return pref;
+  return AUTO_OPENAI_MODEL;
+}
+
 if (process.env.AI_DEBUG === "1") {
   console.log("AI Server Startup Diagnostic:", {
     hasGemini: !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
@@ -1047,7 +1072,6 @@ How it works:
       const { getEnabledActions, runAgenticActions } = await import("./actions.server");
       const projectActions = await getEnabledActions(projectId);
       if (projectActions.length > 0) {
-        const wantsOpenAIForActions = !!modelPreference && modelPreference.startsWith("gpt");
         const wantsGeminiForActions = !!modelPreference && modelPreference.startsWith("gemini");
         const outcome = await runAgenticActions({
           projectId,
@@ -1056,7 +1080,7 @@ How it works:
           actions: projectActions,
           openai: getOpenAI(),
           gemini: getGemini(),
-          openaiModel: wantsOpenAIForActions ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini"),
+          openaiModel: resolveOpenAIModel(modelPreference),
           geminiModel: wantsGeminiForActions ? modelPreference! : "gemini-2.0-flash",
         });
         if (outcome && outcome.ran.length > 0) {
@@ -1116,7 +1140,7 @@ How it works:
   const wantsOpenAI = !!modelPreference && modelPreference.startsWith("gpt");
   const wantsGemini = !!modelPreference && modelPreference.startsWith("gemini");
   const geminiModel = wantsGemini ? modelPreference! : "gemini-2.0-flash";
-  const openaiModelPref = wantsOpenAI ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini");
+  const openaiModelPref = resolveOpenAIModel(modelPreference);
 
   // Add a safety timeout for the entire generation process
   const generationTimeout = setTimeout(() => {
