@@ -62,6 +62,7 @@ export default function EmbedChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [rateLimit, setRateLimit] = useState<{ remaining: number; window: string } | null>(null);
   const chatFetcher = useFetcher();
   const leadFetcher = useFetcher();
@@ -137,6 +138,7 @@ export default function EmbedChat() {
     
     setInput("");
     setIsStreaming(true);
+    setIsTyping(true);
     const now = new Date();
     setMessages(prev => [...prev, { role: 'user', content: messageToSend, timestamp: now }]);
     setMessages(prev => [...prev, { role: 'assistant', content: "", timestamp: new Date() }]);
@@ -163,6 +165,7 @@ export default function EmbedChat() {
           }
           return newMsgs;
         });
+        setIsTyping(false);
         setIsStreaming(false);
         return;
       }
@@ -196,6 +199,8 @@ export default function EmbedChat() {
             try {
               const data = JSON.parse(trimmed.slice(6));
               if (data.content) {
+                // First real token arrived — hide the typing indicator
+                setIsTyping(false);
                 accumulated += data.content;
                 setMessages(prev => {
                   const newMsgs = [...prev];
@@ -260,6 +265,7 @@ export default function EmbedChat() {
         return newMsgs;
       });
     } finally {
+      setIsTyping(false);
       setIsStreaming(false);
     }
   };
@@ -300,6 +306,28 @@ export default function EmbedChat() {
 
   return (
     <div className={`flex flex-col h-screen relative transition-colors duration-300 ${font === 'serif' ? 'font-serif' : font === 'mono' ? 'font-mono' : 'font-sans'} ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-white text-zinc-900'}`}>
+      <style>{`
+        .typing-indicator {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 0;
+        }
+        .typing-indicator span {
+          width: 6px;
+          height: 6px;
+          border-radius: 9999px;
+          background-color: currentColor;
+          opacity: 0.35;
+          animation: sitegist-typing 1.2s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes sitegist-typing {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+          30% { transform: translateY(-4px); opacity: 1; }
+        }
+      `}</style>
       {/* Lead Form Overlay */}
       {showLeadForm && (
         <div className={`absolute inset-0 z-50 p-8 flex flex-col items-center justify-center animate-in fade-in slide-in-from-bottom-4 ${isDarkMode ? 'bg-zinc-950' : 'bg-white'}`}>
@@ -458,7 +486,13 @@ export default function EmbedChat() {
                 ? 'bg-zinc-900 text-white rounded-br-none shadow-sm' 
                 : `${isDarkMode ? 'bg-zinc-900 text-zinc-200' : 'bg-zinc-100 text-zinc-800'} rounded-bl-none`
             }`}>
-              <Markdown>{msg.content}</Markdown>
+              {msg.role === 'assistant' && isTyping && i === messages.length - 1 && !msg.content ? (
+                <div className="typing-indicator" aria-label="Assistant is typing">
+                  <span></span><span></span><span></span>
+                </div>
+              ) : (
+                <Markdown>{msg.content}</Markdown>
+              )}
               
               {msg.role === 'assistant' && (msg as any).citations?.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-zinc-500/10">
