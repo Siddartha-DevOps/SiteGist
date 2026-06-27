@@ -3,6 +3,7 @@ import { prisma } from "~/database/db.server";
 import { chunkText, parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 import { upsertChunks } from "~/ai-layer/ai.server";
 import { refreshDropboxToken, refreshMicrosoftToken } from "~/backend/oauth.server";
+import { enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
 
 async function getNotionPageContent(notion: Client, blockId: string): Promise<string> {
   try {
@@ -386,4 +387,151 @@ export async function syncOneDrive(projectId: string) {
       console.error(`[OneDrive] Failed to process "${file.name}":`, err);
     }
   }
+}
+
+// --- Confluence (Atlassian) ---
+
+/** Strip Confluence storage-format XHTML down to readable plain text. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n\s*\n+/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Atlassian access tokens are short-lived (~1h). Proactively refresh before a
+ * sync using the stored refresh token (mirrors refreshGoogleToken). Atlassian
+ * rotates refresh tokens, so persist the new one when returned.
+ */
+async function refreshConfluenceToken(integration: {
+  accessToken: string;
+  refreshToken: string | null;
+  projectId: string;
+}): Promise<string> {
+  if (!integration.refreshToken) return integration.accessToken;
+  try {
+    const res = await fetch("https://auth.atlassian.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        client_id: process.env.CONFLUENCE_CLIENT_ID,
+        client_secret: process.env.CONFLUENCE_CLIENT_SECRET,
+        refresh_token: integration.refreshToken,
+      }),
+    });
+    if (!res.ok) return integration.accessToken;
+    const data = (await res.json()) as any;
+    if (data.access_token) {
+      await prisma.integration.update({
+        where: { projectId_provider: { projectId: integration.projectId, provider: "confluence" } },
+        data: {
+          accessToken: data.access_token,
+          ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+          updatedAt: new Date(),
+        },
+      });
+      return data.access_token;
+    }
+  } catch (err) {
+    console.error("[Confluence] Token refresh error:", err);
+  }
+  return integration.accessToken;
+}
+
+/**
+ * Import every Confluence page across the connected workspace's spaces as a
+ * KnowledgeSource (type "text"), then hand them to the ingestion pipeline.
+ * Capped to keep a single request bounded; the queued sources finish via the
+ * background drain.
+ */
+export async function syncConfluence(projectId: string) {
+  const integration = await prisma.integration.findUnique({
+    where: { projectId_provider: { projectId, provider: "confluence" } },
+  });
+  if (!integration) throw new Error("Confluence not connected");
+
+  const cloudId = (integration.details as any)?.cloud_id;
+  if (!cloudId) throw new Error("Confluence cloud ID is missing — please reconnect Confluence.");
+  const siteUrl = (integration.details as any)?.site_url || "";
+
+  const accessToken = await refreshConfluenceToken({ ...integration, projectId });
+  const base = `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/rest/api`;
+  const authHeaders = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+
+  const MAX_SPACES = 50;
+  const PAGES_PER_SPACE = 100;
+  const MAX_TOTAL_PAGES = 200;
+
+  // 1. Fetch all spaces.
+  const spacesRes = await fetch(`${base}/space?limit=${MAX_SPACES}`, { headers: authHeaders });
+  if (!spacesRes.ok) {
+    throw new Error(`Confluence space list failed (HTTP ${spacesRes.status}): ${await spacesRes.text()}`);
+  }
+  const spacesData = (await spacesRes.json()) as any;
+  const spaces: any[] = spacesData.results || [];
+
+  const toEnqueue: { projectId: string; sourceId: string }[] = [];
+  let pageCount = 0;
+
+  // 2. For each space, fetch its pages with body.storage expanded.
+  for (const space of spaces) {
+    if (pageCount >= MAX_TOTAL_PAGES) break;
+    const spaceKey = space.key;
+    if (!spaceKey) continue;
+
+    const pagesRes = await fetch(
+      `${base}/content?type=page&spaceKey=${encodeURIComponent(spaceKey)}&expand=body.storage&limit=${PAGES_PER_SPACE}`,
+      { headers: authHeaders }
+    );
+    if (!pagesRes.ok) {
+      console.error(`[Confluence] Page list failed for space ${spaceKey}: HTTP ${pagesRes.status}`);
+      continue;
+    }
+    const pagesData = (await pagesRes.json()) as any;
+    const pages: any[] = pagesData.results || [];
+
+    for (const page of pages) {
+      if (pageCount >= MAX_TOTAL_PAGES) break;
+
+      // 3. Extract plain text from the storage-format body.
+      const text = stripHtml(page.body?.storage?.value || "");
+      if (!text.trim()) continue;
+
+      const title = page.title || "Confluence Page";
+      const webUrl = page._links?.webui ? `${siteUrl}/wiki${page._links.webui}` : "";
+      const sourceKey = `confluence-${page.id}`;
+      const content = `Confluence Page: ${title}\n${webUrl ? `URL: ${webUrl}\n` : ""}\n${text}`;
+
+      // 4. Create (or refresh) a text KnowledgeSource per page.
+      const existing = await prisma.knowledgeSource.findFirst({
+        where: { projectId, source: sourceKey },
+      });
+      const src = existing
+        ? await prisma.knowledgeSource.update({
+            where: { id: existing.id },
+            data: { content, title, status: "queued", error: null },
+          })
+        : await prisma.knowledgeSource.create({
+            data: { projectId, type: "text", source: sourceKey, title, content, status: "queued" },
+          });
+      toEnqueue.push({ projectId, sourceId: src.id });
+      pageCount++;
+    }
+  }
+
+  // 5. Enqueue everything for ingestion (a few inline for instant feedback).
+  await enqueueManySourceIngestions(toEnqueue, { maxInline: 5 });
+
+  return { spaces: spaces.length, pages: toEnqueue.length };
 }
