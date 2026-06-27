@@ -110,6 +110,22 @@ export async function action({ params, request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // --- DROPBOX ---
+  if (_action === "disconnect_dropbox") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "dropbox" },
+    });
+    return json({ success: true });
+  }
+
+  // --- MICROSOFT / ONEDRIVE ---
+  if (_action === "disconnect_microsoft") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "microsoft" },
+    });
+    return json({ success: true });
+  }
+
   return json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -175,7 +191,8 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom' && provider !== 'zoho') return;
+    const oauthProviders = ['notion', 'google_drive', 'crisp', 'messenger', 'intercom', 'zoho', 'dropbox', 'microsoft'];
+    if (!oauthProviders.includes(provider)) return;
     setConnecting(provider);
     try {
       const endpoint =
@@ -184,11 +201,12 @@ export default function ProjectIntegrations() {
         provider === 'crisp' ? 'crisp' :
         provider === 'intercom' ? 'intercom' :
         provider === 'zoho' ? 'zoho' :
+        provider === 'dropbox' ? 'dropbox' :
+        provider === 'microsoft' ? 'microsoft' :
         'google';
       const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
       const data = await response.json();
       if (data.url) {
-        // Open OAuth in new window
         const width = 600;
         const height = 700;
         const left = window.screenX + (window.outerWidth - width) / 2;
@@ -265,7 +283,30 @@ export default function ProjectIntegrations() {
       description: "Turn escalated conversations into Zoho Desk tickets automatically.",
       icon: <Headphones className="w-6 h-6 text-red-600" />,
       connected: project.integrations.some(i => i.provider === 'zoho'),
-    }
+    },
+    {
+      id: "dropbox",
+      name: "Dropbox",
+      description: "Import PDFs and documents from your Dropbox as knowledge sources.",
+      icon: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <path fill="#0061FF" d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4L6 2zm12 0l-6 4 6 4 6-4-6-4zM0 14l6 4 6-4-6-4-6 4zm18-4l-6 4 6 4 6-4-6-4z"/>
+        </svg>
+      ),
+      connected: project.integrations.some(i => i.provider === 'dropbox'),
+    },
+    {
+      id: "microsoft",
+      name: "OneDrive",
+      description: "Sync Word documents, PDFs, and text files from Microsoft OneDrive.",
+      icon: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <path fill="#0364B8" d="M14.5 11.5C14.5 9 12.5 7 10 7c-2 0-3.7 1.3-4.3 3.1C4 10.3 3 11.5 3 13c0 1.7 1.3 3 3 3h8.5c1.4 0 2.5-1.1 2.5-2.5 0-1.2-.8-2.2-2-2z"/>
+          <path fill="#0078D4" d="M18.5 12.5h-.2C18 10 16 8 13.5 8c-.5 0-1 .1-1.5.3C11.3 6.9 9.8 6 8 6c-2.8 0-5 2.2-5 5 0 .2 0 .4.1.5C1.8 12 1 13.2 1 14.5 1 16.4 2.6 18 4.5 18H18.5c1.7 0 3-1.3 3-3s-1.3-2.5-3-2.5z"/>
+        </svg>
+      ),
+      connected: project.integrations.some(i => i.provider === 'microsoft'),
+    },
   ];
 
   return (
@@ -297,7 +338,7 @@ export default function ProjectIntegrations() {
             <h3 className="text-xl font-bold mb-2">{item.name}</h3>
             <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
             
-            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && (
+            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && item.id !== 'disconnect_only' && (
               <button 
                 onClick={() => !item.connected && handleConnect(item.id)}
                 disabled={item.connected || connecting === item.id}
