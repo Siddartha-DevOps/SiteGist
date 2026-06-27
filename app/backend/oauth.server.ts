@@ -260,6 +260,81 @@ export async function exchangeIntercomCode(code: string, projectId: string): Pro
   });
 }
 
+// --- Confluence (Atlassian) ---
+// OAuth 2.0 (3LO). Register an app at https://developer.atlassian.com/console/myapps/
+// to obtain CONFLUENCE_CLIENT_ID / CONFLUENCE_CLIENT_SECRET, and add the callback
+// `${APP_URL}/api/oauth/confluence/callback` as an allowed redirect URI.
+export const CONFLUENCE_AUTH_URL = "https://auth.atlassian.com/authorize";
+export const CONFLUENCE_TOKEN_URL = "https://auth.atlassian.com/oauth/token";
+export const CONFLUENCE_SCOPES = [
+  "read:confluence-content.all",
+  "read:confluence-space.summary",
+  "offline_access", // also issue a refresh token
+];
+
+export function getConfluenceAuthUrl(projectId: string) {
+  const clientId = process.env.CONFLUENCE_CLIENT_ID;
+  if (!clientId) throw new Error("CONFLUENCE_CLIENT_ID is missing");
+
+  const params = new URLSearchParams({
+    audience: "api.atlassian.com",
+    client_id: clientId,
+    scope: CONFLUENCE_SCOPES.join(" "),
+    redirect_uri: `${APP_URL}/api/oauth/confluence/callback`,
+    state: projectId, // Pass projectId in state, mirroring Notion/Google
+    response_type: "code",
+    prompt: "consent",
+  });
+
+  return `${CONFLUENCE_AUTH_URL}?${params.toString()}`;
+}
+
+export async function exchangeConfluenceCode(code: string, projectId: string) {
+  const clientId = process.env.CONFLUENCE_CLIENT_ID;
+  const clientSecret = process.env.CONFLUENCE_CLIENT_SECRET;
+
+  const tokenRes = await axios.post(CONFLUENCE_TOKEN_URL, {
+    grant_type: "authorization_code",
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+    redirect_uri: `${APP_URL}/api/oauth/confluence/callback`,
+  });
+
+  const data = tokenRes.data;
+  const accessToken: string = data.access_token;
+
+  // Resolve the cloud id (the workspace this token can access). Required for all
+  // Confluence REST calls: https://api.atlassian.com/ex/confluence/{cloudId}/...
+  const resourcesRes = await axios.get("https://api.atlassian.com/oauth/token/accessible-resources", {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  const site = Array.isArray(resourcesRes.data) ? resourcesRes.data[0] : undefined;
+  if (!site?.id) {
+    throw new Error("No accessible Confluence site found for this Atlassian account.");
+  }
+
+  await prisma.integration.upsert({
+    where: { projectId_provider: { projectId, provider: "confluence" } },
+    update: {
+      accessToken,
+      refreshToken: data.refresh_token || null,
+      // cloud_id is stored alongside the (encrypted) access token so sync can target the workspace.
+      details: { cloud_id: site.id, site_url: site.url, site_name: site.name },
+      updatedAt: new Date(),
+    },
+    create: {
+      projectId,
+      provider: "confluence",
+      accessToken,
+      refreshToken: data.refresh_token || null,
+      details: { cloud_id: site.id, site_url: site.url, site_name: site.name },
+    },
+  });
+
+  return data;
+}
+
 // --- Facebook Messenger ---
 const GRAPH_API = "https://graph.facebook.com/v18.0";
 

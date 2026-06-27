@@ -4,7 +4,7 @@ import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/reac
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { recordAudit } from "~/lib/audit.server";
-import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle, Headphones } from "lucide-react";
+import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle, Headphones, BookText, Loader2, RefreshCw } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export async function action({ params, request }: ActionFunctionArgs) {
@@ -110,6 +110,27 @@ export async function action({ params, request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // --- CONFLUENCE ---
+  if (_action === "sync_confluence") {
+    try {
+      const { syncConfluence } = await import("~/backend/integrations.server");
+      const result = await syncConfluence(project.id);
+      return json({
+        success: true,
+        message: `Queued ${result.pages} Confluence page${result.pages !== 1 ? "s" : ""} from ${result.spaces} space${result.spaces !== 1 ? "s" : ""} for training. They'll show on the Train page as they finish.`,
+      });
+    } catch (e: any) {
+      return json({ error: e?.message || "Confluence sync failed." }, { status: 400 });
+    }
+  }
+
+  if (_action === "disconnect_confluence") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "confluence" },
+    });
+    return json({ success: true });
+  }
+
   return json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -138,6 +159,13 @@ export default function ProjectIntegrations() {
   const zapierFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const freshdeskFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const zohoFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const confluenceFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+
+  useEffect(() => {
+    if (confluenceFetcher.data?.success && confluenceFetcher.formData?.get("_action") === "disconnect_confluence") {
+      revalidator.revalidate();
+    }
+  }, [confluenceFetcher.data, confluenceFetcher.formData, revalidator]);
 
   // Trigger revalidation/refresh when a fetcher finishes successfully
   useEffect(() => {
@@ -175,17 +203,15 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom' && provider !== 'zoho') return;
+    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom' && provider !== 'zoho' && provider !== 'confluence') return;
     setConnecting(provider);
     try {
-      const endpoint =
-        provider === 'notion' ? 'notion' :
-        provider === 'messenger' ? 'messenger' :
-        provider === 'crisp' ? 'crisp' :
-        provider === 'intercom' ? 'intercom' :
-        provider === 'zoho' ? 'zoho' :
-        'google';
-      const response = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
+      // Confluence uses the spec-mandated /api/oauth/ prefix; the rest use /api/auth/.
+      const urlEndpoint =
+        provider === 'confluence'
+          ? '/api/oauth/confluence/url'
+          : `/api/auth/${provider === 'google_drive' ? 'google' : provider}/url`;
+      const response = await fetch(`${urlEndpoint}?projectId=${project.id}`);
       const data = await response.json();
       if (data.url) {
         // Open OAuth in new window
@@ -265,6 +291,13 @@ export default function ProjectIntegrations() {
       description: "Turn escalated conversations into Zoho Desk tickets automatically.",
       icon: <Headphones className="w-6 h-6 text-red-600" />,
       connected: project.integrations.some(i => i.provider === 'zoho'),
+    },
+    {
+      id: "confluence",
+      name: "Confluence",
+      description: "Train your AI on your Atlassian Confluence spaces and pages.",
+      icon: <BookText className="w-6 h-6 text-blue-600" />,
+      connected: project.integrations.some(i => i.provider === 'confluence'),
     }
   ];
 
@@ -479,6 +512,46 @@ export default function ProjectIntegrations() {
                     Disconnect Zoho Desk
                   </button>
                 </zohoFetcher.Form>
+              </div>
+            )}
+
+            {item.id === 'confluence' && item.connected && (
+              <div className="mt-2 space-y-2">
+                <confluenceFetcher.Form method="post">
+                  <input type="hidden" name="_action" value="sync_confluence" />
+                  <button
+                    type="submit"
+                    disabled={confluenceFetcher.state === "submitting"}
+                    className="w-full py-4 rounded-2xl font-black transition-all bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {confluenceFetcher.state === "submitting" && confluenceFetcher.formData?.get("_action") === "sync_confluence" ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Importing pages…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" /> Sync Confluence Pages
+                      </>
+                    )}
+                  </button>
+                </confluenceFetcher.Form>
+
+                {confluenceFetcher.data?.message && (
+                  <p className="text-[11px] text-green-600 font-bold text-center leading-relaxed">{confluenceFetcher.data.message}</p>
+                )}
+                {confluenceFetcher.data?.error && (
+                  <p className="text-[11px] text-red-500 font-bold text-center leading-relaxed">{confluenceFetcher.data.error}</p>
+                )}
+
+                <confluenceFetcher.Form method="post">
+                  <input type="hidden" name="_action" value="disconnect_confluence" />
+                  <button
+                    type="submit"
+                    className="w-full py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
+                  >
+                    Disconnect Confluence
+                  </button>
+                </confluenceFetcher.Form>
               </div>
             )}
           </div>
