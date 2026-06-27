@@ -84,6 +84,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, message: "Re-queued for training." });
   }
 
+  if (method === "set_recrawl") {
+    const sourceId = formData.get("id") as string;
+    const intervalRaw = (formData.get("interval") as string || "").trim();
+
+    // Allowed cadences: never (null), monthly (30), weekly (7), daily (1).
+    const ALLOWED = [1, 7, 30];
+    let interval: number | null = null;
+    if (intervalRaw && intervalRaw !== "null") {
+      const parsed = parseInt(intervalRaw, 10);
+      if (!ALLOWED.includes(parsed)) {
+        return json({ error: "Invalid auto-refresh interval." }, { status: 400 });
+      }
+      interval = parsed;
+    }
+
+    const source = await prisma.knowledgeSource.findFirst({
+      where: { id: sourceId, projectId: params.projectId! },
+    });
+    if (!source) return json({ error: "Source not found." }, { status: 404 });
+    if (source.type !== "web" && source.type !== "youtube") {
+      return json({ error: "Auto-refresh is only available for web and YouTube sources." }, { status: 400 });
+    }
+
+    const nextRecrawlAt = interval ? new Date(Date.now() + interval * 24 * 60 * 60 * 1000) : null;
+    await prisma.knowledgeSource.update({
+      where: { id: sourceId },
+      data: { recrawlIntervalDays: interval, nextRecrawlAt },
+    });
+
+    return json({
+      success: true,
+      message: interval
+        ? `Auto-refresh set. Next refresh ${nextRecrawlAt!.toLocaleDateString()}.`
+        : "Auto-refresh turned off for this source.",
+    });
+  }
+
   if (method === "add_qa") {
     const question = (formData.get("question") as string || "").trim();
     const answer = (formData.get("answer") as string || "").trim();
@@ -1505,10 +1542,33 @@ export default function TrainProject() {
                   {source.status === "failed" && source.error && (
                     <p className="mt-1.5 text-[10px] text-red-500 font-medium max-w-md truncate" title={source.error}>⚠ {source.error}</p>
                   )}
+                  {source.recrawlIntervalDays && source.nextRecrawlAt && (
+                    <p className="mt-1.5 text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" /> Next refresh: {new Date(source.nextRecrawlAt).toLocaleDateString()}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                {(source.type === "web" || source.type === "youtube") && (
+                  <Form method="post">
+                    <input type="hidden" name="_action" value="set_recrawl" />
+                    <input type="hidden" name="id" value={source.id} />
+                    <select
+                      name="interval"
+                      defaultValue={source.recrawlIntervalDays ? String(source.recrawlIntervalDays) : "null"}
+                      onChange={(e) => e.currentTarget.form?.requestSubmit()}
+                      title="Auto-refresh schedule"
+                      className="bg-white border border-zinc-200 text-[11px] font-bold px-2.5 py-1.5 rounded-lg outline-none cursor-pointer text-zinc-600 hover:border-zinc-300 transition-colors"
+                    >
+                      <option value="null">Auto-refresh: Never</option>
+                      <option value="30">Monthly</option>
+                      <option value="7">Weekly</option>
+                      <option value="1">Daily</option>
+                    </select>
+                  </Form>
+                )}
                 <Form method="post">
                   <input type="hidden" name="_action" value="retry_source" />
                   <input type="hidden" name="id" value={source.id} />

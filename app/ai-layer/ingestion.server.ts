@@ -44,13 +44,17 @@ export function isAsyncIngestionEnabled(): boolean {
  * is enabled; otherwise runs inline (awaited) so existing deployments keep working
  * exactly as before until Inngest is configured.
  */
-export async function enqueueSourceIngestion(projectId: string, sourceId: string): Promise<void> {
+export async function enqueueSourceIngestion(
+  projectId: string,
+  sourceId: string,
+  opts: { force?: boolean } = {}
+): Promise<void> {
   if (isAsyncIngestionEnabled()) {
-    await inngest.send({ name: INGEST_SOURCE_EVENT, data: { projectId, sourceId } });
+    await inngest.send({ name: INGEST_SOURCE_EVENT, data: { projectId, sourceId, force: opts.force } });
     return;
   }
   try {
-    await ingestKnowledgeSource(sourceId);
+    await ingestKnowledgeSource(sourceId, { force: opts.force });
   } catch (err) {
     console.error(`[Ingestion] Inline fallback failed for source ${sourceId}:`, err);
   }
