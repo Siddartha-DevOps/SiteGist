@@ -18,8 +18,8 @@ export const ingestSource = inngest.createFunction(
   },
   { event: INGEST_SOURCE_EVENT },
   async ({ event, step }) => {
-    const { sourceId } = event.data;
-    const result = await step.run("ingest-knowledge-source", () => ingestKnowledgeSource(sourceId));
+    const { sourceId, force } = event.data;
+    const result = await step.run("ingest-knowledge-source", () => ingestKnowledgeSource(sourceId, { force }));
     return result;
   }
 );
