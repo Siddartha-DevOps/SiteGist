@@ -53,7 +53,10 @@ export function getPortkey() {
       return null;
     }
 
-    console.log(`[Portkey] Using Portkey with API Key starting: ${apiKey.substring(0, 7)}... and Virtual Key: ${virtualKey ? virtualKey.substring(0, 7) + "..." : "NONE"}`);
+    // Key-prefix diagnostics are for local debugging only — keep them out of production logs.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[Portkey] Using Portkey with API Key starting: ${apiKey.substring(0, 7)}... and Virtual Key: ${virtualKey ? virtualKey.substring(0, 7) + "..." : "NONE"}`);
+    }
 
     _portkey = new Portkey({
       apiKey,

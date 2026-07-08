@@ -192,7 +192,9 @@ function getOpenAI() {
       console.log("[AI] Initializing OpenAI via Portkey");
       _openai = portkey as any;
     } else {
-      console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+      }
       _openai = new OpenAI({ apiKey: currentKey });
     }
   }
@@ -270,7 +272,11 @@ function getGemini(): GoogleGenAI | null {
   }
 
   if (!_gemini && currentKey) {
-    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+    // Key diagnostics (length + first/last-4) are useful locally but should not be
+    // logged in production.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+    }
     _gemini = new GoogleGenAI({
       apiKey: currentKey,
       httpOptions: {
@@ -279,27 +285,6 @@ function getGemini(): GoogleGenAI | null {
         }
       }
     });
-
-    // List models for diagnostic purposes asynchronously
-    (async () => {
-      try {
-        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
-          headers: {
-            "x-goog-api-key": currentKey,
-          },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const modelList = data.models?.map((m: any) => m.name.replace("models/", "")).join(", ");
-          console.log(`[AI] Gemini Auth Check: SUCCESS. Available Models: ${modelList}`);
-        } else {
-          const errData = await response.json().catch(() => ({}));
-          console.error(`[AI] Gemini Auth Check: FAILED. Status: ${response.status}. Reason: ${JSON.stringify(errData)}`);
-        }
-      } catch (e) {
-        console.warn("[AI] Gemini Auth Check: NETWORK_ERROR", e);
-      }
-    })();
   }
   return _gemini;
 }
