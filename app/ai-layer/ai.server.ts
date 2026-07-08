@@ -531,11 +531,24 @@ export async function upsertChunksBatched(
     if (opts.onProgress) await opts.onProgress(processed, total);
   }
 
-  console.log(`[AI] Batched upsert: ${upserted}/${total} chunks to Pinecone.`);
+  // Fail loudly if there were chunks to index but nothing was actually stored
+  // (every embedding failed or mismatched dimension). Returning { upserted: 0 }
+  // here would let ingestKnowledgeSource mark the source "indexed" with no vectors.
+  if (total > 0 && upserted === 0) {
+    throw new Error(`Vector upsert produced 0 vectors for ${total} chunk(s) in namespace ${projectId} — refusing to report success.`);
+  }
+
+  log.info("vector.upsert_batched.ok", { projectId, namespace: projectId, upserted, chunks: total });
   return { upserted };
 }
 
-export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
+export async function upsertChunks(
+  projectId: string,
+  chunks: { text: string; metadata: any }[],
+  opts: { sourceId?: string } = {}
+) {
+  const startedAt = Date.now();
+  const sourceId = opts.sourceId;
   try {
     const index = pineconeIndex;
 
@@ -578,15 +591,55 @@ export async function upsertChunks(projectId: string, chunks: { text: string; me
       return true;
     });
 
-    if (validVectors.length > 0) {
-      await index.namespace(projectId).upsert({ records: validVectors });
-      console.log(`[AI] Successfully upserted ${validVectors.length} chunks to Pinecone vector database.`);
-    } else {
-      console.warn("[AI] No valid vector embedding with matching dimension could be created for chunks. Stored content in main database only.");
+    // Fail loudly when there was content to index but nothing survived embedding
+    // (empty/failed embeddings or dimension mismatch). Silently returning here is
+    // what let a source be marked "indexed" with zero vectors actually stored.
+    if (validVectors.length === 0) {
+      if (chunks.length > 0) {
+        throw new Error(
+          `No valid vectors to upsert for project ${projectId} (all ${chunks.length} chunk(s) failed to embed or had a dimension mismatch).`
+        );
+      }
+      return; // genuinely nothing to index
     }
-  } catch (error) {
-    console.error("[AI] Error upserting chunks to Pinecone vector store (falling back gracefully to Prisma DB storage):", error);
-    // Suppress error so training action finishes successfully, storing documents in SQLite/MySQL knowledgeSource for keyword search.
+
+    await index.namespace(projectId).upsert({ records: validVectors });
+    log.info("vector.upsert.ok", {
+      projectId,
+      sourceId,
+      namespace: projectId,
+      vectors: validVectors.length,
+      chunks: chunks.length,
+      duration_ms: Date.now() - startedAt,
+    });
+
+    // Only mark the source indexed AFTER the upsert has actually succeeded.
+    if (sourceId) {
+      const { prisma } = await import("~/database/db.server");
+      await prisma.knowledgeSource
+        .update({ where: { id: sourceId }, data: { status: "indexed", error: null, lastIndexedAt: new Date() } })
+        .catch((e) => log.warn("vector.upsert.status_update_failed", { sourceId, error: e?.message }));
+    }
+  } catch (error: any) {
+    // FAILURE PATH: capture the original error, mark the source FAILED with the
+    // reason, then re-throw so the caller/pipeline stops instead of continuing.
+    const message = error?.message ? String(error.message).slice(0, 1000) : "Vector upsert failed";
+    log.error("vector.upsert.failed", {
+      projectId,
+      sourceId,
+      namespace: projectId,
+      chunks: chunks.length,
+      duration_ms: Date.now() - startedAt,
+      error: message,
+      stack: error?.stack,
+    });
+    if (sourceId) {
+      const { prisma } = await import("~/database/db.server");
+      await prisma.knowledgeSource
+        .update({ where: { id: sourceId }, data: { status: "failed", error: message } })
+        .catch((e) => log.warn("vector.upsert.status_update_failed", { sourceId, error: e?.message }));
+    }
+    throw error;
   }
 }
 

@@ -738,24 +738,23 @@ const prisma = new Proxy({} as ExtendedPrismaClient, {
         } catch (err: any) {
           const errMsg = err.message || "";
           const isKeyError = errMsg.includes("P5000") || errMsg.includes("P6002") || errMsg.includes("API key is invalid");
-          if (isKeyError) {
-            console.log(`[Prisma Failover] Client operation in offline fallback.`);
-            if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-              setUsingFallback(true);
-              const fallbackClient = getPrisma();
-              const fallbackMethod = fallbackClient[prop];
-              if (typeof fallbackMethod === "function") {
-                try {
-                  return await fallbackMethod.apply(fallbackClient, args);
-                } catch (fallbackErr) {
-                  return [];
-                }
-              }
+
+          // Accelerate key failure only: retry once through the direct connection.
+          // Its result (success OR error) is returned/propagated as-is.
+          if (isKeyError && process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
+            console.log(`[Prisma Failover] Client operation '${prop}' retrying via direct connection.`);
+            setUsingFallback(true);
+            const fallbackClient = getPrisma();
+            const fallbackMethod = fallbackClient[prop];
+            if (typeof fallbackMethod === "function") {
+              return await fallbackMethod.apply(fallbackClient, args);
             }
-          } else {
-            console.log(`[Prisma Wrapper] Client operation '${prop}' resolved via fallback.`);
           }
-          return [];
+
+          // Never hide a query/transaction failure behind an empty array — a
+          // silent [] here can make a failed $transaction or $queryRaw look like
+          // a successful empty result. Surface the real error to the caller.
+          throw err;
         }
       };
     }

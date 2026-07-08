@@ -74,7 +74,11 @@ export async function syncNotion(projectId: string) {
     });
 
     const chunks = chunkText(content);
-    await upsertChunks(projectId, chunks.map(c => ({ text: c, metadata: { source: 'notion', title, url: page.url || `https://notion.so/${page.id.replace(/-/g, "")}` } })));
+    await upsertChunks(
+      projectId,
+      chunks.map(c => ({ text: c, metadata: { source: 'notion', title, url: page.url || `https://notion.so/${page.id.replace(/-/g, "")}` } })),
+      { sourceId: `notion-${page.id}` }
+    );
   }
 }
 
@@ -184,10 +188,11 @@ export async function syncGoogleDrive(projectId: string) {
       });
 
       const chunks = chunkText(fullContent);
-      await upsertChunks(projectId, chunks.map(c => ({
-        text: c,
-        metadata: { source, title, type: "google_drive" },
-      })));
+      await upsertChunks(
+        projectId,
+        chunks.map(c => ({ text: c, metadata: { source, title, type: "google_drive" } })),
+        { sourceId: `gdrive-${file.id}` }
+      );
 
       console.log(`[Google Drive] Synced "${title}" (${chunks.length} chunks)`);
     } catch (err) {
