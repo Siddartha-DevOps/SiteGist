@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { pineconeIndex } from "~/lib/pinecone.server";
-import { getPortkey } from "./portkey.server";
+import { getPortkey, getPortkeyEmbeddings } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
 import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
@@ -199,6 +199,42 @@ function getOpenAI() {
   return _openai;
 }
 
+let _openaiEmbeddings: OpenAI | null = null;
+let _lastEmbeddingsKey = "";
+
+/**
+ * Dedicated client for EMBEDDINGS. It must NOT reuse the Portkey chat client from
+ * getOpenAI(): that client is bound to the chat virtual key / chat provider, so
+ * embedding requests sent through it are silently misrouted. Preference order:
+ *   1. A dedicated Portkey embeddings client (PORTKEY_EMBEDDINGS_VIRTUAL_KEY), else
+ *   2. a direct OpenAI client pointed straight at the embeddings provider.
+ */
+function getOpenAIEmbeddings(): OpenAI | null {
+  const searchKeys = ["OPENAI_KEY", "OPENAI_API_KEY", "OpenAI_API_KEY", "VITE_OPENAI_API_KEY"];
+  let currentKey = "";
+  for (const key of searchKeys) {
+    const cleaned = cleanKey(process.env[key]);
+    if (cleaned) { currentKey = cleaned; break; }
+  }
+
+  if (currentKey !== _lastEmbeddingsKey) {
+    _openaiEmbeddings = null;
+    _lastEmbeddingsKey = currentKey;
+  }
+
+  if (!_openaiEmbeddings) {
+    const pkEmbeddings = getPortkeyEmbeddings();
+    if (pkEmbeddings) {
+      console.log("[AI] Initializing dedicated embeddings client via Portkey embeddings virtual key");
+      _openaiEmbeddings = pkEmbeddings as any;
+    } else if (currentKey) {
+      console.log(`[AI] Initializing dedicated OpenAI embeddings client (direct to embeddings provider).`);
+      _openaiEmbeddings = new OpenAI({ apiKey: currentKey });
+    }
+  }
+  return _openaiEmbeddings;
+}
+
 let _gemini: GoogleGenAI | null = null;
 let _geminiFoundVar = "none";
 let _lastGeminiKey = "";
@@ -389,7 +425,7 @@ export async function embedText(text: string) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       if (EMBEDDING_PROVIDER === "openai") {
-        const openai = getOpenAI();
+        const openai = getOpenAIEmbeddings();
         if (!openai) {
           throw new Error("OpenAI is configured as the EMBEDDING_PROVIDER, but OpenAI API key is not available or invalid.");
         }
@@ -443,7 +479,7 @@ export async function embedTexts(texts: string[], batchSize = 96): Promise<numbe
   const results: number[][] = texts.map(() => [] as number[]);
 
   if (EMBEDDING_PROVIDER === "openai") {
-    const openai = getOpenAI();
+    const openai = getOpenAIEmbeddings();
     if (!openai) throw new Error("OpenAI is configured as EMBEDDING_PROVIDER, but no OpenAI client is available.");
 
     for (let start = 0; start < texts.length; start += batchSize) {
