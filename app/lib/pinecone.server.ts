@@ -12,7 +12,8 @@ const getPineconeClient = () => {
     
     if (!apiKey) {
       console.warn("[Pinecone Audit] WARNING: PINECONE_API_KEY is not defined in environment variables.");
-    } else {
+    } else if (process.env.NODE_ENV !== "production") {
+      // Key-fragment diagnostics for local debugging only — never in production logs.
       console.log(`[Pinecone Audit] Using Key Masked: ${apiKey.substring(0, 4)}...${apiKey.slice(-4)}`);
     }
 

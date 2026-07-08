@@ -300,8 +300,10 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 
-  // Diagnostic (masked)
-  console.log(`[RAG Audit] Reranking with Portkey. Virtual Key Masked: ${cohereVirtualKey.substring(0, 4)}...${cohereVirtualKey.slice(-4)}`);
+  // Diagnostic (masked) — key-fragment logging kept out of production.
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[RAG Audit] Reranking with Portkey. Virtual Key Masked: ${cohereVirtualKey.substring(0, 4)}...${cohereVirtualKey.slice(-4)}`);
+  }
 
   try {
     const response = await fetch(
