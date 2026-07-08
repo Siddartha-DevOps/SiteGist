@@ -800,6 +800,29 @@ export async function expandQueries(query: string, n = 2): Promise<string[]> {
   }
 }
 
+// Postgres text-search configurations we allow for full-text search. Used to map
+// a project's configured language to a regconfig safely (allow-list → no injection).
+const PG_FTS_CONFIGS = new Set([
+  "simple", "arabic", "armenian", "basque", "catalan", "danish", "dutch", "english",
+  "finnish", "french", "german", "greek", "hindi", "hungarian", "indonesian", "irish",
+  "italian", "lithuanian", "nepali", "norwegian", "portuguese", "romanian", "russian",
+  "serbian", "spanish", "swedish", "tamil", "turkish", "yiddish",
+]);
+
+/**
+ * Resolve a project's configured language to a Postgres FTS regconfig. Defaults to
+ * "english" for "auto"/unknown values so behaviour is unchanged unless a supported
+ * language name is set. NOTE: the KnowledgeSource.search_vector column is generated
+ * with a fixed config, so switching languages here improves query parsing but full
+ * multilingual recall also requires regenerating that column per language.
+ */
+function ftsConfig(lang?: string): string {
+  if (!lang) return "english";
+  const l = lang.trim().toLowerCase();
+  if (!l || l === "auto") return "english";
+  return PG_FTS_CONFIGS.has(l) ? l : "english";
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
@@ -822,9 +845,21 @@ export async function* streamRAG(
   if (projectId !== "demo-project") {
     try {
       const { prisma } = await import("~/database/db.server");
-      const qas = await prisma.knowledgeQA.findMany({
-        where: { projectId }
-      });
+      // Push candidate filtering to the DB instead of loading every Q&A row and
+      // scanning it in JS. Every positive score below is a substring relationship
+      // between the query and a stored question, so an ILIKE in both directions
+      // (bounded by LIMIT) fetches only plausible matches; the exact scoring still
+      // runs in JS on that small candidate set to preserve the ranking semantics.
+      const qas = await prisma.$queryRaw<{ id: string; question: string; answer: string }[]>`
+        SELECT "id", "question", "answer"
+        FROM "KnowledgeQA"
+        WHERE "projectId" = ${projectId}
+          AND (
+            "question" ILIKE '%' || ${query} || '%'
+            OR ${query} ILIKE '%' || "question" || '%'
+          )
+        LIMIT 25
+      `;
 
       if (qas && qas.length > 0) {
         const getNormalizedText = (txt: string) => {
@@ -932,15 +967,17 @@ export async function* streamRAG(
         console.warn("[Hybrid Search] Pinecone initialization/embedding failed during search:", err);
       }
 
-      // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery)
+      // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery).
+      //    The text-search config is per-project (defaults to English) rather than hardcoded.
+      const ftsLang = ftsConfig(responseLanguage);
       const keywordTask = (!searchTerms || !searchTerms.trim())
         ? Promise.resolve([])
         : prisma.$queryRaw<any[]>`
             SELECT "content", "source", "title",
-                   ts_rank("search_vector", websearch_to_tsquery('english', ${searchTerms})) AS "rank"
+                   ts_rank("search_vector", websearch_to_tsquery(${ftsLang}::regconfig, ${searchTerms})) AS "rank"
             FROM "KnowledgeSource"
             WHERE "projectId" = ${projectId}
-              AND "search_vector" @@ websearch_to_tsquery('english', ${searchTerms})
+              AND "search_vector" @@ websearch_to_tsquery(${ftsLang}::regconfig, ${searchTerms})
             ORDER BY "rank" DESC
             LIMIT 5
           `.catch((err: any) => {
@@ -998,14 +1035,17 @@ export async function* streamRAG(
 
       const fuseList = (
         items: any[],
-        toDoc: (item: any) => { text?: string; url?: string; title?: string; method: string; vectorScore?: number } | null
+        toDoc: (item: any) => { id?: string; text?: string; url?: string; title?: string; method: string; vectorScore?: number } | null
       ) => {
         const seenInList = new Set<string>();
         let rank = 0;
         for (const item of items) {
           const doc = toDoc(item);
           if (!doc?.text) continue;
-          const key = doc.text.substring(0, 100);
+          // Dedup on a stable identity: the vector's chunk id when available, else a
+          // content hash of the FULL text. Using the first 100 chars merged adjacent
+          // chunks, because chunk overlap prepends the previous chunk's tail.
+          const key = doc.id ?? ("h:" + crypto.createHash("sha256").update(doc.text).digest("hex"));
           if (seenInList.has(key)) continue; // only the best rank within a single list counts
           seenInList.add(key);
           rank += 1;
@@ -1039,6 +1079,7 @@ export async function* streamRAG(
         .filter((m: any) => (m.score || 0) >= VECTOR_SCORE_THRESHOLD && (m.metadata as any)?.text)
         .sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
       fuseList(vectorRanked, (m: any) => ({
+        id: m.id,
         text: (m.metadata as any)?.text,
         url: (m.metadata as any)?.url,
         title: (m.metadata as any)?.title,
@@ -1231,11 +1272,15 @@ How it works:
   const geminiModel = wantsGemini ? modelPreference! : "gemini-2.0-flash";
   const openaiModelPref = resolveOpenAIModel(modelPreference);
 
-  // Add a safety timeout for the entire generation process
+  // Add a safety timeout for the entire generation process. On timeout we actually
+  // abort the in-flight provider request (via AbortController) instead of only
+  // recording an error while the stream keeps running.
+  const controller = new AbortController();
   const generationTimeout = setTimeout(() => {
     if (!fullAnswer && !lastError) {
       lastError = { message: "Generation timed out after 30 seconds." };
     }
+    controller.abort();
   }, 30000);
 
   try {
@@ -1251,9 +1296,10 @@ How it works:
         const result = await gemini.models.generateContentStream({
           model: geminiModel,
           contents: prompt,
-          config: { maxOutputTokens: GEMINI_CHAT_MAX_TOKENS },
+          config: { maxOutputTokens: GEMINI_CHAT_MAX_TOKENS, abortSignal: controller.signal } as any,
         });
         for await (const chunk of result) {
+          if (controller.signal.aborted) break; // stop consuming on timeout
           try {
             const chunkText = chunk.text;
             if (chunkText) { fullAnswer += chunkText; yield chunkText; }
@@ -1285,8 +1331,9 @@ How it works:
           stream: true,
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxTokens,
-        }, { timeout: 20000 });
+        }, { timeout: 20000, signal: controller.signal });
         for await (const chunk of stream) {
+          if (controller.signal.aborted) break; // stop consuming on timeout
           const content = chunk.choices[0]?.delta?.content || "";
           if (content) { fullAnswer += content; yield content; }
         }
