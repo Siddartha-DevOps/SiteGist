@@ -4,7 +4,7 @@ import { useLoaderData, Form, useNavigation, useActionData, useRevalidator, useS
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { getSitemapUrls } from "~/ai-layer/crawler.server";
-import { enqueueSourceIngestion, enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
+import { enqueueSourceIngestion, enqueueManySourceIngestions, cancelIngestion } from "~/ai-layer/ingestion.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen, Github } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
@@ -68,6 +68,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
       await prisma.knowledgeSource.delete({ where: { id: sourceId } });
     }
     return json({ success: true, message: "Source removed and vector data cleaned successfully" });
+  }
+
+  if (method === "cancel_source") {
+    const sourceId = formData.get("id") as string;
+    const { cancelled } = await cancelIngestion(params.projectId!, sourceId);
+    return json({
+      success: true,
+      message: cancelled ? "Ingestion cancelled." : "Nothing to cancel (already finished).",
+    });
   }
 
   if (method === "retry_source") {
@@ -424,6 +433,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, message: "Google Drive files synced successfully" });
   }
 
+  if (method === "sync_dropbox") {
+    const { syncDropbox } = await import("~/backend/integrations.server");
+    await syncDropbox(params.projectId!);
+    return json({ success: true, message: "Dropbox files synced successfully" });
+  }
+
+  if (method === "sync_microsoft") {
+    const { syncOneDrive } = await import("~/backend/integrations.server");
+    await syncOneDrive(params.projectId!);
+    return json({ success: true, message: "OneDrive files synced successfully" });
+  }
+
   if (method === "get_sitemap") {
     const urls = await getSitemapUrls(url);
     return json({ sitemapUrls: urls });
@@ -582,10 +603,15 @@ export default function TrainProject() {
 
   const [connecting, setConnecting] = useState<string | null>(null);
 
-  const handleConnect = async (provider: 'notion' | 'google') => {
+  const handleConnect = async (provider: 'notion' | 'google' | 'dropbox' | 'microsoft') => {
     setConnecting(provider);
     try {
-      const resp = await fetch(`/api/auth/${provider}/url?projectId=${project.id}`);
+      const endpoint =
+        provider === 'notion' ? 'notion' :
+        provider === 'google' ? 'google' :
+        provider === 'dropbox' ? 'dropbox' :
+        'microsoft';
+      const resp = await fetch(`/api/auth/${endpoint}/url?projectId=${project.id}`);
       const { url } = await resp.json();
       if (url) {
         window.open(url, "oauth_popup", "width=600,height=700");
@@ -611,6 +637,8 @@ export default function TrainProject() {
   const integrations = (project as any).integrations || [];
   const isNotionConnected = integrations.some((i: any) => i.provider === 'notion');
   const isDriveConnected = integrations.some((i: any) => i.provider === 'google_drive');
+  const isDropboxConnected = integrations.some((i: any) => i.provider === 'dropbox');
+  const isMicrosoftConnected = integrations.some((i: any) => i.provider === 'microsoft');
 
   return (
     <div>
@@ -807,6 +835,62 @@ export default function TrainProject() {
                         className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold transition-all hover:scale-105"
                       >
                         {connecting === 'google' ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
+                      </button>
+                    )}
+                  </Form>
+                </div>
+
+                {/* Dropbox */}
+                <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100 flex items-center justify-between group hover:border-blue-500/10 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center">
+                      <svg viewBox="0 0 24 24" className="w-6 h-6"><path fill="#0061FF" d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4L6 2zm12 0l-6 4 6 4 6-4-6-4zM0 14l6 4 6-4-6-4-6 4zm18-4l-6 4 6 4 6-4-6-4z"/></svg>
+                    </div>
+                    <div>
+                      <h3 className="font-bold flex items-center gap-2">
+                        Dropbox
+                        {isDropboxConnected && <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full uppercase tracking-wider font-black">Connected</span>}
+                      </h3>
+                      <p className="text-xs text-text-muted">Train on PDFs and docs from your Dropbox</p>
+                    </div>
+                  </div>
+                  <Form method="post">
+                    <input type="hidden" name="_action" value="sync_dropbox" />
+                    {isDropboxConnected ? (
+                      <button type="submit" disabled={isCrawling} className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold transition-all hover:scale-105">
+                        {isCrawling ? <Loader2 className="w-3 h-3 animate-spin" /> : "Sync All"}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => handleConnect('dropbox')} disabled={!!connecting} className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold transition-all hover:scale-105">
+                        {connecting === 'dropbox' ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
+                      </button>
+                    )}
+                  </Form>
+                </div>
+
+                {/* OneDrive / Microsoft */}
+                <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100 flex items-center justify-between group hover:border-blue-500/10 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center">
+                      <svg viewBox="0 0 24 24" className="w-6 h-6"><path fill="#0364B8" d="M14.5 11.5C14.5 9 12.5 7 10 7c-2 0-3.7 1.3-4.3 3.1C4 10.3 3 11.5 3 13c0 1.7 1.3 3 3 3h8.5c1.4 0 2.5-1.1 2.5-2.5 0-1.2-.8-2.2-2-2z"/><path fill="#0078D4" d="M18.5 12.5h-.2C18 10 16 8 13.5 8c-.5 0-1 .1-1.5.3C11.3 6.9 9.8 6 8 6c-2.8 0-5 2.2-5 5 0 .2 0 .4.1.5C1.8 12 1 13.2 1 14.5 1 16.4 2.6 18 4.5 18H18.5c1.7 0 3-1.3 3-3s-1.3-2.5-3-2.5z"/></svg>
+                    </div>
+                    <div>
+                      <h3 className="font-bold flex items-center gap-2">
+                        OneDrive
+                        {isMicrosoftConnected && <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full uppercase tracking-wider font-black">Connected</span>}
+                      </h3>
+                      <p className="text-xs text-text-muted">Sync documents from Microsoft OneDrive</p>
+                    </div>
+                  </div>
+                  <Form method="post">
+                    <input type="hidden" name="_action" value="sync_microsoft" />
+                    {isMicrosoftConnected ? (
+                      <button type="submit" disabled={isCrawling} className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold transition-all hover:scale-105">
+                        {isCrawling ? <Loader2 className="w-3 h-3 animate-spin" /> : "Sync All"}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => handleConnect('microsoft')} disabled={!!connecting} className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold transition-all hover:scale-105">
+                        {connecting === 'microsoft' ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
                       </button>
                     )}
                   </Form>

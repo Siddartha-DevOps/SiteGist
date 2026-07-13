@@ -17,6 +17,15 @@ export async function comparePassword(password: string, hash: string) {
 }
 
 const sessionSecret = env.SESSION_SECRET || "DEFAULT_SECRET_CHANGE_ME";
+if (!env.SESSION_SECRET && env.NODE_ENV === "production") {
+  // A known default secret means session cookies can be forged → account takeover.
+  // We warn loudly rather than crash, to match this app's "never fail boot in prod"
+  // posture (see validateEnvAtStartup), but this must be fixed immediately.
+  console.error(
+    "[auth] SECURITY: SESSION_SECRET is not set in production — session cookies are " +
+    "signed with a PUBLIC DEFAULT and can be FORGED. Set SESSION_SECRET now."
+  );
+}
 
 export const storage = createCookieSessionStorage({
   cookie: {

@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight } from "lucide-react";
+import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight, Loader2, AlertTriangle } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -50,7 +50,18 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       "app.sitegist.co";
     const baseUrl = `https://${host}`;
 
-    return json({ project, messageCount, unanswered, baseUrl });
+    // Setup validation: turn raw source statuses into an actionable readiness summary
+    // so the dashboard can tell the user *why* their bot isn't ready (still training,
+    // failed sources) instead of silently looking "done".
+    const sources = project.knowledgeSources;
+    const setup = {
+      total: sources.length,
+      indexed: sources.filter((s) => s.status === "indexed").length,
+      failed: sources.filter((s) => s.status === "failed").length,
+      inProgress: sources.filter((s) => ["queued", "crawling", "embedding"].includes(s.status)).length,
+    };
+
+    return json({ project, messageCount, unanswered, baseUrl, setup });
   } catch (error: any) {
     // Surface DB failures (e.g. schema drift on a db-push'd prod that is missing
     // migrated columns) through the root ErrorBoundary's "Database Connection
@@ -66,8 +77,25 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export default function ProjectDetails() {
-  const { project, messageCount, unanswered, baseUrl } = useLoaderData<typeof loader>();
+  const { project, messageCount, unanswered, baseUrl, setup } = useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
+
+  // Actionable setup-validation banner derived from real ingestion status.
+  const trainHref = `/dashboard/projects/${project.id}/train`;
+  const readiness =
+    setup.total === 0
+      ? { tone: "info" as const, icon: Circle, text: "No knowledge added yet — your chatbot has nothing to answer from.", cta: "Add sources", href: trainHref }
+      : setup.failed > 0
+      ? { tone: "error" as const, icon: AlertTriangle, text: `${setup.failed} source${setup.failed === 1 ? "" : "s"} failed to train — open Train to see the reason and retry.`, cta: "Review", href: trainHref }
+      : setup.inProgress > 0
+      ? { tone: "progress" as const, icon: Loader2, text: `${setup.inProgress} source${setup.inProgress === 1 ? "" : "s"} still training — answers improve as this finishes.`, cta: "View progress", href: trainHref }
+      : { tone: "ok" as const, icon: CheckCircle2, text: `All ${setup.indexed} source${setup.indexed === 1 ? "" : "s"} trained and ready.`, cta: null, href: trainHref };
+  const readinessStyles = {
+    info: "bg-zinc-50 border-zinc-200 text-zinc-600",
+    error: "bg-red-50 border-red-200 text-red-700",
+    progress: "bg-amber-50 border-amber-200 text-amber-700",
+    ok: "bg-green-50 border-green-200 text-green-700",
+  }[readiness.tone];
 
   // First-run onboarding checklist — derived from real project state; it disappears
   // once the core steps (train, customize, test) are done.
@@ -134,6 +162,17 @@ export default function ProjectDetails() {
           </div>
         </div>
       )}
+
+      {/* Setup validation: actionable readiness state from real ingestion status. */}
+      <div className={`mb-8 flex items-center gap-3 rounded-2xl border px-5 py-4 ${readinessStyles}`}>
+        <readiness.icon className={`w-5 h-5 shrink-0 ${readiness.tone === "progress" ? "animate-spin" : ""}`} />
+        <p className="text-sm font-semibold flex-1 min-w-0">{readiness.text}</p>
+        {readiness.cta && (
+          <Link to={readiness.href} className="text-xs font-bold whitespace-nowrap inline-flex items-center gap-1 hover:gap-2 transition-all">
+            {readiness.cta} <ArrowRight className="w-3 h-3" />
+          </Link>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm transition-all hover:shadow-md">

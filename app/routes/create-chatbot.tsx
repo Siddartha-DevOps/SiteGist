@@ -3,6 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { enforceChatbotQuota } from "~/lib/usage.server";
 import { Bot, ArrowLeft, Loader2, Sparkles, Globe, Shield } from "lucide-react";
 import React from 'react';
 import { Logo } from "~/frontend/components/Logo";
@@ -20,6 +21,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (typeof name !== "string" || name.length < 3) {
     return json({ error: "Chatbot name must be at least 3 characters" }, { status: 400 });
   }
+
+  const quotaError = await enforceChatbotQuota(userId);
+  if (quotaError) return quotaError;
 
   try {
     const project = await prisma.project.create({
