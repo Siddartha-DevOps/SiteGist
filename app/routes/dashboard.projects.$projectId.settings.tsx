@@ -162,6 +162,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     "lead.captured": formData.get("webhook_event_lead") === "on",
   };
 
+  // Human handoff: configurable escalation keywords + agent routing mode.
+  const escalationKeywords = ((formData.get("escalation_keywords") as string) || "")
+    .split(/[\n,]/).map(k => k.trim()).filter(Boolean);
+  const routingModeRaw = (formData.get("escalation_routing") as string) || "off";
+  const escalation = {
+    keywords: escalationKeywords,
+    routing: { mode: ["off", "round_robin", "first_admin"].includes(routingModeRaw) ? routingModeRaw : "off" },
+  };
+
   const settings = {
     systemPrompt,
     model,
@@ -173,6 +182,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     leadFields,
     slackWebhookUrl,
     webhookEvents,
+    escalation,
     branding: {
       primaryColor,
       assistantName,
@@ -745,6 +755,30 @@ export default function ProjectSettings() {
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Human handoff — escalation triggers + agent routing */}
+                <div className="border-t border-zinc-100 pt-6">
+                  <label className="block text-sm font-bold mb-2">Human handoff</label>
+                  <p className="text-xs text-zinc-400 mb-3 font-medium">Escalate to a human when a visitor's message matches any of these keywords (one per line or comma-separated). Leave empty to use sensible defaults.</p>
+                  <textarea
+                    name="escalation_keywords"
+                    rows={3}
+                    defaultValue={(currentSettings.escalation?.keywords || []).join("\n")}
+                    placeholder={"human\nagent\ntalk to someone"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm font-mono"
+                  />
+                  <label className="block text-sm font-bold mt-4 mb-1.5">Agent routing</label>
+                  <select
+                    name="escalation_routing"
+                    defaultValue={currentSettings.escalation?.routing?.mode || "off"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
+                  >
+                    <option value="off">Off — leave escalated chats unassigned</option>
+                    <option value="round_robin">Round-robin — least-busy admin</option>
+                    <option value="first_admin">First admin — always the earliest admin</option>
+                  </select>
+                  <p className="text-[11px] text-zinc-400 mt-1.5">Assigns escalated conversations to a project <strong>Admin</strong> member (managed on the Members page).</p>
                 </div>
 
                 <div className="border-t border-zinc-100 pt-6">

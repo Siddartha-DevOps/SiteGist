@@ -4,6 +4,7 @@ import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions, analyzeSentiment } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
 import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
+import { pickAgentEmail } from "~/backend/routing.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
@@ -296,9 +297,12 @@ export async function action({ request }: ActionFunctionArgs) {
           // Agent-only: skip AI entirely, route straight to human queue
           if (chatMode === 'agent-only') {
             if (projectId !== "demo-project" && session) {
+              // Agent routing: assign the escalated conversation per settings.escalation.routing.
+              const routingMode = (settings?.escalation?.routing?.mode) || "off";
+              const assignedTo = await pickAgentEmail(projectId, routingMode).catch(() => null);
               await prisma.chatSession.update({
                 where: { id: session.id },
-                data: { mode: 'human', isRead: false },
+                data: { mode: 'human', isRead: false, ...(assignedTo ? { assignedTo } : {}) },
               });
 
               if (project?.webhookUrl && webhookEventEnabled(settings, 'conversation.escalated')) {
@@ -309,6 +313,7 @@ export async function action({ request }: ActionFunctionArgs) {
                   session: { id: session.id },
                   trigger: 'visitor_requested',
                   message,
+                  ...(assignedTo ? { assignedTo } : {}),
                 });
               }
 
@@ -333,7 +338,12 @@ export async function action({ request }: ActionFunctionArgs) {
           const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference, undefined, responseLanguage);
           
           // Check for handoff intent
-          const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
+          // Configurable escalation keywords (settings.escalation.keywords), falling
+          // back to the built-in defaults when none are configured.
+          const configuredKeywords = (settings?.escalation?.keywords as string[] | undefined)?.map(k => k.trim().toLowerCase()).filter(Boolean);
+          const handoffKeywords = (configuredKeywords && configuredKeywords.length > 0)
+            ? configuredKeywords
+            : ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
           const isHandoffRequested = handoffKeywords.some(keyword => message.toLowerCase().includes(keyword));
 
           if (isHandoffRequested && project?.webhookUrl && webhookEventEnabled(settings, 'conversation.escalated')) {
