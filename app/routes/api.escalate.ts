@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -57,7 +57,7 @@ export async function action({ request }: ActionFunctionArgs) {
           });
 
           // 4. Fire project.webhookUrl if set (same pattern as existing handoff webhook)
-          if (project.webhookUrl) {
+          if (project.webhookUrl && webhookEventEnabled((project.settings as any), 'conversation.escalated')) {
             console.log(`[Escalation API] Triggering webhook for project: ${project.name}`);
             await sendWebhook(project.webhookUrl, 'conversation.escalated', {
               id: project.id,

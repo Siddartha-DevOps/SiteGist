@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
 import { notifySlackLeadCaptured } from "~/lib/slack.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -56,7 +56,7 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   // Feature 3: Real-Time Notifications
-  if (lead.project.webhookUrl) {
+  if (lead.project.webhookUrl && webhookEventEnabled((lead.project.settings as any), 'lead.captured')) {
     try {
       let customFields = {};
       if (lead.notes) {

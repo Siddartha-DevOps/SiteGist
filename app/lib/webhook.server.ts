@@ -13,6 +13,64 @@ export type WebhookPayload = {
   data: Record<string, unknown>;
 };
 
+// -----------------------------------------------------------------------------
+// Documented per-event payload schemas. The `data` field of WebhookPayload takes
+// one of these shapes depending on `event`. Exported so producers, the API docs,
+// and integrators share a single source of truth.
+// -----------------------------------------------------------------------------
+export interface MessageReceivedData {
+  session: { id: string };
+  message: { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
+}
+export interface ConversationEscalatedData {
+  session: { id?: string };
+  trigger: string;            // e.g. 'keyword_match' | 'visitor_requested'
+  message?: string;
+  assignedTo?: string;
+}
+export interface ConversationResolvedData {
+  session: { id: string; resolvedAt: string };
+}
+export interface LeadCapturedData {
+  lead: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    company?: string | null;
+    customFields?: Record<string, unknown>;
+    createdAt: string | Date;
+    sessionId?: string | null;
+  };
+}
+export type WebhookEventData = {
+  'message.received': MessageReceivedData;
+  'conversation.escalated': ConversationEscalatedData;
+  'conversation.resolved': ConversationResolvedData;
+  'lead.captured': LeadCapturedData;
+};
+
+// Default subscription: high-volume message events are OFF by default; the rest ON
+// (preserves existing behaviour — escalated/resolved/lead have always fired).
+export const DEFAULT_WEBHOOK_EVENTS: Record<WebhookEvent, boolean> = {
+  'message.received': false,
+  'conversation.escalated': true,
+  'conversation.resolved': true,
+  'lead.captured': true,
+};
+
+/**
+ * Whether a project has subscribed to a given webhook event. Reads
+ * `settings.webhookEvents` (a `Record<WebhookEvent, boolean>`); falls back to the
+ * defaults above when unset, so existing projects keep receiving escalation/lead/
+ * resolved events without any config.
+ */
+export function webhookEventEnabled(settings: any, event: WebhookEvent): boolean {
+  const cfg = settings?.webhookEvents;
+  if (cfg && typeof cfg[event] === 'boolean') return cfg[event];
+  return DEFAULT_WEBHOOK_EVENTS[event];
+}
+
 export async function sendWebhook(
   webhookUrl: string,
   event: WebhookEvent,

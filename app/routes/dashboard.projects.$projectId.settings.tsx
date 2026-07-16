@@ -153,6 +153,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
+  // Webhook event subscriptions (which events fire to webhookUrl). Checkboxes only
+  // submit when checked, so an absent value = unchecked/disabled.
+  const webhookEvents = {
+    "message.received": formData.get("webhook_event_message") === "on",
+    "conversation.escalated": formData.get("webhook_event_escalated") === "on",
+    "conversation.resolved": formData.get("webhook_event_resolved") === "on",
+    "lead.captured": formData.get("webhook_event_lead") === "on",
+  };
+
   const settings = {
     systemPrompt,
     model,
@@ -163,6 +172,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     rateLimitWindow,
     leadFields,
     slackWebhookUrl,
+    webhookEvents,
     branding: {
       primaryColor,
       assistantName,
@@ -709,10 +719,31 @@ export default function ProjectSettings() {
                       In Zapier, create a new Zap → trigger: <em>Webhooks by Zapier → Catch Hook</em> → paste the URL here.
                     </p>
                     <p>
-                      Events sent: <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">lead.captured</code>,{' '}
-                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.escalated</code>,{' '}
-                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.resolved</code>
+                      Choose which events fire below. Each POST is signed with{' '}
+                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">X-SiteGist-Signature</code> (HMAC-SHA256).
                     </p>
+                  </div>
+
+                  {/* Webhook event subscriptions */}
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      { name: "webhook_event_lead", event: "lead.captured", label: "Lead captured", def: true },
+                      { name: "webhook_event_escalated", event: "conversation.escalated", label: "Conversation escalated", def: true },
+                      { name: "webhook_event_resolved", event: "conversation.resolved", label: "Conversation resolved", def: true },
+                      { name: "webhook_event_message", event: "message.received", label: "Message received (high volume)", def: false },
+                    ] as const).map((ev) => {
+                      const configured = currentSettings.webhookEvents?.[ev.event];
+                      const checked = typeof configured === "boolean" ? configured : ev.def;
+                      return (
+                        <label key={ev.name} className="flex items-center gap-2.5 p-3 bg-zinc-50 border border-zinc-100 rounded-xl cursor-pointer text-sm">
+                          <input type="checkbox" name={ev.name} defaultChecked={checked} className="w-4 h-4 rounded border-zinc-300 text-primary focus:ring-primary/10 cursor-pointer" />
+                          <span className="flex-1">
+                            <span className="font-semibold text-zinc-700">{ev.label}</span>
+                            <code className="ml-2 bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded font-mono text-[10px]">{ev.event}</code>
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
 
