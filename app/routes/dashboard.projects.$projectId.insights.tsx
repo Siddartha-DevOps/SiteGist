@@ -18,7 +18,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (!project) return redirect("/dashboard");
 
   const rawRange = Number(new URL(request.url).searchParams.get("range"));
-  const range: 7 | 30 | 90 = rawRange === 30 ? 30 : rawRange === 90 ? 90 : 7;
+  const range: 7 | 30 | 90 | 365 =
+    rawRange === 30 ? 30 : rawRange === 90 ? 90 : rawRange === 365 ? 365 : 7;
 
   // Get messages with feedback
   const messagesWithFeedback = await prisma.message.findMany({
@@ -50,7 +51,32 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
   let chartData: { day: string; messages: number; leads: number }[];
 
-  if (range === 90) {
+  if (range === 365) {
+    // 12-month usage: aggregate stored daily snapshots into calendar months.
+    const monthStart = new Date(); monthStart.setHours(0, 0, 0, 0); monthStart.setDate(1);
+    monthStart.setMonth(monthStart.getMonth() - 11);
+    const snapshots = await prisma.analyticsSnapshot.findMany({
+      where: { projectId: params.projectId, date: { gte: monthStart } },
+      orderBy: { date: "asc" },
+      select: { date: true, messagesCount: true, leadsCaptured: true },
+    });
+    const monthBuckets: { day: string; key: string; messages: number; leads: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(1); d.setMonth(d.getMonth() - i);
+      monthBuckets.push({
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        day: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+        messages: 0, leads: 0,
+      });
+    }
+    const monthIndex = new Map(monthBuckets.map((b, i) => [b.key, i]));
+    for (const s of snapshots) {
+      const d = new Date(s.date);
+      const i = monthIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
+      if (i != null) { monthBuckets[i].messages += s.messagesCount; monthBuckets[i].leads += s.leadsCaptured; }
+    }
+    chartData = monthBuckets.map(b => ({ day: b.day, messages: b.messages, leads: b.leads }));
+  } else if (range === 90) {
     const snapshots = await prisma.analyticsSnapshot.findMany({
       where: { projectId: params.projectId, date: { gte: since } },
       orderBy: { date: "asc" },
@@ -263,6 +289,7 @@ export default function ProjectInsights() {
               <option value="7">Last 7 Days</option>
               <option value="30">Last 30 Days</option>
               <option value="90">Last 90 Days</option>
+              <option value="365">Last 12 Months</option>
             </select>
           </div>
           <div className="h-[300px] w-full">
