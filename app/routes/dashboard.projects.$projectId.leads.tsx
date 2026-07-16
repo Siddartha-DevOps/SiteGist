@@ -165,11 +165,15 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
   converted: { label: "Converted", bg: "bg-green-50",  text: "text-green-600",  border: "border-green-100" },
 };
 
+// Ordered pipeline stages (New → Contacted → Qualified → Converted).
+const STAGES = ["new", "contacted", "qualified", "converted"] as const;
+
 export default function ProjectLeads() {
   const { leads, project, activeFilter, totalCount } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [view, setView] = useState<"list" | "pipeline">("list");
   const fetcher = useFetcher();
 
   const filterTabs = [
@@ -259,6 +263,21 @@ export default function ProjectLeads() {
         ))}
       </div>
 
+      {/* List / Pipeline view toggle */}
+      <div className="flex items-center gap-2 mb-4">
+        {(["list", "pipeline"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
+              view === v ? "bg-brand-dark text-white" : "bg-brand-light text-brand-gray border border-brand-border hover:text-brand-dark"
+            }`}
+          >
+            {v === "list" ? "List" : "Pipeline"}
+          </button>
+        ))}
+      </div>
+
       {/* Bulk action toolbar — visible when items are selected */}
       {selectedIds.length > 0 && (
         <div className="flex items-center gap-3 mb-4 p-4 bg-primary/5 border border-primary/20 rounded-2xl">
@@ -303,7 +322,8 @@ export default function ProjectLeads() {
         </div>
       )}
 
-      {/* Leads table */}
+      {/* Leads table (list view) */}
+      {view === "list" && (
       <div className="bg-white border border-zinc-100 rounded-[40px] overflow-hidden">
         {filtered.length === 0 ? (
           <div className="p-20 text-center">
@@ -491,6 +511,61 @@ export default function ProjectLeads() {
           </>
         )}
       </div>
+      )}
+
+      {/* Pipeline (kanban) view */}
+      {view === "pipeline" && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {STAGES.map((stage) => {
+            const cfg = STATUS_CONFIG[stage];
+            const items = filtered.filter((l: any) => (l.status || "new") === stage);
+            const idx = STAGES.indexOf(stage);
+            return (
+              <div key={stage} className="bg-zinc-50/60 border border-zinc-100 rounded-3xl p-3 min-h-[220px]">
+                <div className="flex items-center justify-between px-2 py-2 mb-2">
+                  <span className={`text-xs font-black uppercase tracking-widest ${cfg.text}`}>{cfg.label}</span>
+                  <span className="text-[10px] font-black text-zinc-400 bg-white border border-zinc-100 px-2 py-0.5 rounded-lg">{items.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {items.map((lead: any) => (
+                    <div key={lead.id} className="bg-white border border-zinc-100 rounded-2xl p-3 shadow-sm">
+                      <p className="font-bold text-sm text-brand-dark truncate">{lead.name || "Unknown"}</p>
+                      {lead.email && <p className="text-[11px] text-text-muted truncate mt-0.5">{lead.email}</p>}
+                      {lead.company && <p className="text-[11px] text-text-muted truncate">{lead.company}</p>}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-1">
+                          {idx > 0 && (
+                            <fetcher.Form method="post">
+                              <input type="hidden" name="_action" value="update_status" />
+                              <input type="hidden" name="leadId" value={lead.id} />
+                              <input type="hidden" name="status" value={STAGES[idx - 1]} />
+                              <button type="submit" title={`Move to ${STATUS_CONFIG[STAGES[idx - 1]].label}`} className="p-1.5 rounded-lg hover:bg-zinc-100 text-zinc-400 hover:text-brand-dark">
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
+                            </fetcher.Form>
+                          )}
+                          {idx < STAGES.length - 1 && (
+                            <fetcher.Form method="post">
+                              <input type="hidden" name="_action" value="update_status" />
+                              <input type="hidden" name="leadId" value={lead.id} />
+                              <input type="hidden" name="status" value={STAGES[idx + 1]} />
+                              <button type="submit" title={`Move to ${STATUS_CONFIG[STAGES[idx + 1]].label}`} className="p-1.5 rounded-lg hover:bg-zinc-100 text-zinc-400 hover:text-brand-dark">
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </fetcher.Form>
+                          )}
+                        </div>
+                        <Link to={`/dashboard/projects/${project.id}/leads/${lead.id}`} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">View</Link>
+                      </div>
+                    </div>
+                  ))}
+                  {items.length === 0 && <p className="text-[11px] text-zinc-300 text-center py-6 italic">Empty</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
