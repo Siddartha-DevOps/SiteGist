@@ -98,17 +98,21 @@ export default function Integrations() {
 
   const categories = ["All", "CRM", "Email", "Slack", "Automations", "E-commerce"];
 
+  // `available: true` marks integrations that are actually wired up in the
+  // dashboard today (real connect flow + backend). Everything else is on the
+  // roadmap and is shown as "Coming soon" so the catalog never implies a
+  // connector is ready to configure before it exists.
   const integrations = [
-    { name: "HubSpot", category: "CRM", description: "Sync contacts and conversations directly to HubSpot.", icon: "H" },
-    { name: "Salesforce", category: "CRM", description: "Manage leads and opportunities in the world's #1 CRM.", icon: "S" },
-    { name: "Slack", category: "Slack", description: "Get instant notifications for every new lead.", icon: "S" },
-    { name: "Zapier", category: "Automations", description: "Connect with 5,000+ apps using Zapier workflows.", icon: "Z" },
-    { name: "Resend", category: "Email", description: "Automated event-triggered transactional emails.", icon: "R" },
-    { name: "Intercom", category: "Slack", description: "Seamlessly handoff chats to human agents.", icon: "I" },
-    { name: "Shopify", category: "E-commerce", description: "Answer product questions and track orders directly.", icon: "S" },
-    { name: "Zendesk", category: "CRM", description: "Convert chats into support tickets automatically.", icon: "Z" },
-    { name: "Make.com", category: "Automations", description: "Advanced automation workflows for your AI bot.", icon: "M" },
-    { name: "Mailchimp", category: "Email", description: "Add new leads to your marketing campaigns.", icon: "M" },
+    { name: "Slack", category: "Slack", description: "Get instant notifications for every new lead.", icon: "S", available: true },
+    { name: "Zapier", category: "Automations", description: "Connect with 5,000+ apps using Zapier workflows.", icon: "Z", available: true },
+    { name: "Intercom", category: "Slack", description: "Seamlessly handoff chats to human agents.", icon: "I", available: true },
+    { name: "HubSpot", category: "CRM", description: "Sync contacts and conversations directly to HubSpot.", icon: "H", available: false },
+    { name: "Salesforce", category: "CRM", description: "Manage leads and opportunities in the world's #1 CRM.", icon: "S", available: false },
+    { name: "Zendesk", category: "CRM", description: "Convert chats into support tickets automatically.", icon: "Z", available: false },
+    { name: "Resend", category: "Email", description: "Automated event-triggered transactional emails.", icon: "R", available: false },
+    { name: "Shopify", category: "E-commerce", description: "Answer product questions and track orders directly.", icon: "S", available: false },
+    { name: "Make.com", category: "Automations", description: "Advanced automation workflows for your AI bot.", icon: "M", available: false },
+    { name: "Mailchimp", category: "Email", description: "Add new leads to your marketing campaigns.", icon: "M", available: false },
   ];
 
   const filtered = integrations.filter(int => {
@@ -616,18 +620,31 @@ export default function Integrations() {
                  <div className="w-14 h-14 bg-brand-light rounded-2xl flex items-center justify-center text-xl font-black text-brand-dark border border-brand-border group-hover:border-brand-accent/20 group-hover:scale-105 transition-all">
                     {renderEcosystemIcon(item.name)}
                  </div>
-                 <div className="px-3 py-1 rounded-full bg-brand-light text-[10px] font-bold text-brand-gray uppercase tracking-widest border border-brand-border">
-                    {item.category}
+                 <div className="flex items-center gap-2">
+                   {!item.available && (
+                     <div className="px-3 py-1 rounded-full bg-brand-accent/5 text-[10px] font-bold text-brand-accent uppercase tracking-widest border border-brand-accent/10">
+                        Coming soon
+                     </div>
+                   )}
+                   <div className="px-3 py-1 rounded-full bg-brand-light text-[10px] font-bold text-brand-gray uppercase tracking-widest border border-brand-border">
+                      {item.category}
+                   </div>
                  </div>
               </div>
               <h3 className="text-xl font-extrabold text-brand-dark mb-3 tracking-tight">{item.name}</h3>
               <p className="text-sm font-medium text-brand-gray leading-relaxed mb-8 flex-grow">
                 {item.description}
               </p>
-              <button className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-brand-light text-brand-dark text-xs font-bold uppercase tracking-widest hover:bg-brand-dark hover:text-white transition-all border border-brand-dark/5">
-                 Configure
-                 <Plus className="w-4 h-4" />
-              </button>
+              {item.available ? (
+                <button className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-brand-light text-brand-dark text-xs font-bold uppercase tracking-widest hover:bg-brand-dark hover:text-white transition-all border border-brand-dark/5">
+                   Configure
+                   <Plus className="w-4 h-4" />
+                </button>
+              ) : (
+                <div className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-brand-light/60 text-brand-gray text-xs font-bold uppercase tracking-widest border border-brand-border cursor-default">
+                   Coming soon
+                </div>
+              )}
             </div>
           ))}
           {filtered.length === 0 && (

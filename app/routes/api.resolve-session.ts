@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Resolve Session API] Action triggered`);
@@ -50,7 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      if (session.project.webhookUrl) {
+      if (session.project.webhookUrl && webhookEventEnabled((session.project.settings as any), 'conversation.resolved')) {
         await sendWebhook(session.project.webhookUrl, 'conversation.resolved', {
           id: session.project.id,
           name: session.project.name,

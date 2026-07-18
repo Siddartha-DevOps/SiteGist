@@ -41,6 +41,47 @@ const PERSONAS = [
   },
 ] as const;
 
+// Industry lead-capture templates. Each prefills the project's custom lead
+// fields with sensible questions for that vertical; the visitor-facing widget
+// already renders whatever custom fields are configured, so these need no
+// widget changes. `id` is assigned at apply-time to keep field ids unique.
+const LEAD_TEMPLATES: { id: string; label: string; description: string; fields: Omit<LeadField, "id">[] }[] = [
+  {
+    id: "real-estate",
+    label: "Real Estate",
+    description: "Budget, property type, buying timeline",
+    fields: [
+      { label: "Budget", type: "dropdown", required: true, options: ["Under $250k", "$250k–$500k", "$500k–$1M", "$1M+"] },
+      { label: "Property Type", type: "dropdown", required: false, options: ["Single-family home", "Condo / Apartment", "Townhouse", "Land", "Commercial"] },
+      { label: "Buying Timeline", type: "dropdown", required: false, options: ["Immediately", "1–3 months", "3–6 months", "Just browsing"] },
+      { label: "Preferred Location", type: "text", required: false },
+      { label: "Pre-approved for financing", type: "checkbox", required: false },
+    ],
+  },
+  {
+    id: "legal",
+    label: "Legal Services",
+    description: "Case type, urgency, best contact time",
+    fields: [
+      { label: "Type of Legal Matter", type: "dropdown", required: true, options: ["Personal Injury", "Family Law", "Criminal Defense", "Business / Corporate", "Estate Planning", "Other"] },
+      { label: "Urgency", type: "dropdown", required: false, options: ["Emergency", "Within a week", "Within a month", "Just exploring"] },
+      { label: "Best Time to Contact", type: "dropdown", required: false, options: ["Morning", "Afternoon", "Evening"] },
+      { label: "Brief Description", type: "text", required: false },
+    ],
+  },
+  {
+    id: "saas",
+    label: "SaaS / B2B",
+    description: "Company size, role, use case",
+    fields: [
+      { label: "Company Size", type: "dropdown", required: false, options: ["1–10", "11–50", "51–200", "201–1000", "1000+"] },
+      { label: "Your Role", type: "text", required: false },
+      { label: "Primary Use Case", type: "text", required: false },
+      { label: "Requesting a demo", type: "checkbox", required: false },
+    ],
+  },
+];
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const [project, user, addons] = await Promise.all([
@@ -153,6 +194,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const suggestions = suggestionsString ? suggestionsString.split("\n").filter(s => s.trim() !== "") : [];
   const allowedDomains = allowedDomainsString ? allowedDomainsString.split(",").map(d => d.trim()).filter(d => d !== "") : [];
 
+  // Webhook event subscriptions (which events fire to webhookUrl). Checkboxes only
+  // submit when checked, so an absent value = unchecked/disabled.
+  const webhookEvents = {
+    "message.received": formData.get("webhook_event_message") === "on",
+    "conversation.escalated": formData.get("webhook_event_escalated") === "on",
+    "conversation.resolved": formData.get("webhook_event_resolved") === "on",
+    "lead.captured": formData.get("webhook_event_lead") === "on",
+  };
+
+  // Human handoff: configurable escalation keywords + agent routing mode.
+  const escalationKeywords = ((formData.get("escalation_keywords") as string) || "")
+    .split(/[\n,]/).map(k => k.trim()).filter(Boolean);
+  const routingModeRaw = (formData.get("escalation_routing") as string) || "off";
+  const escalation = {
+    keywords: escalationKeywords,
+    routing: { mode: ["off", "round_robin", "first_admin"].includes(routingModeRaw) ? routingModeRaw : "off" },
+  };
+
   const settings = {
     systemPrompt,
     model,
@@ -163,6 +222,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     rateLimitWindow,
     leadFields,
     slackWebhookUrl,
+    webhookEvents,
+    escalation,
     branding: {
       primaryColor,
       assistantName,
@@ -709,11 +770,56 @@ export default function ProjectSettings() {
                       In Zapier, create a new Zap → trigger: <em>Webhooks by Zapier → Catch Hook</em> → paste the URL here.
                     </p>
                     <p>
-                      Events sent: <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">lead.captured</code>,{' '}
-                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.escalated</code>,{' '}
-                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">conversation.resolved</code>
+                      Choose which events fire below. Each POST is signed with{' '}
+                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">X-SiteGist-Signature</code> (HMAC-SHA256).
                     </p>
                   </div>
+
+                  {/* Webhook event subscriptions */}
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      { name: "webhook_event_lead", event: "lead.captured", label: "Lead captured", def: true },
+                      { name: "webhook_event_escalated", event: "conversation.escalated", label: "Conversation escalated", def: true },
+                      { name: "webhook_event_resolved", event: "conversation.resolved", label: "Conversation resolved", def: true },
+                      { name: "webhook_event_message", event: "message.received", label: "Message received (high volume)", def: false },
+                    ] as const).map((ev) => {
+                      const configured = currentSettings.webhookEvents?.[ev.event];
+                      const checked = typeof configured === "boolean" ? configured : ev.def;
+                      return (
+                        <label key={ev.name} className="flex items-center gap-2.5 p-3 bg-zinc-50 border border-zinc-100 rounded-xl cursor-pointer text-sm">
+                          <input type="checkbox" name={ev.name} defaultChecked={checked} className="w-4 h-4 rounded border-zinc-300 text-primary focus:ring-primary/10 cursor-pointer" />
+                          <span className="flex-1">
+                            <span className="font-semibold text-zinc-700">{ev.label}</span>
+                            <code className="ml-2 bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded font-mono text-[10px]">{ev.event}</code>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Human handoff — escalation triggers + agent routing */}
+                <div className="border-t border-zinc-100 pt-6">
+                  <label className="block text-sm font-bold mb-2">Human handoff</label>
+                  <p className="text-xs text-zinc-400 mb-3 font-medium">Escalate to a human when a visitor's message matches any of these keywords (one per line or comma-separated). Leave empty to use sensible defaults.</p>
+                  <textarea
+                    name="escalation_keywords"
+                    rows={3}
+                    defaultValue={(currentSettings.escalation?.keywords || []).join("\n")}
+                    placeholder={"human\nagent\ntalk to someone"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm font-mono"
+                  />
+                  <label className="block text-sm font-bold mt-4 mb-1.5">Agent routing</label>
+                  <select
+                    name="escalation_routing"
+                    defaultValue={currentSettings.escalation?.routing?.mode || "off"}
+                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
+                  >
+                    <option value="off">Off — leave escalated chats unassigned</option>
+                    <option value="round_robin">Round-robin — least-busy admin</option>
+                    <option value="first_admin">First admin — always the earliest admin</option>
+                  </select>
+                  <p className="text-[11px] text-zinc-400 mt-1.5">Assigns escalated conversations to a project <strong>Admin</strong> member (managed on the Members page).</p>
                 </div>
 
                 <div className="border-t border-zinc-100 pt-6">
@@ -905,6 +1011,24 @@ export default function ProjectSettings() {
                     </button>
                   </div>
                   <p className="text-xs text-zinc-400 font-medium">Configure extra answers you'd like to collect, such as Company size, Role, or Budget.</p>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mr-1">Start from a template:</span>
+                    {LEAD_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        title={tpl.description}
+                        onClick={() => {
+                          if (leadFields.length > 0 && !confirm(`Replace your current custom fields with the ${tpl.label} template?`)) return;
+                          setLeadFields(tpl.fields.map((f) => ({ ...f, id: Math.random().toString(36).substring(2, 9) })));
+                        }}
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold border border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-primary hover:text-primary transition-all cursor-pointer"
+                      >
+                        {tpl.label}
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="space-y-4">
                     {leadFields.map((field, i) => (

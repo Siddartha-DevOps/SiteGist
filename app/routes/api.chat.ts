@@ -3,7 +3,8 @@ import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { streamRAG, generateFollowUpSuggestions, analyzeSentiment } from "~/ai-layer/ai.server";
 import { getRedis } from "~/lib/redis.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
+import { pickAgentEmail } from "~/backend/routing.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
 import { getUsageForUser } from "~/lib/usage.server";
 import { captureException } from "~/lib/monitoring.server";
@@ -324,6 +325,17 @@ export async function action({ request }: ActionFunctionArgs) {
           },
         });
         scoreSentimentAsync(userMsg.id, message);
+
+        // message.received webhook (opt-in; fire-and-forget so it never adds
+        // latency to or blocks the chat stream).
+        if (project?.webhookUrl && webhookEventEnabled(settings, "message.received")) {
+          sendWebhook(
+            project.webhookUrl,
+            "message.received",
+            { id: project.id, name: project.name },
+            { session: { id: session.id }, message: { id: userMsg.id, role: "user", content: message, createdAt: userMsg.createdAt.toISOString() } }
+          ).catch((e) => console.warn("[Webhook] message.received (user) failed:", e));
+        }
       } catch (dbError) {
         console.error("[Chat] Database error in session management:", dbError);
       }
@@ -350,12 +362,15 @@ export async function action({ request }: ActionFunctionArgs) {
           // Agent-only: skip AI entirely, route straight to human queue
           if (chatMode === 'agent-only') {
             if (projectId !== "demo-project" && session) {
+              // Agent routing: assign the escalated conversation per settings.escalation.routing.
+              const routingMode = (settings?.escalation?.routing?.mode) || "off";
+              const assignedTo = await pickAgentEmail(projectId, routingMode).catch(() => null);
               await prisma.chatSession.update({
                 where: { id: session.id },
-                data: { mode: 'human', isRead: false },
+                data: { mode: 'human', isRead: false, ...(assignedTo ? { assignedTo } : {}) },
               });
 
-              if (project?.webhookUrl) {
+              if (project?.webhookUrl && webhookEventEnabled(settings, 'conversation.escalated')) {
                 await sendWebhook(project.webhookUrl, 'conversation.escalated', {
                   id: project.id,
                   name: project.name,
@@ -363,6 +378,7 @@ export async function action({ request }: ActionFunctionArgs) {
                   session: { id: session.id },
                   trigger: 'visitor_requested',
                   message,
+                  ...(assignedTo ? { assignedTo } : {}),
                 });
               }
 
@@ -387,10 +403,15 @@ export async function action({ request }: ActionFunctionArgs) {
           const ragStream = streamRAG(projectId, message, systemPrompt, formattedHistory, modelPreference, undefined, responseLanguage);
           
           // Check for handoff intent
-          const handoffKeywords = ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
+          // Configurable escalation keywords (settings.escalation.keywords), falling
+          // back to the built-in defaults when none are configured.
+          const configuredKeywords = (settings?.escalation?.keywords as string[] | undefined)?.map(k => k.trim().toLowerCase()).filter(Boolean);
+          const handoffKeywords = (configuredKeywords && configuredKeywords.length > 0)
+            ? configuredKeywords
+            : ["human", "agent", "real person", "support rep", "talk to someone", "help me"];
           const isHandoffRequested = handoffKeywords.some(keyword => message.toLowerCase().includes(keyword));
 
-          if (isHandoffRequested && project?.webhookUrl) {
+          if (isHandoffRequested && project?.webhookUrl && webhookEventEnabled(settings, 'conversation.escalated')) {
             console.log(`[Chat] Handoff requested for project: ${projectId}. Triggering webhook.`);
             await sendWebhook(project.webhookUrl, 'conversation.escalated', {
               id: project.id,
@@ -516,7 +537,17 @@ export async function action({ request }: ActionFunctionArgs) {
                 },
               });
               controller.enqueue(encoder.encode(`event: messageId\ndata: ${JSON.stringify({ messageId: assistantMsg.id })}\n\n`));
-              
+
+              // message.received webhook for the assistant reply (opt-in, fire-and-forget).
+              if (project.webhookUrl && webhookEventEnabled(settings, "message.received")) {
+                sendWebhook(
+                  project.webhookUrl,
+                  "message.received",
+                  { id: project.id, name: project.name },
+                  { session: { id: session.id }, message: { id: assistantMsg.id, role: "assistant", content: fullAnswer, createdAt: assistantMsg.createdAt.toISOString() } }
+                ).catch((e) => console.warn("[Webhook] message.received (assistant) failed:", e));
+              }
+
               await prisma.usageRecord.create({
                 data: {
                   userId: project.userId,

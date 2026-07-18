@@ -2,8 +2,9 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
-import { sendWebhook } from "~/lib/webhook.server";
+import { sendWebhook, webhookEventEnabled } from "~/lib/webhook.server";
 import { notifySlackEscalation } from "~/lib/slack.server";
+import { pickAgentEmail } from "~/backend/routing.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   console.log(`[Escalation API] Action triggered`);
@@ -45,6 +46,18 @@ export async function action({ request }: ActionFunctionArgs) {
         });
 
         if (project) {
+          // Agent routing: assign the escalated conversation per settings.
+          let assignedTo: string | null = null;
+          try {
+            const routingMode = ((project.settings as any)?.escalation?.routing?.mode) || "off";
+            assignedTo = await pickAgentEmail(projectId, routingMode);
+            if (assignedTo) {
+              await prisma.chatSession.update({ where: { id: sessionId }, data: { assignedTo } });
+            }
+          } catch (routeErr) {
+            console.error("[Escalation API] Agent routing failed:", routeErr);
+          }
+
           // 3. Send email to owner
           const ownerEmail = project.user.email;
           await sendEmail({
@@ -57,7 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
           });
 
           // 4. Fire project.webhookUrl if set (same pattern as existing handoff webhook)
-          if (project.webhookUrl) {
+          if (project.webhookUrl && webhookEventEnabled((project.settings as any), 'conversation.escalated')) {
             console.log(`[Escalation API] Triggering webhook for project: ${project.name}`);
             await sendWebhook(project.webhookUrl, 'conversation.escalated', {
               id: project.id,
@@ -65,6 +78,7 @@ export async function action({ request }: ActionFunctionArgs) {
             }, {
               session: { id: sessionId },
               trigger: 'visitor_requested',
+              ...(assignedTo ? { assignedTo } : {}),
             });
           }
 
