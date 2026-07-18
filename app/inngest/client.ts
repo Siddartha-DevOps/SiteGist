@@ -13,5 +13,5 @@ export const INGEST_SOURCE_EVENT = "ingest/source.requested" as const;
 
 export type IngestSourceEvent = {
   name: typeof INGEST_SOURCE_EVENT;
-  data: { projectId: string; sourceId: string };
+  data: { projectId: string; sourceId: string; force?: boolean };
 };

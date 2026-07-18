@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { pineconeIndex } from "~/lib/pinecone.server";
-import { getPortkey } from "./portkey.server";
+import { getPortkey, getPortkeyEmbeddings } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
 import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
@@ -25,6 +25,31 @@ const GEMINI_VERIFY_MAX_TOKENS   = 256;
 const GEMINI_SIMPLE_MAX_TOKENS   = 1024;
 
 const USER_FACING_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
+
+// Selectable OpenAI chat models for per-bot model routing. Maps the stored/UI
+// model id to the actual OpenAI model id sent to the API. The mapping is the
+// identity today, but keeping it as an explicit allow-list means an unknown or
+// typo'd preference can't be forwarded blindly to the provider.
+const OPENAI_CHAT_MODELS: Record<string, string> = {
+  "gpt-4.1": "gpt-4.1",
+  "gpt-4.1-mini": "gpt-4.1-mini",
+  "gpt-4o": "gpt-4o",
+  "gpt-4o-mini": "gpt-4o-mini",
+};
+
+// Default OpenAI model when a bot is on "auto" (or unset). Prefers GPT-4.1-mini
+// for its speed/cost, overridable via PORTKEY_MODEL.
+const AUTO_OPENAI_MODEL = process.env.PORTKEY_MODEL?.trim() || "gpt-4.1-mini";
+
+// Resolve a stored model preference to the OpenAI model id to call. Known ids map
+// through the allow-list; other "gpt-*" ids are forwarded for forward-compat with
+// future releases; anything else (e.g. "auto", a Gemini id, undefined) falls back
+// to the auto default.
+function resolveOpenAIModel(pref?: string): string {
+  if (pref && OPENAI_CHAT_MODELS[pref]) return OPENAI_CHAT_MODELS[pref];
+  if (pref && pref.startsWith("gpt")) return pref;
+  return AUTO_OPENAI_MODEL;
+}
 
 if (process.env.AI_DEBUG === "1") {
   console.log("AI Server Startup Diagnostic:", {
@@ -167,11 +192,49 @@ function getOpenAI() {
       console.log("[AI] Initializing OpenAI via Portkey");
       _openai = portkey as any;
     } else {
-      console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[AI] SUCCESS: Initializing OpenAI with key from ${_openaiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+      }
       _openai = new OpenAI({ apiKey: currentKey });
     }
   }
   return _openai;
+}
+
+let _openaiEmbeddings: OpenAI | null = null;
+let _lastEmbeddingsKey = "";
+
+/**
+ * Dedicated client for EMBEDDINGS. It must NOT reuse the Portkey chat client from
+ * getOpenAI(): that client is bound to the chat virtual key / chat provider, so
+ * embedding requests sent through it are silently misrouted. Preference order:
+ *   1. A dedicated Portkey embeddings client (PORTKEY_EMBEDDINGS_VIRTUAL_KEY), else
+ *   2. a direct OpenAI client pointed straight at the embeddings provider.
+ */
+function getOpenAIEmbeddings(): OpenAI | null {
+  const searchKeys = ["OPENAI_KEY", "OPENAI_API_KEY", "OpenAI_API_KEY", "VITE_OPENAI_API_KEY"];
+  let currentKey = "";
+  for (const key of searchKeys) {
+    const cleaned = cleanKey(process.env[key]);
+    if (cleaned) { currentKey = cleaned; break; }
+  }
+
+  if (currentKey !== _lastEmbeddingsKey) {
+    _openaiEmbeddings = null;
+    _lastEmbeddingsKey = currentKey;
+  }
+
+  if (!_openaiEmbeddings) {
+    const pkEmbeddings = getPortkeyEmbeddings();
+    if (pkEmbeddings) {
+      console.log("[AI] Initializing dedicated embeddings client via Portkey embeddings virtual key");
+      _openaiEmbeddings = pkEmbeddings as any;
+    } else if (currentKey) {
+      console.log(`[AI] Initializing dedicated OpenAI embeddings client (direct to embeddings provider).`);
+      _openaiEmbeddings = new OpenAI({ apiKey: currentKey });
+    }
+  }
+  return _openaiEmbeddings;
 }
 
 let _gemini: GoogleGenAI | null = null;
@@ -209,7 +272,11 @@ function getGemini(): GoogleGenAI | null {
   }
 
   if (!_gemini && currentKey) {
-    console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+    // Key diagnostics (length + first/last-4) are useful locally but should not be
+    // logged in production.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[AI] SUCCESS: Initializing Gemini with key from ${_geminiFoundVar}. ${getDiagnosticInfo(currentKey)}`);
+    }
     _gemini = new GoogleGenAI({
       apiKey: currentKey,
       httpOptions: {
@@ -218,27 +285,6 @@ function getGemini(): GoogleGenAI | null {
         }
       }
     });
-
-    // List models for diagnostic purposes asynchronously
-    (async () => {
-      try {
-        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
-          headers: {
-            "x-goog-api-key": currentKey,
-          },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const modelList = data.models?.map((m: any) => m.name.replace("models/", "")).join(", ");
-          console.log(`[AI] Gemini Auth Check: SUCCESS. Available Models: ${modelList}`);
-        } else {
-          const errData = await response.json().catch(() => ({}));
-          console.error(`[AI] Gemini Auth Check: FAILED. Status: ${response.status}. Reason: ${JSON.stringify(errData)}`);
-        }
-      } catch (e) {
-        console.warn("[AI] Gemini Auth Check: NETWORK_ERROR", e);
-      }
-    })();
   }
   return _gemini;
 }
@@ -255,8 +301,10 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 
-  // Diagnostic (masked)
-  console.log(`[RAG Audit] Reranking with Portkey. Virtual Key Masked: ${cohereVirtualKey.substring(0, 4)}...${cohereVirtualKey.slice(-4)}`);
+  // Diagnostic (masked) — key-fragment logging kept out of production.
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[RAG Audit] Reranking with Portkey. Virtual Key Masked: ${cohereVirtualKey.substring(0, 4)}...${cohereVirtualKey.slice(-4)}`);
+  }
 
   try {
     const response = await fetch(
@@ -364,7 +412,7 @@ export async function embedText(text: string) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       if (EMBEDDING_PROVIDER === "openai") {
-        const openai = getOpenAI();
+        const openai = getOpenAIEmbeddings();
         if (!openai) {
           throw new Error("OpenAI is configured as the EMBEDDING_PROVIDER, but OpenAI API key is not available or invalid.");
         }
@@ -418,7 +466,7 @@ export async function embedTexts(texts: string[], batchSize = 96): Promise<numbe
   const results: number[][] = texts.map(() => [] as number[]);
 
   if (EMBEDDING_PROVIDER === "openai") {
-    const openai = getOpenAI();
+    const openai = getOpenAIEmbeddings();
     if (!openai) throw new Error("OpenAI is configured as EMBEDDING_PROVIDER, but no OpenAI client is available.");
 
     for (let start = 0; start < texts.length; start += batchSize) {
@@ -506,11 +554,24 @@ export async function upsertChunksBatched(
     if (opts.onProgress) await opts.onProgress(processed, total);
   }
 
-  console.log(`[AI] Batched upsert: ${upserted}/${total} chunks to Pinecone.`);
+  // Fail loudly if there were chunks to index but nothing was actually stored
+  // (every embedding failed or mismatched dimension). Returning { upserted: 0 }
+  // here would let ingestKnowledgeSource mark the source "indexed" with no vectors.
+  if (total > 0 && upserted === 0) {
+    throw new Error(`Vector upsert produced 0 vectors for ${total} chunk(s) in namespace ${projectId} — refusing to report success.`);
+  }
+
+  log.info("vector.upsert_batched.ok", { projectId, namespace: projectId, upserted, chunks: total });
   return { upserted };
 }
 
-export async function upsertChunks(projectId: string, chunks: { text: string; metadata: any }[]) {
+export async function upsertChunks(
+  projectId: string,
+  chunks: { text: string; metadata: any }[],
+  opts: { sourceId?: string } = {}
+) {
+  const startedAt = Date.now();
+  const sourceId = opts.sourceId;
   try {
     const index = pineconeIndex;
 
@@ -553,15 +614,55 @@ export async function upsertChunks(projectId: string, chunks: { text: string; me
       return true;
     });
 
-    if (validVectors.length > 0) {
-      await index.namespace(projectId).upsert({ records: validVectors });
-      console.log(`[AI] Successfully upserted ${validVectors.length} chunks to Pinecone vector database.`);
-    } else {
-      console.warn("[AI] No valid vector embedding with matching dimension could be created for chunks. Stored content in main database only.");
+    // Fail loudly when there was content to index but nothing survived embedding
+    // (empty/failed embeddings or dimension mismatch). Silently returning here is
+    // what let a source be marked "indexed" with zero vectors actually stored.
+    if (validVectors.length === 0) {
+      if (chunks.length > 0) {
+        throw new Error(
+          `No valid vectors to upsert for project ${projectId} (all ${chunks.length} chunk(s) failed to embed or had a dimension mismatch).`
+        );
+      }
+      return; // genuinely nothing to index
     }
-  } catch (error) {
-    console.error("[AI] Error upserting chunks to Pinecone vector store (falling back gracefully to Prisma DB storage):", error);
-    // Suppress error so training action finishes successfully, storing documents in SQLite/MySQL knowledgeSource for keyword search.
+
+    await index.namespace(projectId).upsert({ records: validVectors });
+    log.info("vector.upsert.ok", {
+      projectId,
+      sourceId,
+      namespace: projectId,
+      vectors: validVectors.length,
+      chunks: chunks.length,
+      duration_ms: Date.now() - startedAt,
+    });
+
+    // Only mark the source indexed AFTER the upsert has actually succeeded.
+    if (sourceId) {
+      const { prisma } = await import("~/database/db.server");
+      await prisma.knowledgeSource
+        .update({ where: { id: sourceId }, data: { status: "indexed", error: null, lastIndexedAt: new Date() } })
+        .catch((e) => log.warn("vector.upsert.status_update_failed", { sourceId, error: e?.message }));
+    }
+  } catch (error: any) {
+    // FAILURE PATH: capture the original error, mark the source FAILED with the
+    // reason, then re-throw so the caller/pipeline stops instead of continuing.
+    const message = error?.message ? String(error.message).slice(0, 1000) : "Vector upsert failed";
+    log.error("vector.upsert.failed", {
+      projectId,
+      sourceId,
+      namespace: projectId,
+      chunks: chunks.length,
+      duration_ms: Date.now() - startedAt,
+      error: message,
+      stack: error?.stack,
+    });
+    if (sourceId) {
+      const { prisma } = await import("~/database/db.server");
+      await prisma.knowledgeSource
+        .update({ where: { id: sourceId }, data: { status: "failed", error: message } })
+        .catch((e) => log.warn("vector.upsert.status_update_failed", { sourceId, error: e?.message }));
+    }
+    throw error;
   }
 }
 
@@ -689,6 +790,29 @@ export async function expandQueries(query: string, n = 2): Promise<string[]> {
   }
 }
 
+// Postgres text-search configurations we allow for full-text search. Used to map
+// a project's configured language to a regconfig safely (allow-list → no injection).
+const PG_FTS_CONFIGS = new Set([
+  "simple", "arabic", "armenian", "basque", "catalan", "danish", "dutch", "english",
+  "finnish", "french", "german", "greek", "hindi", "hungarian", "indonesian", "irish",
+  "italian", "lithuanian", "nepali", "norwegian", "portuguese", "romanian", "russian",
+  "serbian", "spanish", "swedish", "tamil", "turkish", "yiddish",
+]);
+
+/**
+ * Resolve a project's configured language to a Postgres FTS regconfig. Defaults to
+ * "english" for "auto"/unknown values so behaviour is unchanged unless a supported
+ * language name is set. NOTE: the KnowledgeSource.search_vector column is generated
+ * with a fixed config, so switching languages here improves query parsing but full
+ * multilingual recall also requires regenerating that column per language.
+ */
+function ftsConfig(lang?: string): string {
+  if (!lang) return "english";
+  const l = lang.trim().toLowerCase();
+  if (!l || l === "auto") return "english";
+  return PG_FTS_CONFIGS.has(l) ? l : "english";
+}
+
 export async function* streamRAG(
   projectId: string,
   query: string,
@@ -711,9 +835,21 @@ export async function* streamRAG(
   if (projectId !== "demo-project") {
     try {
       const { prisma } = await import("~/database/db.server");
-      const qas = await prisma.knowledgeQA.findMany({
-        where: { projectId }
-      });
+      // Push candidate filtering to the DB instead of loading every Q&A row and
+      // scanning it in JS. Every positive score below is a substring relationship
+      // between the query and a stored question, so an ILIKE in both directions
+      // (bounded by LIMIT) fetches only plausible matches; the exact scoring still
+      // runs in JS on that small candidate set to preserve the ranking semantics.
+      const qas = await prisma.$queryRaw<{ id: string; question: string; answer: string }[]>`
+        SELECT "id", "question", "answer"
+        FROM "KnowledgeQA"
+        WHERE "projectId" = ${projectId}
+          AND (
+            "question" ILIKE '%' || ${query} || '%'
+            OR ${query} ILIKE '%' || "question" || '%'
+          )
+        LIMIT 25
+      `;
 
       if (qas && qas.length > 0) {
         const getNormalizedText = (txt: string) => {
@@ -821,15 +957,17 @@ export async function* streamRAG(
         console.warn("[Hybrid Search] Pinecone initialization/embedding failed during search:", err);
       }
 
-      // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery)
+      // 2. Keyword Search (PostgreSQL Full-Text Search via tsvector and websearch_to_tsquery).
+      //    The text-search config is per-project (defaults to English) rather than hardcoded.
+      const ftsLang = ftsConfig(responseLanguage);
       const keywordTask = (!searchTerms || !searchTerms.trim())
         ? Promise.resolve([])
         : prisma.$queryRaw<any[]>`
             SELECT "content", "source", "title",
-                   ts_rank("search_vector", websearch_to_tsquery('english', ${searchTerms})) AS "rank"
+                   ts_rank("search_vector", websearch_to_tsquery(${ftsLang}::regconfig, ${searchTerms})) AS "rank"
             FROM "KnowledgeSource"
             WHERE "projectId" = ${projectId}
-              AND "search_vector" @@ websearch_to_tsquery('english', ${searchTerms})
+              AND "search_vector" @@ websearch_to_tsquery(${ftsLang}::regconfig, ${searchTerms})
             ORDER BY "rank" DESC
             LIMIT 5
           `.catch((err: any) => {
@@ -901,14 +1039,17 @@ export async function* streamRAG(
       const fuseList = (
         items: any[],
         weight: number,
-        toDoc: (item: any) => { text?: string; url?: string; title?: string; method: string; vectorScore?: number; id?: string } | null
+        toDoc: (item: any) => { id?: string; text?: string; url?: string; title?: string; method: string; vectorScore?: number } | null
       ) => {
         const seenInList = new Set<string>();
         let rank = 0;
         for (const item of items) {
           const doc = toDoc(item);
           if (!doc?.text) continue;
-          const key = dedupKey(doc.text, doc.id);
+          // Dedup on a stable identity: the vector's chunk id when available, else a
+          // content hash of the FULL text. Using the first 100 chars merged adjacent
+          // chunks, because chunk overlap prepends the previous chunk's tail.
+          const key = doc.id ?? ("h:" + crypto.createHash("sha256").update(doc.text).digest("hex"));
           if (seenInList.has(key)) continue; // only the best rank within a single list counts
           seenInList.add(key);
           rank += 1;
@@ -944,12 +1085,12 @@ export async function* streamRAG(
         .filter((m: any) => (m.score || 0) >= VECTOR_SCORE_THRESHOLD && (m.metadata as any)?.text)
         .sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
       fuseList(vectorRanked, vectorWeight, (m: any) => ({
+        id: typeof m.id === "string" ? m.id : undefined,
         text: (m.metadata as any)?.text,
         url: (m.metadata as any)?.url,
         title: (m.metadata as any)?.title,
         method: "vector",
         vectorScore: m.score || 0,
-        id: typeof m.id === "string" ? m.id : undefined,
       }));
 
       const initialMatches: any[] = [...fused.values()]
@@ -1067,7 +1208,6 @@ How it works:
       const { getEnabledActions, runAgenticActions } = await import("./actions.server");
       const projectActions = await getEnabledActions(projectId);
       if (projectActions.length > 0) {
-        const wantsOpenAIForActions = !!modelPreference && modelPreference.startsWith("gpt");
         const wantsGeminiForActions = !!modelPreference && modelPreference.startsWith("gemini");
         const outcome = await runAgenticActions({
           projectId,
@@ -1076,7 +1216,7 @@ How it works:
           actions: projectActions,
           openai: getOpenAI(),
           gemini: getGemini(),
-          openaiModel: wantsOpenAIForActions ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini"),
+          openaiModel: resolveOpenAIModel(modelPreference),
           geminiModel: wantsGeminiForActions ? modelPreference! : "gemini-2.0-flash",
         });
         if (outcome && outcome.ran.length > 0) {
@@ -1136,13 +1276,17 @@ How it works:
   const wantsOpenAI = !!modelPreference && modelPreference.startsWith("gpt");
   const wantsGemini = !!modelPreference && modelPreference.startsWith("gemini");
   const geminiModel = wantsGemini ? modelPreference! : "gemini-2.0-flash";
-  const openaiModelPref = wantsOpenAI ? modelPreference! : (process.env.PORTKEY_MODEL || "gpt-4o-mini");
+  const openaiModelPref = resolveOpenAIModel(modelPreference);
 
-  // Add a safety timeout for the entire generation process
+  // Add a safety timeout for the entire generation process. On timeout we actually
+  // abort the in-flight provider request (via AbortController) instead of only
+  // recording an error while the stream keeps running.
+  const controller = new AbortController();
   const generationTimeout = setTimeout(() => {
     if (!fullAnswer && !lastError) {
       lastError = { message: "Generation timed out after 30 seconds." };
     }
+    controller.abort();
   }, 30000);
 
   try {
@@ -1158,9 +1302,10 @@ How it works:
         const result = await gemini.models.generateContentStream({
           model: geminiModel,
           contents: prompt,
-          config: { maxOutputTokens: GEMINI_CHAT_MAX_TOKENS },
+          config: { maxOutputTokens: GEMINI_CHAT_MAX_TOKENS, abortSignal: controller.signal } as any,
         });
         for await (const chunk of result) {
+          if (controller.signal.aborted) break; // stop consuming on timeout
           try {
             const chunkText = chunk.text;
             if (chunkText) { fullAnswer += chunkText; yield chunkText; }
@@ -1192,8 +1337,9 @@ How it works:
           stream: true,
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxTokens,
-        }, { timeout: 20000 });
+        }, { timeout: 20000, signal: controller.signal });
         for await (const chunk of stream) {
+          if (controller.signal.aborted) break; // stop consuming on timeout
           const content = chunk.choices[0]?.delta?.content || "";
           if (content) { fullAnswer += content; yield content; }
         }

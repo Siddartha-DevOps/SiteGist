@@ -17,6 +17,10 @@
     {
       "path": "/api/cron/usage-warnings",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/recrawl",
+      "schedule": "0 6 * * *"
     }
   ]
 }

@@ -30,10 +30,10 @@ export const action = serve(async (context: any) => {
       }
       if (data && data.content) {
         const chunks = chunkText(data.content);
-        await upsertChunks(projectId, chunks.map(c => ({ 
-          text: c, 
-          metadata: { source: source.source, title: data.title, type: "web" } 
-        })));
+        await upsertChunks(projectId, chunks.map(c => ({
+          text: c,
+          metadata: { source: source.source, title: data.title, type: "web" }
+        })), { sourceId: source.id });
         
         await prisma.knowledgeSource.update({
           where: { id: source.id },

@@ -374,29 +374,31 @@ function getFallbackMockData(model: string | undefined, operation: string, args:
   return null;
 }
 
-function getClient(useFallback = false): any {
-  // Helper to strip surrounding quotes if present
-  const stripQuotes = (val: string | undefined): string => {
-    if (!val) return "";
-    let trimmed = val.trim();
-    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-      trimmed = trimmed.slice(1, -1).trim();
-    }
-    return trimmed;
-  };
-
-  // Clean the existing process.env variables from top-level platform injections
-  if (process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = stripQuotes(process.env.DATABASE_URL);
+// Strip surrounding quotes from an env value. Module scope so both the one-time
+// resolver and getClient can use it.
+function stripQuotes(val: string | undefined): string {
+  if (!val) return "";
+  let trimmed = val.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    trimmed = trimmed.slice(1, -1).trim();
   }
-  if (process.env.DIRECT_DATABASE_URL) {
-    process.env.DIRECT_DATABASE_URL = stripQuotes(process.env.DIRECT_DATABASE_URL);
-  }
+  return trimmed;
+}
 
-  // Load connection details directly from local .env ONLY if the primary platform variables are empty or placeholder
-  const isUrlEmptyOrPlaceholder = !process.env.DATABASE_URL || 
-                                   process.env.DATABASE_URL.trim() === "" || 
-                                   process.env.DATABASE_URL.includes("placeholder");
+// Resolve DB connection config ONCE at module load — NOT per getClient call.
+// Strips quotes on the platform vars, and only if DATABASE_URL is missing/
+// placeholder does it read the local .env file a single time. After this,
+// process.env.DATABASE_URL / DIRECT_DATABASE_URL hold the resolved values that
+// getClient reads — so no fs access happens on the hot path (including the
+// failover getClient(true) path).
+function resolveDbEnvOnce() {
+  if (process.env.DATABASE_URL) process.env.DATABASE_URL = stripQuotes(process.env.DATABASE_URL);
+  if (process.env.DIRECT_DATABASE_URL) process.env.DIRECT_DATABASE_URL = stripQuotes(process.env.DIRECT_DATABASE_URL);
+
+  const isUrlEmptyOrPlaceholder =
+    !process.env.DATABASE_URL ||
+    process.env.DATABASE_URL.trim() === "" ||
+    process.env.DATABASE_URL.includes("placeholder");
 
   if (isUrlEmptyOrPlaceholder) {
     try {
@@ -406,23 +408,29 @@ function getClient(useFallback = false): any {
         const dbUrlMatch = envContent.match(/DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
         if (dbUrlMatch && dbUrlMatch[2]) {
           const localUrl = stripQuotes(dbUrlMatch[2]);
-          if (localUrl && !localUrl.includes("placeholder")) {
-            process.env.DATABASE_URL = localUrl;
-          }
+          if (localUrl && !localUrl.includes("placeholder")) process.env.DATABASE_URL = localUrl;
         }
         const directUrlMatch = envContent.match(/DIRECT_DATABASE_URL\s*=\s*(['\"]?)(.*?)\1(?:[\r\n]|$)/);
         if (directUrlMatch && directUrlMatch[2]) {
           const localDirectUrl = stripQuotes(directUrlMatch[2]);
-          if (localDirectUrl && !localDirectUrl.includes("placeholder")) {
-            process.env.DIRECT_DATABASE_URL = localDirectUrl;
-          }
+          if (localDirectUrl && !localDirectUrl.includes("placeholder")) process.env.DIRECT_DATABASE_URL = localDirectUrl;
         }
       }
     } catch (err) {
       console.warn("[Prisma Config] Local .env parsing failed or not found, using system variables:", err);
     }
   }
+}
 
+// Run the resolution exactly once per process (guarded against dev hot-reload).
+if (typeof global === "undefined" || !(global as any).__db_env_resolved__) {
+  resolveDbEnvOnce();
+  if (typeof global !== "undefined") (global as any).__db_env_resolved__ = true;
+}
+
+function getClient(useFallback = false): any {
+  // Connection config (.env parsing, quote stripping) is resolved once at module
+  // load by resolveDbEnvOnce() — getClient no longer touches the filesystem.
   let url = process.env.DATABASE_URL || "";
   
   if (useFallback && process.env.DIRECT_DATABASE_URL) {
@@ -501,9 +509,11 @@ function getClient(useFallback = false): any {
             } catch (err: any) {
               const errMsg = err.message || "";
               
-              // Check for API key / Accelerate errors
-              const isKeyError = errMsg.includes("P6002") || 
-                                 errMsg.includes("API key is invalid") || 
+              // Check for API key / Accelerate errors. Includes P5000 so this
+              // single surviving layer covers everything the removed proxy matched.
+              const isKeyError = errMsg.includes("P5000") ||
+                                 errMsg.includes("P6002") ||
+                                 errMsg.includes("API key is invalid") ||
                                  (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
               
               if (isKeyError) {
@@ -639,96 +649,15 @@ function getPrisma() {
   return client;
 }
 
-function wrapModelDelegate(modelName: string, delegate: any): any {
-  if (!delegate || typeof delegate !== "object") return delegate;
-  
-  return new Proxy(delegate, {
-    get(target, prop) {
-      const origMethod = Reflect.get(target, prop);
-      if (typeof origMethod !== "function") {
-        return origMethod;
-      }
-      
-      return async function (...args: any[]) {
-        const operation = String(prop);
-        
-        if (isEntirelyOffline()) {
-          return getFallbackMockData(modelName, operation, args[0]);
-        }
-        
-        try {
-          return await origMethod.apply(target, args);
-        } catch (err: any) {
-          const errMsg = err.message || "";
-          
-          const isKeyError = errMsg.includes("P5000") ||
-                             errMsg.includes("P6002") || 
-                             errMsg.includes("API key is invalid") || 
-                             (errMsg.includes("Unauthorized") && errMsg.toLowerCase().includes("accelerate"));
-                             
-          if (isKeyError) {
-            console.log(`[Prisma Failover] Connection pending fallback lookup.`);
-            if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-              console.log(`[Prisma Failover] Activating direct connection.`);
-              setUsingFallback(true);
-              
-              // Get direct client
-              const fallbackClient = getPrisma(); // Will return fallback direct connection client as isUsingFallback() is now true
-              const fallbackDelegate = fallbackClient[modelName];
-              
-              if (fallbackDelegate && typeof fallbackDelegate[operation] === "function") {
-                try {
-                  console.log(`[Prisma Failover] Retrying '${modelName}.${operation}' via direct channel...`);
-                  return await fallbackDelegate[operation](...args);
-                } catch (fallbackErr: any) {
-                  console.log(`[Prisma Failover] Direct connection standby deactivated. Using offline sandbox.`);
-                  setEntirelyOffline(true);
-                  return getFallbackMockData(modelName, operation, args[0]);
-                }
-              }
-            } else {
-              console.log(`[Prisma Failover] Direct DB fallback unavailable. Operating offline.`);
-              setEntirelyOffline(true);
-              return getFallbackMockData(modelName, operation, args[0]);
-            }
-          }
-          
-          // Check for transient errors
-          const isTransientError = 
-            errMsg.includes("ConnectionReset") ||
-            errMsg.includes("Connection reset") ||
-            errMsg.includes("104") ||
-            errMsg.includes("Io") ||
-            errMsg.includes("ECONNRESET") ||
-            errMsg.includes("socket hang up") ||
-            errMsg.includes("EPIPE") ||
-            errMsg.includes("ETIMEDOUT") ||
-            errMsg.includes("P1017") || 
-            errMsg.includes("closed by peer") ||
-            errMsg.toLowerCase().includes("connection reset") ||
-            errMsg.toLowerCase().includes("can't reach database");
-            
-          if (isTransientError) {
-            console.log(`[Prisma Wrapper] Transient fluctuation encountered.`);
-            throw err;
-          }
-
-          // Do NOT permanently latch offline for unknown/generic errors — surface them
-          // so the caller can handle and the next request retries the real database.
-          throw err;
-        }
-      };
-    }
-  });
-}
-
 const prisma = new Proxy({} as ExtendedPrismaClient, {
   get(target, prop) {
     const client = getPrisma();
     const val = Reflect.get(client, prop);
     
     if (typeof prop === "string" && val && typeof val === "object" && !prop.startsWith("$")) {
-      return wrapModelDelegate(prop, val);
+      // Model delegates already run through the single $extends failover layer
+      // ($allOperations). No second proxy layer — that was the duplicate matching.
+      return val;
     }
     
     if (typeof prop === "string" && typeof val === "function" && prop.startsWith("$")) {
@@ -738,24 +667,23 @@ const prisma = new Proxy({} as ExtendedPrismaClient, {
         } catch (err: any) {
           const errMsg = err.message || "";
           const isKeyError = errMsg.includes("P5000") || errMsg.includes("P6002") || errMsg.includes("API key is invalid");
-          if (isKeyError) {
-            console.log(`[Prisma Failover] Client operation in offline fallback.`);
-            if (process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
-              setUsingFallback(true);
-              const fallbackClient = getPrisma();
-              const fallbackMethod = fallbackClient[prop];
-              if (typeof fallbackMethod === "function") {
-                try {
-                  return await fallbackMethod.apply(fallbackClient, args);
-                } catch (fallbackErr) {
-                  return [];
-                }
-              }
+
+          // Accelerate key failure only: retry once through the direct connection.
+          // Its result (success OR error) is returned/propagated as-is.
+          if (isKeyError && process.env.DIRECT_DATABASE_URL && !isUsingFallback()) {
+            console.log(`[Prisma Failover] Client operation '${prop}' retrying via direct connection.`);
+            setUsingFallback(true);
+            const fallbackClient = getPrisma();
+            const fallbackMethod = fallbackClient[prop];
+            if (typeof fallbackMethod === "function") {
+              return await fallbackMethod.apply(fallbackClient, args);
             }
-          } else {
-            console.log(`[Prisma Wrapper] Client operation '${prop}' resolved via fallback.`);
           }
-          return [];
+
+          // Never hide a query/transaction failure behind an empty array — a
+          // silent [] here can make a failed $transaction or $queryRaw look like
+          // a successful empty result. Surface the real error to the caller.
+          throw err;
         }
       };
     }

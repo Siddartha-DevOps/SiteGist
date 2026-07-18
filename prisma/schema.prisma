@@ -138,11 +138,14 @@ model KnowledgeSource {
   contentHash   String?                       // sha256 of last-indexed content, for incremental-sync skip
   chunksTotal   Int      @default(0)          // total chunks for the current ingest (progress bar)
   chunksIndexed Int      @default(0)          // chunks embedded so far (progress bar)
+  recrawlIntervalDays Int?                    // auto-refresh cadence in days (1/7/30); null = never auto-recrawl
+  nextRecrawlAt DateTime?                     // when this source is next due for an automatic re-index
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   search_vector Unsupported("tsvector")? // Managed via raw SQL migration as it is stored and generated
 
   @@index([projectId])
+  @@index([nextRecrawlAt])
 }
 
 model ChatSession {
