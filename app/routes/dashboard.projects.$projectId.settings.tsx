@@ -41,6 +41,47 @@ const PERSONAS = [
   },
 ] as const;
 
+// Industry lead-capture templates. Each prefills the project's custom lead
+// fields with sensible questions for that vertical; the visitor-facing widget
+// already renders whatever custom fields are configured, so these need no
+// widget changes. `id` is assigned at apply-time to keep field ids unique.
+const LEAD_TEMPLATES: { id: string; label: string; description: string; fields: Omit<LeadField, "id">[] }[] = [
+  {
+    id: "real-estate",
+    label: "Real Estate",
+    description: "Budget, property type, buying timeline",
+    fields: [
+      { label: "Budget", type: "dropdown", required: true, options: ["Under $250k", "$250k–$500k", "$500k–$1M", "$1M+"] },
+      { label: "Property Type", type: "dropdown", required: false, options: ["Single-family home", "Condo / Apartment", "Townhouse", "Land", "Commercial"] },
+      { label: "Buying Timeline", type: "dropdown", required: false, options: ["Immediately", "1–3 months", "3–6 months", "Just browsing"] },
+      { label: "Preferred Location", type: "text", required: false },
+      { label: "Pre-approved for financing", type: "checkbox", required: false },
+    ],
+  },
+  {
+    id: "legal",
+    label: "Legal Services",
+    description: "Case type, urgency, best contact time",
+    fields: [
+      { label: "Type of Legal Matter", type: "dropdown", required: true, options: ["Personal Injury", "Family Law", "Criminal Defense", "Business / Corporate", "Estate Planning", "Other"] },
+      { label: "Urgency", type: "dropdown", required: false, options: ["Emergency", "Within a week", "Within a month", "Just exploring"] },
+      { label: "Best Time to Contact", type: "dropdown", required: false, options: ["Morning", "Afternoon", "Evening"] },
+      { label: "Brief Description", type: "text", required: false },
+    ],
+  },
+  {
+    id: "saas",
+    label: "SaaS / B2B",
+    description: "Company size, role, use case",
+    fields: [
+      { label: "Company Size", type: "dropdown", required: false, options: ["1–10", "11–50", "51–200", "201–1000", "1000+"] },
+      { label: "Your Role", type: "text", required: false },
+      { label: "Primary Use Case", type: "text", required: false },
+      { label: "Requesting a demo", type: "checkbox", required: false },
+    ],
+  },
+];
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
   const [project, user, addons] = await Promise.all([
@@ -970,6 +1011,24 @@ export default function ProjectSettings() {
                     </button>
                   </div>
                   <p className="text-xs text-zinc-400 font-medium">Configure extra answers you'd like to collect, such as Company size, Role, or Budget.</p>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mr-1">Start from a template:</span>
+                    {LEAD_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        title={tpl.description}
+                        onClick={() => {
+                          if (leadFields.length > 0 && !confirm(`Replace your current custom fields with the ${tpl.label} template?`)) return;
+                          setLeadFields(tpl.fields.map((f) => ({ ...f, id: Math.random().toString(36).substring(2, 9) })));
+                        }}
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold border border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-primary hover:text-primary transition-all cursor-pointer"
+                      >
+                        {tpl.label}
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="space-y-4">
                     {leadFields.map((field, i) => (
