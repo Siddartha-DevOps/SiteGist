@@ -38,7 +38,13 @@ export default function WordpressPlugin() {
                 Connect your WordPress site to SiteGist in seconds. No theme hacking or complex scripts required. Just install and go live.
              </p>
              <div className="flex flex-col sm:flex-row items-start gap-4">
-               <CTAButton to="#" variant="primary" className="px-10 py-5 text-base w-full sm:w-auto bg-[#21759b] border-none">Download Plugin</CTAButton>
+               <a
+                 href="/sitegist-wordpress-plugin.zip"
+                 download
+                 className="px-10 py-5 text-base w-full sm:w-auto bg-[#21759b] text-white rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-[#21759b]/20 hover:brightness-110"
+               >
+                 <Download className="w-5 h-5" /> Download Plugin
+               </a>
                <CTAButton to="/signup" variant="secondary" className="px-10 py-5 text-base w-full sm:w-auto">View Setup Guide</CTAButton>
              </div>
           </div>
