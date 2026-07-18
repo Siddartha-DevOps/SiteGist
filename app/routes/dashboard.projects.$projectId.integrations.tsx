@@ -110,6 +110,22 @@ export async function action({ params, request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // --- DROPBOX ---
+  if (_action === "disconnect_dropbox") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "dropbox" },
+    });
+    return json({ success: true });
+  }
+
+  // --- MICROSOFT / ONEDRIVE ---
+  if (_action === "disconnect_microsoft") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "microsoft" },
+    });
+    return json({ success: true });
+  }
+
   // --- CONFLUENCE ---
   if (_action === "sync_confluence") {
     try {
@@ -203,18 +219,17 @@ export default function ProjectIntegrations() {
   }, [revalidator]);
 
   const handleConnect = async (provider: string) => {
-    if (provider !== 'notion' && provider !== 'google_drive' && provider !== 'crisp' && provider !== 'messenger' && provider !== 'intercom' && provider !== 'zoho' && provider !== 'confluence') return;
+    const oauthProviders = ['notion', 'google_drive', 'crisp', 'messenger', 'intercom', 'zoho', 'dropbox', 'microsoft', 'confluence'];
+    if (!oauthProviders.includes(provider)) return;
     setConnecting(provider);
     try {
-      // Confluence uses the spec-mandated /api/oauth/ prefix; the rest use /api/auth/.
       const urlEndpoint =
         provider === 'confluence'
           ? '/api/oauth/confluence/url'
-          : `/api/auth/${provider === 'google_drive' ? 'google' : provider}/url`;
+          : `/api/auth/${provider === 'google_drive' ? 'google' : provider === 'dropbox' ? 'dropbox' : provider === 'microsoft' ? 'microsoft' : provider}/url`;
       const response = await fetch(`${urlEndpoint}?projectId=${project.id}`);
       const data = await response.json();
       if (data.url) {
-        // Open OAuth in new window
         const width = 600;
         const height = 700;
         const left = window.screenX + (window.outerWidth - width) / 2;
@@ -293,12 +308,35 @@ export default function ProjectIntegrations() {
       connected: project.integrations.some(i => i.provider === 'zoho'),
     },
     {
+      id: "dropbox",
+      name: "Dropbox",
+      description: "Import PDFs and documents from your Dropbox as knowledge sources.",
+      icon: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <path fill="#0061FF" d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4L6 2zm12 0l-6 4 6 4 6-4-6-4zM0 14l6 4 6-4-6-4-6 4zm18-4l-6 4 6 4 6-4-6-4z"/>
+        </svg>
+      ),
+      connected: project.integrations.some(i => i.provider === 'dropbox'),
+    },
+    {
+      id: "microsoft",
+      name: "OneDrive",
+      description: "Sync Word documents, PDFs, and text files from Microsoft OneDrive.",
+      icon: (
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <path fill="#0364B8" d="M14.5 11.5C14.5 9 12.5 7 10 7c-2 0-3.7 1.3-4.3 3.1C4 10.3 3 11.5 3 13c0 1.7 1.3 3 3 3h8.5c1.4 0 2.5-1.1 2.5-2.5 0-1.2-.8-2.2-2-2z"/>
+          <path fill="#0078D4" d="M18.5 12.5h-.2C18 10 16 8 13.5 8c-.5 0-1 .1-1.5.3C11.3 6.9 9.8 6 8 6c-2.8 0-5 2.2-5 5 0 .2 0 .4.1.5C1.8 12 1 13.2 1 14.5 1 16.4 2.6 18 4.5 18H18.5c1.7 0 3-1.3 3-3s-1.3-2.5-3-2.5z"/>
+        </svg>
+      ),
+      connected: project.integrations.some(i => i.provider === 'microsoft'),
+    },
+    {
       id: "confluence",
       name: "Confluence",
       description: "Train your AI on your Atlassian Confluence spaces and pages.",
       icon: <BookText className="w-6 h-6 text-blue-600" />,
       connected: project.integrations.some(i => i.provider === 'confluence'),
-    }
+    },
   ];
 
   return (
@@ -330,7 +368,7 @@ export default function ProjectIntegrations() {
             <h3 className="text-xl font-bold mb-2">{item.name}</h3>
             <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
             
-            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && (
+            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && item.id !== 'disconnect_only' && (
               <button 
                 onClick={() => !item.connected && handleConnect(item.id)}
                 disabled={item.connected || connecting === item.id}

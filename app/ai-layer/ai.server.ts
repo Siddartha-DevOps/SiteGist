@@ -297,6 +297,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
     // Not silent: surface that quality is degraded. The fallback ranks by the
     // RRF-fused score from hybrid retrieval (a real ranking signal), not a flat score.
     console.warn("[RAG] Cohere rerank is OFF (Portkey keys absent) — using RRF-fused ranking. Set PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY to enable reranking.");
+    log.metric("rag.rerank", 1, { mode: "fallback_no_keys" });
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 
@@ -330,9 +331,11 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
     const data = await response.json();
     const rerankedMatches = data.results.map((result: any) => ({ ...documents[result.index], relevanceScore: result.relevance_score ?? 0 }));
+    log.metric("rag.rerank", 1, { mode: "cohere", count: rerankedMatches.length });
     return rerankedMatches;
   } catch (error) {
     console.error("Portkey Rerank error — falling back to RRF-fused ranking:", error);
+    log.metric("rag.rerank", 1, { mode: "fallback_error" });
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
 }
@@ -1017,11 +1020,25 @@ export async function* streamRAG(
       // methods now accumulates both contributions (rank agreement = boost), and the
       // fused score is a coherent ranking signal for the rerank-off fallback.
       const RRF_K = 60; // standard damping constant
+      // Per-modality weighting (configurable). RRF contribution = weight / (k + rank),
+      // so e.g. RAG_RRF_VECTOR_WEIGHT=2 makes semantic matches count twice as much as
+      // keyword matches. Defaults to 1/1 (classic unweighted RRF).
+      const vectorWeight = parseFloat(process.env.RAG_RRF_VECTOR_WEIGHT || "1") || 1;
+      const keywordWeight = parseFloat(process.env.RAG_RRF_KEYWORD_WEIGHT || "1") || 1;
+
+      // Dedup key: a hash of the normalised chunk text (prefer the vector store's
+      // chunk id when present). Replaces the old first-100-chars substring key, which
+      // collided whenever two distinct chunks shared a prefix (common with repeated
+      // headers/boilerplate) and merged unrelated documents.
+      const dedupKey = (text: string, id?: string) =>
+        id || crypto.createHash("sha1").update(text.trim().replace(/\s+/g, " ").toLowerCase()).digest("hex");
+
       type Fused = { text: string; url?: string; title?: string; vectorScore: number; methods: Set<string>; rrf: number };
       const fused = new Map<string, Fused>();
 
       const fuseList = (
         items: any[],
+        weight: number,
         toDoc: (item: any) => { id?: string; text?: string; url?: string; title?: string; method: string; vectorScore?: number } | null
       ) => {
         const seenInList = new Set<string>();
@@ -1036,7 +1053,7 @@ export async function* streamRAG(
           if (seenInList.has(key)) continue; // only the best rank within a single list counts
           seenInList.add(key);
           rank += 1;
-          const contribution = 1 / (RRF_K + rank);
+          const contribution = weight / (RRF_K + rank);
           const existing = fused.get(key);
           if (existing) {
             existing.rrf += contribution;
@@ -1055,8 +1072,10 @@ export async function* streamRAG(
         }
       };
 
-      // Keyword list is already ordered by ts_rank (SQL ORDER BY rank DESC).
-      fuseList(keywordResults || [], (s: any) =>
+      // Keyword list is already ordered by ts_rank (SQL ORDER BY rank DESC). Keyword
+      // rows have no chunk id, so they dedup by content hash (and merge with any
+      // identical vector chunk).
+      fuseList(keywordResults || [], keywordWeight, (s: any) =>
         s.content ? { text: s.content, url: s.source, title: s.title, method: "keyword" } : null
       );
 
@@ -1065,8 +1084,8 @@ export async function* streamRAG(
       const vectorRanked = (vectorResults.matches || [])
         .filter((m: any) => (m.score || 0) >= VECTOR_SCORE_THRESHOLD && (m.metadata as any)?.text)
         .sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
-      fuseList(vectorRanked, (m: any) => ({
-        id: m.id,
+      fuseList(vectorRanked, vectorWeight, (m: any) => ({
+        id: typeof m.id === "string" ? m.id : undefined,
         text: (m.metadata as any)?.text,
         url: (m.metadata as any)?.url,
         title: (m.metadata as any)?.title,

@@ -27,15 +27,18 @@ function sha256(s: string): string {
 }
 
 /**
- * Async ingestion is used only when explicitly opted in via INGEST_ASYNC=1 AND
- * Inngest is configured. Merely having INNGEST_EVENT_KEY present is NOT enough:
- * if the Inngest app isn't synced to /api/inngest (or the signing key is missing),
- * events are accepted but never processed, leaving every source stuck in "queued".
- * Defaulting to the inline path makes ingestion work reliably out of the box;
- * flip INGEST_ASYNC=1 once Inngest is fully wired and verified for scale.
+ * Async ingestion is now the DEFAULT whenever Inngest is configured (an
+ * INNGEST_EVENT_KEY or INNGEST_DEV is present), so large crawls never block an
+ * HTTP request. It falls back to the inline path automatically when Inngest is
+ * not configured, so the app still works out of the box.
+ *
+ * Synchronous mode remains available by setting INGEST_ASYNC=0 (e.g. while
+ * Inngest is configured but not yet verified end-to-end — if the app isn't
+ * synced to /api/inngest, events are accepted but never processed and sources
+ * would otherwise stall in "queued").
  */
 export function isAsyncIngestionEnabled(): boolean {
-  if (process.env.INGEST_ASYNC?.trim() !== "1") return false;
+  if (process.env.INGEST_ASYNC?.trim() === "0") return false; // explicit sync override
   return !!(process.env.INNGEST_EVENT_KEY?.trim() || process.env.INNGEST_DEV?.trim());
 }
 
@@ -116,10 +119,33 @@ export async function drainQueuedSources(projectId: string, batch = 4): Promise<
 
 async function setStatus(
   sourceId: string,
-  status: "queued" | "crawling" | "embedding" | "indexed" | "failed",
+  status: "queued" | "crawling" | "embedding" | "indexed" | "failed" | "cancelled",
   extra: Record<string, any> = {}
 ) {
   await prisma.knowledgeSource.update({ where: { id: sourceId }, data: { status, ...extra } });
+}
+
+/** Thrown internally to unwind a cancelled ingestion cleanly (not an error). */
+class IngestionCancelled extends Error {}
+
+/**
+ * Request cancellation of an in-flight or queued ingestion. Scoped to the project
+ * so it can't cancel another tenant's source. The running pipeline checks for this
+ * at each stage boundary (see assertNotCancelled) and unwinds to a "cancelled"
+ * status; a not-yet-started source is simply marked cancelled and skipped.
+ */
+export async function cancelIngestion(projectId: string, sourceId: string): Promise<{ cancelled: boolean }> {
+  const res = await prisma.knowledgeSource.updateMany({
+    where: { id: sourceId, projectId, status: { in: ["queued", "crawling", "embedding"] } },
+    data: { status: "cancelled", error: "Cancelled by user." },
+  });
+  return { cancelled: res.count > 0 };
+}
+
+/** Abort the pipeline if the source was cancelled mid-flight. */
+async function assertNotCancelled(sourceId: string) {
+  const row = await prisma.knowledgeSource.findUnique({ where: { id: sourceId }, select: { status: true } });
+  if (row?.status === "cancelled") throw new IngestionCancelled();
 }
 
 /**
@@ -139,6 +165,8 @@ export async function ingestKnowledgeSource(
   const endTimer = startTimer("ingest.source", { sourceId, projectId, type: source.type });
 
   try {
+    await assertNotCancelled(sourceId); // bail if cancelled before we started
+
     // 1. Resolve content by source type.
     let content = source.content || "";
     let title = source.title || source.source;
@@ -177,6 +205,8 @@ export async function ingestKnowledgeSource(
       endTimer({ ok: true, skipped: true });
       return { sourceId, chunks: 0, upserted: 0, skipped: true };
     }
+
+    await assertNotCancelled(sourceId); // bail before the expensive embed stage
 
     // 3. Token-based chunking.
     const chunks = chunkTextByTokens(content);
@@ -221,6 +251,13 @@ export async function ingestKnowledgeSource(
     endTimer({ ok: true, skipped: false, chunks: chunks.length, upserted });
     return { sourceId, chunks: chunks.length, upserted, skipped: false };
   } catch (err: any) {
+    // Cancellation is an expected outcome, not a failure: leave the row "cancelled"
+    // and return quietly so retries (Inngest) don't re-run a user-cancelled source.
+    if (err instanceof IngestionCancelled) {
+      await setStatus(sourceId, "cancelled", { error: "Cancelled by user." }).catch(() => {});
+      endTimer({ ok: true, cancelled: true });
+      return { sourceId, chunks: 0, upserted: 0, skipped: true };
+    }
     const message = err?.message ? String(err.message).slice(0, 1000) : "Ingestion failed";
     await setStatus(sourceId, "failed", { error: message }).catch(() => {});
     captureException(err, { where: "ingestKnowledgeSource", sourceId, projectId, type: source.type });

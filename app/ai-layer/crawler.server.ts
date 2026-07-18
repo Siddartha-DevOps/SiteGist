@@ -16,6 +16,52 @@ const MAX_CONTENT_CHARS = 500_000;            // ~125k tokens of extracted text
 // Below this many non-whitespace chars we treat the fetch as "no readable text"
 // — usually a JavaScript-rendered shell that needs a headless renderer (Firecrawl).
 const MIN_READABLE_CHARS = 30;
+// At or above this many readable chars, static scraping is considered sufficient and
+// we skip the (slower, paid) headless fallback — preserves static for normal pages.
+const GOOD_STATIC_CHARS = 500;
+const FIRECRAWL_TIMEOUT_MS = 45_000;
+
+/**
+ * Headless render via Firecrawl (the serverless-friendly stand-in for a bundled
+ * browser). Used as an automatic fallback for JS-rendered pages that static
+ * scraping can't read. Returns null when Firecrawl isn't configured or fails.
+ * Adds an explicit timeout and one retry on top of the SDK.
+ */
+async function scrapeWithFirecrawl(url: string): Promise<{ title: string; content: string; url: string } | null> {
+  const firecrawl = getFirecrawl();
+  if (!firecrawl) return null;
+
+  const attempt = async () => {
+    let response: any;
+    if (typeof (firecrawl as any).scrape === "function") {
+      response = await (firecrawl as any).scrape(url, { formats: ["markdown"] });
+    } else if (typeof (firecrawl as any).scrapeUrl === "function") {
+      response = await (firecrawl as any).scrapeUrl(url, { formats: ["markdown"] });
+    }
+    if (response && response.success) {
+      const doc = response.data || response;
+      return {
+        title: doc.metadata?.title || doc.title || url,
+        content: doc.markdown || doc.content || "",
+        url: doc.metadata?.sourceURL || doc.url || url,
+      };
+    }
+    return null;
+  };
+
+  for (let i = 0; i < 2; i++) {
+    try {
+      const result = await Promise.race([
+        attempt(),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Firecrawl timeout")), FIRECRAWL_TIMEOUT_MS)),
+      ]);
+      if (result && result.content) return result;
+    } catch (e) {
+      console.warn(`[Crawler] Firecrawl attempt ${i + 1}/2 failed for ${url}:`, e);
+    }
+  }
+  return null;
+}
 
 /** robots.txt is respected by default; set RESPECT_ROBOTS=0 to disable. */
 function shouldRespectRobots(): boolean {
@@ -265,8 +311,6 @@ export async function parseDocx(buffer: Buffer) {
 }
 
 export async function crawlUrl(url: string, recursive = false) {
-  const firecrawl = getFirecrawl();
-
   // Respect robots.txt before any fetch (both Firecrawl and the basic path).
   if (shouldRespectRobots() && !(await isAllowedByRobots(url))) {
     throw new Error(
@@ -275,33 +319,9 @@ export async function crawlUrl(url: string, recursive = false) {
     );
   }
 
-  if (firecrawl && !recursive) {
-    try {
-      let response: any;
-      if (typeof (firecrawl as any).scrape === "function") {
-        response = await (firecrawl as any).scrape(url, {
-          formats: ["markdown"],
-        });
-      } else if (typeof (firecrawl as any).scrapeUrl === "function") {
-        response = await (firecrawl as any).scrapeUrl(url, {
-          formats: ["markdown"],
-        });
-      }
-
-      if (response && response.success) {
-        const doc = response.data || response;
-        return {
-          title: doc.metadata?.title || doc.title || url,
-          content: doc.markdown || doc.content || "",
-          url: doc.metadata?.sourceURL || doc.url || url,
-        };
-      }
-    } catch (e) {
-      console.warn("Firecrawl failed, falling back to basic crawler", e);
-    }
-  }
-
-  // Fallback to basic axios/cheerio if firecrawl fails or is missing
+  // Static-first: try plain HTTP + cheerio (fast, free, preserves normal HTML pages).
+  // JS-rendered pages produce little/no readable text here and fall back to the
+  // headless renderer (Firecrawl) further below.
   let response: any;
   try {
     response = await axios.get(url, {
@@ -447,29 +467,43 @@ export async function crawlUrl(url: string, recursive = false) {
     return null;
   }
 
-  // Cap extracted text so a pathologically large page can't blow up chunking/embedding.
-  if (finalContent.length > MAX_CONTENT_CHARS) {
-    console.warn(`[Crawler] Truncating ${url} from ${finalContent.length} to ${MAX_CONTENT_CHARS} chars`);
-    finalContent = finalContent.slice(0, MAX_CONTENT_CHARS);
+  const capContent = (c: string) => (c.length > MAX_CONTENT_CHARS ? c.slice(0, MAX_CONTENT_CHARS) : c);
+  finalContent = capContent(finalContent);
+  const staticReadable = finalContent.replace(/\s+/g, "").length;
+
+  // Rich static content → use it directly. Preserves fast/free static scraping for
+  // normal HTML pages and avoids paying for a headless render.
+  if (staticReadable >= GOOD_STATIC_CHARS) {
+    return { title, content: finalContent, url };
   }
 
-  // Empty / SPA detection: the basic fetcher can't run JavaScript, so a client-rendered
-  // app yields an empty shell. Fail loudly with an actionable message instead of silently
-  // indexing nothing (the previous behaviour surfaced only a generic "No content").
-  if (finalContent.replace(/\s+/g, "").length < MIN_READABLE_CHARS) {
-    const rawHtml = typeof response.data === "string" ? response.data : "";
-    const looksSpa = /enable JavaScript|id=["'](root|app|__next|___gatsby)["']/i.test(rawHtml);
-    if (firecrawl) {
-      throw new Error("This page returned almost no readable text and the Firecrawl scrape failed — retry shortly, or add the content as Text/File.");
+  // Thin/empty static content usually means a JS-rendered page. Automatically fall
+  // back to the headless renderer (Firecrawl) and keep whichever result is richer.
+  if (!recursive) {
+    const fc = await scrapeWithFirecrawl(url);
+    if (fc?.content) {
+      const fcReadable = fc.content.replace(/\s+/g, "").length;
+      if (fcReadable > staticReadable) {
+        return { title: fc.title || title, content: capContent(fc.content), url: fc.url || url };
+      }
     }
-    throw new Error(
-      looksSpa
+  }
+
+  // Some (thin) static text and no better headless result — use what we have.
+  if (staticReadable >= MIN_READABLE_CHARS) {
+    return { title, content: finalContent, url };
+  }
+
+  // Truly empty: fail loudly with an actionable message instead of indexing nothing.
+  const rawHtml = typeof response.data === "string" ? response.data : "";
+  const looksSpa = /enable JavaScript|id=["'](root|app|__next|___gatsby)["']/i.test(rawHtml);
+  throw new Error(
+    getFirecrawl()
+      ? "This page returned no readable text and the headless render also failed — retry shortly, or add the content as Text/File."
+      : looksSpa
         ? "This page rendered no readable text — it looks like a JavaScript app. Set FIRECRAWL_API_KEY to crawl JS-rendered sites, or paste the content via Text/File."
         : "No readable text found on this page. If it needs JavaScript to render, set FIRECRAWL_API_KEY; otherwise add the content as Text/File."
-    );
-  }
-
-  return { title, content: finalContent, url };
+  );
 }
 
 export async function crawlRecursive(url: string, limit = 10) {

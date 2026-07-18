@@ -1,7 +1,8 @@
 import { Client } from "@notionhq/client";
 import { prisma } from "~/database/db.server";
-import { chunkText } from "~/ai-layer/crawler.server";
+import { chunkText, parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 import { upsertChunks } from "~/ai-layer/ai.server";
+import { refreshDropboxToken, refreshMicrosoftToken } from "~/backend/oauth.server";
 import { enqueueManySourceIngestions } from "~/ai-layer/ingestion.server";
 
 async function getNotionPageContent(notion: Client, blockId: string): Promise<string> {
@@ -196,6 +197,199 @@ export async function syncGoogleDrive(projectId: string) {
       console.log(`[Google Drive] Synced "${title}" (${chunks.length} chunks)`);
     } catch (err) {
       console.error(`[Google Drive] Failed to process "${file.name}":`, err);
+    }
+  }
+}
+
+// ---- Dropbox ----------------------------------------------------------------
+
+const DROPBOX_SUPPORTED_EXT = /\.(pdf|docx|txt|md|mdx|csv)$/i;
+const DROPBOX_API = "https://api.dropboxapi.com/2";
+const DROPBOX_CONTENT_API = "https://content.dropboxapi.com/2";
+
+async function listDropboxFiles(
+  token: string,
+  cursor?: string
+): Promise<{ entries: any[]; hasMore: boolean; cursor: string }> {
+  const res = cursor
+    ? await fetch(`${DROPBOX_API}/files/list_folder/continue`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ cursor }),
+      })
+    : await fetch(`${DROPBOX_API}/files/list_folder`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "", recursive: true, limit: 200 }),
+      });
+  if (!res.ok) throw new Error(`Dropbox list_folder error (${res.status}): ${await res.text()}`);
+  const data = await res.json() as any;
+  return { entries: data.entries || [], hasMore: data.has_more, cursor: data.cursor };
+}
+
+export async function syncDropbox(projectId: string) {
+  const token = await refreshDropboxToken(projectId);
+
+  // Collect all file entries recursively
+  const allFiles: { path_lower: string; name: string }[] = [];
+  let cursor: string | undefined;
+  let hasMore = true;
+  while (hasMore) {
+    const result = await listDropboxFiles(token, cursor);
+    for (const entry of result.entries) {
+      if (entry[".tag"] === "file" && DROPBOX_SUPPORTED_EXT.test(entry.name)) {
+        allFiles.push(entry);
+      }
+    }
+    hasMore = result.hasMore;
+    cursor = result.cursor;
+    if (allFiles.length >= 200) break; // cap
+  }
+
+  console.log(`[Dropbox] Found ${allFiles.length} supported files for project ${projectId}`);
+
+  for (const file of allFiles) {
+    try {
+      // Download file binary content
+      const dlRes = await fetch(`${DROPBOX_CONTENT_API}/files/download`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Dropbox-API-Arg": JSON.stringify({ path: file.path_lower }),
+          "Content-Type": "text/plain",
+        },
+      });
+      if (!dlRes.ok) {
+        console.warn(`[Dropbox] Download failed for "${file.name}" (${dlRes.status})`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await dlRes.arrayBuffer());
+      let content = "";
+
+      if (/\.pdf$/i.test(file.name)) {
+        content = await parsePdf(buffer);
+      } else if (/\.docx$/i.test(file.name)) {
+        content = await parseDocx(buffer);
+      } else {
+        content = buffer.toString("utf-8");
+      }
+
+      if (!content.trim()) {
+        console.log(`[Dropbox] Skipping empty file: "${file.name}"`);
+        continue;
+      }
+
+      const title = file.name;
+      const source = `dropbox:${file.path_lower}`;
+      const fullContent = `Dropbox: ${title}\nPath: ${file.path_lower}\n\n${content.trim()}`.slice(0, 500_000);
+
+      await prisma.knowledgeSource.upsert({
+        where: { id: `dropbox-${Buffer.from(file.path_lower).toString("base64").slice(0, 20)}` },
+        update: { content: fullContent, title, updatedAt: new Date() },
+        create: {
+          id: `dropbox-${Buffer.from(file.path_lower).toString("base64").slice(0, 20)}`,
+          projectId,
+          type: "file",
+          source,
+          title,
+          content: fullContent,
+        },
+      });
+
+      const chunks = chunkText(fullContent);
+      await upsertChunks(
+        projectId,
+        chunks.map((c) => ({ text: c, metadata: { source, title, type: "dropbox" } }))
+      );
+      console.log(`[Dropbox] Synced "${title}" (${chunks.length} chunks)`);
+    } catch (err) {
+      console.error(`[Dropbox] Failed to process "${file.name}":`, err);
+    }
+  }
+}
+
+// ---- Microsoft OneDrive -----------------------------------------------------
+
+const GRAPH_URL = "https://graph.microsoft.com/v1.0";
+const ONEDRIVE_SUPPORTED_EXT = /\.(pdf|docx|txt|md|mdx|csv|pptx)$/i;
+
+async function listOneDriveFiles(token: string): Promise<any[]> {
+  const collected: any[] = [];
+  // Search for supported file types using Graph search
+  let url: string | null =
+    `${GRAPH_URL}/me/drive/root/search(q='')?$select=id,name,file,webUrl,parentReference&$top=200`;
+
+  while (url && collected.length < 300) {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`OneDrive list error (${res.status}): ${await res.text()}`);
+    const data = await res.json() as any;
+    for (const item of (data.value || [])) {
+      if (item.file && ONEDRIVE_SUPPORTED_EXT.test(item.name)) {
+        collected.push(item);
+      }
+    }
+    url = data["@odata.nextLink"] || null;
+  }
+  return collected;
+}
+
+export async function syncOneDrive(projectId: string) {
+  const token = await refreshMicrosoftToken(projectId);
+  const files = await listOneDriveFiles(token);
+  console.log(`[OneDrive] Found ${files.length} supported files for project ${projectId}`);
+
+  for (const file of files) {
+    try {
+      const dlRes = await fetch(`${GRAPH_URL}/me/drive/items/${file.id}/content`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!dlRes.ok) {
+        console.warn(`[OneDrive] Download failed for "${file.name}" (${dlRes.status})`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await dlRes.arrayBuffer());
+      let content = "";
+
+      if (/\.pdf$/i.test(file.name)) {
+        content = await parsePdf(buffer);
+      } else if (/\.docx$/i.test(file.name)) {
+        content = await parseDocx(buffer);
+      } else {
+        content = buffer.toString("utf-8");
+      }
+
+      if (!content.trim()) {
+        console.log(`[OneDrive] Skipping empty file: "${file.name}"`);
+        continue;
+      }
+
+      const title = file.name;
+      const source = file.webUrl || `onedrive:${file.id}`;
+      const fullContent = `OneDrive: ${title}\nSource: ${source}\n\n${content.trim()}`.slice(0, 500_000);
+
+      await prisma.knowledgeSource.upsert({
+        where: { id: `onedrive-${file.id}` },
+        update: { content: fullContent, title, updatedAt: new Date() },
+        create: {
+          id: `onedrive-${file.id}`,
+          projectId,
+          type: "file",
+          source,
+          title,
+          content: fullContent,
+        },
+      });
+
+      const chunks = chunkText(fullContent);
+      await upsertChunks(
+        projectId,
+        chunks.map((c) => ({ text: c, metadata: { source, title, url: source, type: "onedrive" } }))
+      );
+      console.log(`[OneDrive] Synced "${title}" (${chunks.length} chunks)`);
+    } catch (err) {
+      console.error(`[OneDrive] Failed to process "${file.name}":`, err);
     }
   }
 }

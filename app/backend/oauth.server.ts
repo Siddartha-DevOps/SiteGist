@@ -490,5 +490,185 @@ export async function exchangeZohoCode(code: string, projectId: string): Promise
   });
 }
 
+// --- Dropbox ---
+export function getDropboxAuthUrl(projectId: string): string {
+  const clientId = process.env.DROPBOX_APP_KEY;
+  if (!clientId) throw new Error("DROPBOX_APP_KEY is missing");
 
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: `${APP_URL}/api/auth/dropbox/callback`,
+    response_type: "code",
+    token_access_type: "offline",
+    state: projectId,
+  });
+
+  return `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
+}
+
+export async function exchangeDropboxCode(code: string, projectId: string): Promise<void> {
+  const clientId = process.env.DROPBOX_APP_KEY;
+  const clientSecret = process.env.DROPBOX_APP_SECRET;
+  if (!clientId || !clientSecret) throw new Error("DROPBOX_APP_KEY / DROPBOX_APP_SECRET missing");
+
+  const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: `${APP_URL}/api/auth/dropbox/callback`,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Dropbox token exchange failed: ${await res.text()}`);
+  const data = await res.json() as any;
+
+  await prisma.integration.upsert({
+    where: { projectId_provider: { projectId, provider: "dropbox" } },
+    create: {
+      projectId,
+      provider: "dropbox",
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      details: { account_id: data.account_id, uid: data.uid },
+    },
+    update: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      details: { account_id: data.account_id, uid: data.uid },
+    },
+  });
+}
+
+export async function refreshDropboxToken(projectId: string): Promise<string> {
+  const integration = await prisma.integration.findUnique({
+    where: { projectId_provider: { projectId, provider: "dropbox" } },
+  });
+  if (!integration) throw new Error("Dropbox not connected");
+  if (!integration.refreshToken) return integration.accessToken;
+
+  const clientId = process.env.DROPBOX_APP_KEY!;
+  const clientSecret = process.env.DROPBOX_APP_SECRET!;
+  const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: integration.refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  if (!res.ok) return integration.accessToken;
+  const data = await res.json() as any;
+  if (data.access_token) {
+    await prisma.integration.update({
+      where: { projectId_provider: { projectId, provider: "dropbox" } },
+      data: { accessToken: data.access_token },
+    });
+    return data.access_token;
+  }
+  return integration.accessToken;
+}
+
+// --- Microsoft (OneDrive / SharePoint) ---
+export function getMicrosoftAuthUrl(projectId: string): string {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  if (!clientId) throw new Error("MICROSOFT_CLIENT_ID is missing");
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: `${APP_URL}/api/auth/microsoft/callback`,
+    response_type: "code",
+    scope: "https://graph.microsoft.com/Files.Read offline_access",
+    state: projectId,
+  });
+
+  return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
+}
+
+export async function exchangeMicrosoftCode(code: string, projectId: string): Promise<void> {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error("MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET missing");
+
+  const res = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: `${APP_URL}/api/auth/microsoft/callback`,
+      scope: "https://graph.microsoft.com/Files.Read offline_access",
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Microsoft token exchange failed: ${await res.text()}`);
+  const data = await res.json() as any;
+
+  // Fetch display name from Graph
+  let displayName = "OneDrive";
+  try {
+    const meRes = await fetch("https://graph.microsoft.com/v1.0/me", {
+      headers: { Authorization: `Bearer ${data.access_token}` },
+    });
+    if (meRes.ok) {
+      const me = await meRes.json() as any;
+      displayName = me.displayName || me.userPrincipalName || "OneDrive";
+    }
+  } catch {}
+
+  await prisma.integration.upsert({
+    where: { projectId_provider: { projectId, provider: "microsoft" } },
+    create: {
+      projectId,
+      provider: "microsoft",
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      details: { display_name: displayName },
+    },
+    update: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || null,
+      details: { display_name: displayName },
+    },
+  });
+}
+
+export async function refreshMicrosoftToken(projectId: string): Promise<string> {
+  const integration = await prisma.integration.findUnique({
+    where: { projectId_provider: { projectId, provider: "microsoft" } },
+  });
+  if (!integration) throw new Error("Microsoft not connected");
+  if (!integration.refreshToken) return integration.accessToken;
+
+  const clientId = process.env.MICROSOFT_CLIENT_ID!;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET!;
+  const res = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: integration.refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "https://graph.microsoft.com/Files.Read offline_access",
+    }),
+  });
+  if (!res.ok) return integration.accessToken;
+  const data = await res.json() as any;
+  if (data.access_token) {
+    await prisma.integration.update({
+      where: { projectId_provider: { projectId, provider: "microsoft" } },
+      data: { accessToken: data.access_token, ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}) },
+    });
+    return data.access_token;
+  }
+  return integration.accessToken;
+}
 

@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation, Link } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
-import { getUsageForUser, getBillingCycleStart } from "~/lib/usage.server";
+import { getUsageForUser, getBillingCycleStart, enforceChatbotQuota } from "~/lib/usage.server";
 import { prisma } from "~/database/db.server";
 import { DashboardIndexPage } from "~/frontend/pages/DashboardIndex";
 import { Layout, AlertCircle } from "lucide-react";
@@ -147,6 +147,9 @@ export async function action({ request }: ActionFunctionArgs) {
   if (typeof name !== "string" || name.length < 3) {
     return json({ error: "Name must be at least 3 characters" }, { status: 400 });
   }
+
+  const quotaError = await enforceChatbotQuota(userId);
+  if (quotaError) return quotaError;
 
   const project = await prisma.project.create({
     data: {
