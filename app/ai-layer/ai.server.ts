@@ -3,7 +3,7 @@ import { pineconeIndex } from "~/lib/pinecone.server";
 import { getPortkey, getPortkeyEmbeddings } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
-import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION } from "~/env.server";
+import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION, env } from "~/env.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
@@ -296,13 +296,22 @@ function getGemini(): GoogleGenAI | null {
 }
 
 export async function rerankDocuments(query: string, documents: { text: string; [key: string]: any }[]) {
+  // Reranking is governed by the explicit RERANK_ENABLED flag (validated at
+  // boot), not inferred from key presence. When disabled, rank by the RRF-fused
+  // score from hybrid retrieval — a real ranking signal — with no per-request
+  // warning (the on/off status is logged once at startup).
+  if (!env.RERANK_ENABLED) {
+    log.metric("rag.rerank", 1, { mode: "disabled" });
+    return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
+  }
+
   const portkeyApiKey = cleanKey(process.env.PORTKEY_API_KEY);
   const cohereVirtualKey = cleanKey(process.env.PORTKEY_COHERE_VIRTUAL_KEY);
 
   if (!portkeyApiKey || !cohereVirtualKey) {
-    // Not silent: surface that quality is degraded. The fallback ranks by the
-    // RRF-fused score from hybrid retrieval (a real ranking signal), not a flat score.
-    console.warn("[RAG] Cohere rerank is OFF (Portkey keys absent) — using RRF-fused ranking. Set PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY to enable reranking.");
+    // Flag is on but Portkey keys are missing (boot validation should have
+    // caught this). Fall back to RRF ranking rather than fail the request.
+    console.warn("[RAG] RERANK_ENABLED is on but Portkey keys are missing — using RRF-fused ranking.");
     log.metric("rag.rerank", 1, { mode: "fallback_no_keys" });
     return [...documents].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5).map(d => ({ ...d, relevanceScore: d.score || 0 }));
   }
@@ -1154,7 +1163,7 @@ export async function* streamRAG(
         .map((s: any, i: number) => `[Document ${i+1}]: ${s.text}\nSource: ${s.title || 'Knowledge Base'} (${s.url || 'Internal'})\n---`)
         .join("\n\n");
 
-      const rerankEnabled = !!(process.env.PORTKEY_API_KEY && process.env.PORTKEY_COHERE_VIRTUAL_KEY);
+      const rerankEnabled = env.RERANK_ENABLED;
       endRetrieval({
         ok: true,
         candidates: initialMatches.length,
