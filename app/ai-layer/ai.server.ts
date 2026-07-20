@@ -143,7 +143,13 @@ function getDiagnosticInfo(key: string | null | undefined): string {
     }
   }
   
-  let info = `Length: ${length}, Masked: "${start}...${end}"`;
+  // Never emit key material (first/last chars or exact length) in production —
+  // this helper feeds error-path logs that run in prod. The classification hints
+  // below (masked / dummy / wrong-prefix / hidden chars) are safe and stay on.
+  let info =
+    process.env.NODE_ENV === "production"
+      ? "present"
+      : `Length: ${length}, Masked: "${start}...${end}"`;
   if (isMasked) {
     info += ` | ❌ CRITICAL: KEY IS MASKED. You cannot copy the masked version (sk-proj-****) from the list. You MUST click 'Create new secret key' and immediately copy the code from the popup before it disappears.`;
   }
