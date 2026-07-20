@@ -106,7 +106,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // tenant's chatbot (IDOR).
   const owned = await prisma.project.findFirst({
     where: { id: params.projectId, userId },
-    select: { id: true },
+    select: { id: true, settings: true },
   });
   if (!owned) throw redirect("/dashboard");
 
@@ -212,7 +212,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     routing: { mode: ["off", "round_robin", "first_admin"].includes(routingModeRaw) ? routingModeRaw : "off" },
   };
 
+  // Preserve settings keys this form doesn't manage (e.g. notifications, and
+  // anything other flows store under settings) by spreading the existing object
+  // first. Without this, saving Bot Settings would wipe those keys.
+  const existingSettings = (owned.settings as Record<string, any>) || {};
+  const existingBranding = (existingSettings.branding as Record<string, any>) || {};
+
   const settings = {
+    ...existingSettings,
     systemPrompt,
     model,
     language,
@@ -225,6 +232,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     webhookEvents,
     escalation,
     branding: {
+      ...existingBranding,
       primaryColor,
       assistantName,
       assistantLogo,
