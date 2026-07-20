@@ -196,6 +196,12 @@ export default function EmbedChat() {
           if (!trimmed) continue;
 
           if (trimmed.startsWith("data: ")) {
+            // Every SSE payload (content chunks AND the session/messageId/
+            // metadata/ratelimit events) arrives on its own `data: ` line, so a
+            // single handler must process them all. A previous second `data:`
+            // branch below was unreachable — this `if` matched first — which
+            // silently dropped sessionId (breaking multi-turn memory), messageId
+            // (breaking feedback), citations, and the rate-limit banner.
             try {
               const data = JSON.parse(trimmed.slice(6));
               if (data.content) {
@@ -208,40 +214,38 @@ export default function EmbedChat() {
                   return newMsgs;
                 });
               }
-            } catch (e) { }
-          } else if (trimmed.startsWith("event: metadata")) {
-             // Expecting next 'data: ' line for JSON
-          } else if (trimmed.startsWith("event: messageId")) {
-             // Expecting next 'data: ' line
-          } else if (trimmed.startsWith("event: session")) {
-             // Expecting next 'data: ' line
-          } else if (trimmed.startsWith("event: handoff")) {
-            if (leadPolicy === "handoff" || leadPolicy === "keywords") {
-              setTimeout(() => setShowLeadForm(true), 1000);
-            }
-          } else if (line.startsWith("data: ")) {
-            // This handles cases where event followed by data in the same line buffer
-            try {
-              const data = JSON.parse(line.trim().slice(6));
-              if (data.citations) {
-                setMessages(prev => {
-                  const newMsgs = [...prev];
-                  newMsgs[newMsgs.length - 1] = { ...(newMsgs[newMsgs.length - 1] as any), citations: data.citations };
-                  return newMsgs;
-                });
-              } else if (data.messageId) {
+              if (data.sessionId) {
+                setSessionId(data.sessionId);
+              }
+              if (data.messageId) {
                 setMessages(prev => {
                   const newMsgs = [...prev];
                   newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], id: data.messageId };
                   return newMsgs;
                 });
-              } else if (data.sessionId) {
-                setSessionId(data.sessionId);
-              } else if (data.remaining !== undefined) {
+              }
+              // Server sends grounding under `sources` (api.chat.ts); accept
+              // `citations` too for forward-compat.
+              const cites = data.sources || data.citations;
+              if (cites) {
+                setMessages(prev => {
+                  const newMsgs = [...prev];
+                  newMsgs[newMsgs.length - 1] = { ...(newMsgs[newMsgs.length - 1] as any), citations: cites };
+                  return newMsgs;
+                });
+              }
+              if (data.remaining !== undefined) {
                 setRateLimit({ remaining: data.remaining, window: data.window });
               }
-            } catch (e) {}
+            } catch (e) { }
+          } else if (trimmed.startsWith("event: handoff")) {
+            if (leadPolicy === "handoff" || leadPolicy === "keywords") {
+              setTimeout(() => setShowLeadForm(true), 1000);
+            }
           }
+          // Other `event: ` lines (session/metadata/messageId/ratelimit) carry no
+          // action themselves — their JSON arrives on the following `data: ` line
+          // handled above.
         }
       }
 
@@ -500,9 +504,9 @@ export default function EmbedChat() {
                   <div className="flex flex-wrap gap-1.5">
                     {(msg as any).citations.map((cite: any, i: number) => (
                       <a 
-                        key={i} 
-                        href={cite.url} 
-                        target="_blank" 
+                        key={i}
+                        href={cite.url || cite.source}
+                        target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white/20 border border-zinc-500/10 rounded-md text-[9px] font-bold text-primary hover:text-primary-dark transition-all no-underline"
                       >

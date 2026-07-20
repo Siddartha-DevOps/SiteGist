@@ -1489,15 +1489,22 @@ Example output: ["Is there a free trial?", "Can I cancel anytime?", "Do you offe
   try {
     if (gemini) {
       console.log("[AI] Generating suggestions using Gemini...");
-      const resp = await gemini.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: {
-          maxOutputTokens: 120,
-        }
-      });
-      rawText = resp.text || "";
-    } else if (openai) {
+      try {
+        const resp = await gemini.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: prompt,
+          config: {
+            maxOutputTokens: 120,
+          }
+        });
+        rawText = resp.text || "";
+      } catch (gemErr) {
+        // Don't let a dead/over-quota Gemini key disable suggestions — fall
+        // through to OpenAI below instead of returning nothing.
+        console.warn("[AI] Gemini suggestions failed; falling back to OpenAI:", gemErr);
+      }
+    }
+    if (!rawText && openai) {
       console.log("[AI] Generating suggestions using OpenAI...");
       const resp = await (openai as any).chat.completions.create({
         model: process.env.PORTKEY_MODEL || "gpt-4o-mini",
