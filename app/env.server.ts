@@ -18,6 +18,8 @@ export interface EnvSchema {
   COHERE_RERANK_MODEL: string | undefined;
   RERANK_ENABLED: boolean;
   RERANK_URL: string | undefined;
+  LOCAL_LLM_URL: string | undefined;
+  LOCAL_EMBED_URL: string | undefined;
   CLOUDFLARE_TURNSTILE_SECRET_KEY: string | undefined;
   PADDLE_API_KEY: string | undefined;
   UPSTASH_REDIS_REST_URL: string | undefined;
@@ -26,7 +28,25 @@ export interface EnvSchema {
 }
 
 export const EMBEDDING_PROVIDER = (typeof process !== "undefined" && process.env.EMBEDDING_PROVIDER === "gemini" ? "gemini" : "openai") as "openai" | "gemini";
-export const EMBEDDING_DIMENSION = EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
+
+// AI stack selector. "cloud" = hosted OpenAI/Gemini/Portkey; "local" = a
+// self-hosted OpenAI-compatible stack (e.g. Ollama/vLLM + bge-m3 + a local
+// reranker). Flipping AI_PROVIDER + the LOCAL_* URLs moves the whole app in one
+// place — the gateway task for the local-LLM migration.
+export const AI_PROVIDER = (typeof process !== "undefined" && process.env.AI_PROVIDER === "local" ? "local" : "cloud") as "cloud" | "local";
+
+// Embedding dimension is now an explicit, overridable env — no longer a hardcoded
+// 768/1536 ternary — so the 1024-dim bge-m3 migration is a config change, not a
+// code edit. Defaults from the active provider when EMBEDDING_DIMENSION is unset.
+const DEFAULT_EMBEDDING_DIMENSION = AI_PROVIDER === "local" ? 1024 : EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
+export const EMBEDDING_DIMENSION = (() => {
+  const raw = typeof process !== "undefined" ? process.env.EMBEDDING_DIMENSION : undefined;
+  if (raw) {
+    const n = parseInt(String(raw).trim(), 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_EMBEDDING_DIMENSION;
+})();
 
 // Zod schema for boot-time validation. Required vars must be non-empty; optional
 // vars are allowed to be undefined. The messages are surfaced verbatim at startup.
@@ -47,6 +67,8 @@ const EnvZodSchema = z.object({
   COHERE_RERANK_MODEL: z.string().optional(),
   RERANK_ENABLED: z.boolean(),
   RERANK_URL: z.string().optional(),
+  LOCAL_LLM_URL: z.string().optional(),
+  LOCAL_EMBED_URL: z.string().optional(),
   CLOUDFLARE_TURNSTILE_SECRET_KEY: z.string().optional(),
   PADDLE_API_KEY: z.string().optional(),
   UPSTASH_REDIS_REST_URL: z.string().optional(),
@@ -101,6 +123,8 @@ export function getCleanEnv(): EnvSchema {
     COHERE_RERANK_MODEL: cleanValue(process.env.COHERE_RERANK_MODEL),
     RERANK_ENABLED: rerankEnabled,
     RERANK_URL: rerankUrl,
+    LOCAL_LLM_URL: cleanValue(process.env.LOCAL_LLM_URL),
+    LOCAL_EMBED_URL: cleanValue(process.env.LOCAL_EMBED_URL),
     CLOUDFLARE_TURNSTILE_SECRET_KEY: cleanValue(process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY),
     PADDLE_API_KEY: cleanValue(process.env.PADDLE_API_KEY),
     UPSTASH_REDIS_REST_URL: cleanValue(process.env.UPSTASH_REDIS_REST_URL),

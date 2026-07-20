@@ -4,6 +4,7 @@ import { getPortkey, getPortkeyEmbeddings } from "./portkey.server";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
 import { EMBEDDING_PROVIDER, EMBEDDING_DIMENSION, env } from "~/env.server";
+import { AI } from "./provider.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
@@ -323,7 +324,7 @@ export async function rerankDocuments(query: string, documents: { text: string; 
 
   try {
     const response = await fetch(
-      "https://api.portkey.ai/v1/rerank",
+      AI.rerankUrl,
       {
         method: "POST",
         headers: {
