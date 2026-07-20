@@ -102,6 +102,51 @@ export async function action({ params, request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // --- ZENDESK ---
+  if (_action === "connect_zendesk") {
+    const subdomain = (formData.get("zendeskSubdomain") as string)?.trim()
+      .replace(/^https?:\/\//, "").replace(/\.zendesk\.com.*$/i, "").replace(/\/+$/, "");
+    const email = (formData.get("zendeskEmail") as string)?.trim();
+    const apiToken = (formData.get("zendeskApiToken") as string)?.trim();
+    if (!subdomain || !email || !apiToken) {
+      return json({ error: "Subdomain, agent email, and API token are required." }, { status: 400 });
+    }
+    await prisma.integration.upsert({
+      where: { projectId_provider: { projectId: project.id, provider: "zendesk" } },
+      create: { projectId: project.id, provider: "zendesk", accessToken: apiToken, details: { subdomain, email } },
+      update: { accessToken: apiToken, details: { subdomain, email } },
+    });
+    return json({ success: true });
+  }
+
+  if (_action === "disconnect_zendesk") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "zendesk" },
+    });
+    return json({ success: true });
+  }
+
+  // --- HUBSPOT ---
+  if (_action === "connect_hubspot") {
+    const token = (formData.get("hubspotToken") as string)?.trim();
+    if (!token) {
+      return json({ error: "A HubSpot Private App access token is required." }, { status: 400 });
+    }
+    await prisma.integration.upsert({
+      where: { projectId_provider: { projectId: project.id, provider: "hubspot" } },
+      create: { projectId: project.id, provider: "hubspot", accessToken: token },
+      update: { accessToken: token },
+    });
+    return json({ success: true });
+  }
+
+  if (_action === "disconnect_hubspot") {
+    await prisma.integration.deleteMany({
+      where: { projectId: project.id, provider: "hubspot" },
+    });
+    return json({ success: true });
+  }
+
   // --- ZOHO DESK ---
   if (_action === "disconnect_zoho") {
     await prisma.integration.deleteMany({
@@ -170,10 +215,16 @@ export default function ProjectIntegrations() {
   const [zapierInput, setZapierInput] = useState("");
   const [freshdeskDomain, setFreshdeskDomain] = useState("");
   const [freshdeskApiKey, setFreshdeskApiKey] = useState("");
+  const [zendeskSubdomain, setZendeskSubdomain] = useState("");
+  const [zendeskEmail, setZendeskEmail] = useState("");
+  const [zendeskApiToken, setZendeskApiToken] = useState("");
+  const [hubspotToken, setHubspotToken] = useState("");
 
   const slackFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const zapierFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const freshdeskFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const zendeskFetcher = useFetcher<{ error?: string; success?: boolean }>();
+  const hubspotFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const zohoFetcher = useFetcher<{ error?: string; success?: boolean }>();
   const confluenceFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
 
@@ -205,6 +256,22 @@ export default function ProjectIntegrations() {
       revalidator.revalidate();
     }
   }, [freshdeskFetcher.data, revalidator]);
+
+  useEffect(() => {
+    if (zendeskFetcher.data?.success) {
+      setZendeskSubdomain("");
+      setZendeskEmail("");
+      setZendeskApiToken("");
+      revalidator.revalidate();
+    }
+  }, [zendeskFetcher.data, revalidator]);
+
+  useEffect(() => {
+    if (hubspotFetcher.data?.success) {
+      setHubspotToken("");
+      revalidator.revalidate();
+    }
+  }, [hubspotFetcher.data, revalidator]);
 
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
@@ -308,6 +375,20 @@ export default function ProjectIntegrations() {
       connected: project.integrations.some(i => i.provider === 'zoho'),
     },
     {
+      id: "zendesk",
+      name: "Zendesk",
+      description: "Automatically open a Zendesk ticket when a conversation is escalated to a human.",
+      icon: <Headphones className="w-6 h-6 text-[#03363D]" />,
+      connected: project.integrations.some(i => i.provider === 'zendesk'),
+    },
+    {
+      id: "hubspot",
+      name: "HubSpot",
+      description: "Sync every captured lead into HubSpot as a CRM contact automatically.",
+      icon: <Database className="w-6 h-6 text-[#FF7A59]" />,
+      connected: project.integrations.some(i => i.provider === 'hubspot'),
+    },
+    {
       id: "dropbox",
       name: "Dropbox",
       description: "Import PDFs and documents from your Dropbox as knowledge sources.",
@@ -368,7 +449,7 @@ export default function ProjectIntegrations() {
             <h3 className="text-xl font-bold mb-2">{item.name}</h3>
             <p className="text-sm text-zinc-500 mb-8 leading-relaxed">{item.description}</p>
             
-            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && item.id !== 'disconnect_only' && (
+            {item.id !== 'slack' && item.id !== 'zapier' && item.id !== 'freshdesk' && item.id !== 'zendesk' && item.id !== 'hubspot' && item.id !== 'disconnect_only' && (
               <button 
                 onClick={() => !item.connected && handleConnect(item.id)}
                 disabled={item.connected || connecting === item.id}
@@ -535,6 +616,116 @@ export default function ProjectIntegrations() {
                       Disconnect Freshdesk
                     </button>
                   </freshdeskFetcher.Form>
+                )}
+              </div>
+            )}
+
+            {item.id === 'zendesk' && (
+              <div className="mt-0">
+                {!item.connected ? (
+                  <zendeskFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="connect_zendesk" />
+                    <input
+                      type="text"
+                      name="zendeskSubdomain"
+                      value={zendeskSubdomain}
+                      onChange={(e) => setZendeskSubdomain(e.target.value)}
+                      placeholder="Subdomain (e.g. yourcompany)"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    <input
+                      type="email"
+                      name="zendeskEmail"
+                      value={zendeskEmail}
+                      onChange={(e) => setZendeskEmail(e.target.value)}
+                      placeholder="Agent email"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    <input
+                      type="password"
+                      name="zendeskApiToken"
+                      value={zendeskApiToken}
+                      onChange={(e) => setZendeskApiToken(e.target.value)}
+                      placeholder="Zendesk API token"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    {zendeskFetcher.data?.error && (
+                      <p className="text-xs text-red-500 font-bold mb-2">{zendeskFetcher.data.error}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!zendeskSubdomain || !zendeskEmail || !zendeskApiToken || zendeskFetcher.state === "submitting"}
+                      className="w-full py-4 rounded-2xl font-black transition-all bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {zendeskFetcher.state === "submitting" ? "Saving..." : "Connect Zendesk"}
+                    </button>
+                    <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
+                      Enable token access in Zendesk &rarr; Admin &rarr; Apps and integrations &rarr; APIs &rarr; Zendesk API.
+                    </p>
+                  </zendeskFetcher.Form>
+                ) : (
+                  <zendeskFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="disconnect_zendesk" />
+                    <button
+                      type="button"
+                      className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
+                    >
+                      Already Integrated
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
+                    >
+                      Disconnect Zendesk
+                    </button>
+                  </zendeskFetcher.Form>
+                )}
+              </div>
+            )}
+
+            {item.id === 'hubspot' && (
+              <div className="mt-0">
+                {!item.connected ? (
+                  <hubspotFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="connect_hubspot" />
+                    <input
+                      type="password"
+                      name="hubspotToken"
+                      value={hubspotToken}
+                      onChange={(e) => setHubspotToken(e.target.value)}
+                      placeholder="HubSpot Private App token (pat-...)"
+                      className="w-full px-4 py-3 text-sm border border-brand-border rounded-xl outline-none focus:border-primary transition-colors bg-white text-brand-dark placeholder:text-brand-gray/40 mb-2"
+                    />
+                    {hubspotFetcher.data?.error && (
+                      <p className="text-xs text-red-500 font-bold mb-2">{hubspotFetcher.data.error}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!hubspotToken || hubspotFetcher.state === "submitting"}
+                      className="w-full py-4 rounded-2xl font-black transition-all bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {hubspotFetcher.state === "submitting" ? "Saving..." : "Connect HubSpot"}
+                    </button>
+                    <p className="text-[11px] text-zinc-400 mt-2 leading-relaxed text-center">
+                      Create a Private App in HubSpot &rarr; Settings &rarr; Integrations &rarr; Private Apps with the <code>crm.objects.contacts.write</code> scope, then paste its access token.
+                    </p>
+                  </hubspotFetcher.Form>
+                ) : (
+                  <hubspotFetcher.Form method="post">
+                    <input type="hidden" name="_action" value="disconnect_hubspot" />
+                    <button
+                      type="button"
+                      className="w-full py-4 rounded-2xl font-black bg-zinc-100 text-zinc-400 cursor-not-allowed flex items-center justify-center"
+                    >
+                      Already Integrated
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-black bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all cursor-pointer"
+                    >
+                      Disconnect HubSpot
+                    </button>
+                  </hubspotFetcher.Form>
                 )}
               </div>
             )}
