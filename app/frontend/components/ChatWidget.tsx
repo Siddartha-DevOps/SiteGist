@@ -265,8 +265,14 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         
         for (const line of lines) {
           const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-          
+          // A blank line terminates an SSE event; reset the event type to the
+          // default so the content frames that follow (sent as bare `data:`
+          // lines after the initial `event: session`) are parsed as content.
+          // Without this reset, currentEvent stayed "session" for the whole
+          // stream and every content frame was dropped — the widget showed the
+          // user's message with no reply.
+          if (!trimmedLine) { currentEvent = "message"; continue; }
+
           if (trimmedLine.startsWith("event: ")) {
             currentEvent = trimmedLine.slice(7).trim();
           } else if (trimmedLine.startsWith("data: ")) {
