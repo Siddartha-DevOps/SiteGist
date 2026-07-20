@@ -55,7 +55,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 export default function EmbedChat() {
   const { project, notReady } = useLoaderData<typeof loader>();
   const [isEmbedded, setIsEmbedded] = useState(true); // default true to avoid flash
-  const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], timestamp?: Date }[]>([]);
+  const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], followups?: string[], timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -237,6 +237,19 @@ export default function EmbedChat() {
               if (data.remaining !== undefined) {
                 setRateLimit({ remaining: data.remaining, window: data.window });
               }
+              // Follow-up suggestions arrive as a bare JSON array (event:
+              // suggestions). Attach them to the assistant message so we render
+              // clickable chips instead of discarding the LLM call that made them.
+              if (Array.isArray(data)) {
+                const chips = data.filter((s: any) => typeof s === "string" && s.trim());
+                if (chips.length > 0) {
+                  setMessages(prev => {
+                    const newMsgs = [...prev];
+                    newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], followups: chips };
+                    return newMsgs;
+                  });
+                }
+              }
             } catch (e) { }
           } else if (trimmed.startsWith("event: handoff")) {
             if (leadPolicy === "handoff" || leadPolicy === "keywords") {
@@ -249,10 +262,18 @@ export default function EmbedChat() {
         }
       }
 
-      // Intelligent keyword-based lead collection
+      // Intelligent keyword-based lead collection. Match the VISITOR's message
+      // for explicit contact/sales intent — not the bot's answer, which used to
+      // pop the form whenever a reply merely mentioned "pricing" or "email".
       if (leadPolicy === "keywords") {
-        const triggers = ["contact details", "email", "phone", "sales", "demo", "pricing", "get in touch"];
-        const shouldShow = triggers.some(t => accumulated.toLowerCase().includes(t));
+        const userText = messageToSend.toLowerCase();
+        const intentPhrases = [
+          "contact me", "contact us", "get in touch", "reach out", "reach me",
+          "call me", "email me", "talk to sales", "speak to sales", "talk to someone",
+          "book a demo", "schedule a demo", "request a demo", "get a demo",
+          "get a quote", "request a quote", "pricing quote", "sign up", "sign me up",
+        ];
+        const shouldShow = intentPhrases.some(t => userText.includes(t));
         if (shouldShow) {
           setTimeout(() => setShowLeadForm(true), 1500);
         }
@@ -531,12 +552,30 @@ export default function EmbedChat() {
                 >
                   <ThumbsUp className="w-3 h-3" />
                 </button>
-                <button 
+                <button
                   onClick={() => msg.id && handleFeedback(msg.id, -1)}
                   className={`p-1 rounded-md hover:bg-zinc-100 transition-colors ${msg.feedback === -1 ? 'text-red-500' : 'text-zinc-400'}`}
                 >
                   <ThumbsDown className="w-3 h-3" />
                 </button>
+              </div>
+            )}
+
+            {msg.role === 'assistant' && !isStreaming && (msg.followups?.length ?? 0) > 0 && (
+              <div className="flex flex-col gap-1.5 mt-2 ml-1">
+                {msg.followups!.map((f, fi) => (
+                  <button
+                    key={fi}
+                    onClick={() => handleSend(f)}
+                    className={`text-left text-xs font-semibold px-3 py-2 rounded-xl border transition-all w-fit max-w-full ${
+                      isDarkMode
+                        ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-primary hover:text-primary'
+                        : 'bg-white border-zinc-100 text-zinc-600 hover:border-primary hover:text-primary hover:shadow-sm'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
               </div>
             )}
           </div>
