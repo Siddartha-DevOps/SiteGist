@@ -100,6 +100,28 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  // HubSpot CRM sync — push the captured lead as a contact when connected.
+  // Fire-and-forget: never block or fail lead capture on a CRM hiccup.
+  try {
+    const hubspot = await prisma.integration.findUnique({
+      where: { projectId_provider: { projectId, provider: "hubspot" } },
+    });
+    if (hubspot?.accessToken && email) {
+      const { upsertHubspotContact } = await import("~/lib/hubspot.server");
+      const [firstName, ...rest] = String(name || "").trim().split(/\s+/).filter(Boolean);
+      await upsertHubspotContact({
+        token: hubspot.accessToken,
+        email,
+        firstName: firstName || undefined,
+        lastName: rest.join(" ") || undefined,
+        phone: phone || undefined,
+        company: company || undefined,
+      }).catch((e) => console.error("[HubSpot] Contact sync failed:", e));
+    }
+  } catch (e) {
+    console.error("[HubSpot] Lead sync error:", e);
+  }
+
   // Email the chatbot owner about the new lead (default ON, never blocks lead capture)
   try {
     const settings = (lead.project.settings as any) || {};
