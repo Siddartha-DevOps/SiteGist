@@ -16,6 +16,10 @@ export interface EnvSchema {
   PORTKEY_API_KEY: string | undefined;
   PORTKEY_COHERE_VIRTUAL_KEY: string | undefined;
   COHERE_RERANK_MODEL: string | undefined;
+  RERANK_ENABLED: boolean;
+  RERANK_URL: string | undefined;
+  LOCAL_LLM_URL: string | undefined;
+  LOCAL_EMBED_URL: string | undefined;
   CLOUDFLARE_TURNSTILE_SECRET_KEY: string | undefined;
   PADDLE_API_KEY: string | undefined;
   UPSTASH_REDIS_REST_URL: string | undefined;
@@ -24,7 +28,25 @@ export interface EnvSchema {
 }
 
 export const EMBEDDING_PROVIDER = (typeof process !== "undefined" && process.env.EMBEDDING_PROVIDER === "gemini" ? "gemini" : "openai") as "openai" | "gemini";
-export const EMBEDDING_DIMENSION = EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
+
+// AI stack selector. "cloud" = hosted OpenAI/Gemini/Portkey; "local" = a
+// self-hosted OpenAI-compatible stack (e.g. Ollama/vLLM + bge-m3 + a local
+// reranker). Flipping AI_PROVIDER + the LOCAL_* URLs moves the whole app in one
+// place — the gateway task for the local-LLM migration.
+export const AI_PROVIDER = (typeof process !== "undefined" && process.env.AI_PROVIDER === "local" ? "local" : "cloud") as "cloud" | "local";
+
+// Embedding dimension is now an explicit, overridable env — no longer a hardcoded
+// 768/1536 ternary — so the 1024-dim bge-m3 migration is a config change, not a
+// code edit. Defaults from the active provider when EMBEDDING_DIMENSION is unset.
+const DEFAULT_EMBEDDING_DIMENSION = AI_PROVIDER === "local" ? 1024 : EMBEDDING_PROVIDER === "gemini" ? 768 : 1536;
+export const EMBEDDING_DIMENSION = (() => {
+  const raw = typeof process !== "undefined" ? process.env.EMBEDDING_DIMENSION : undefined;
+  if (raw) {
+    const n = parseInt(String(raw).trim(), 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_EMBEDDING_DIMENSION;
+})();
 
 // Zod schema for boot-time validation. Required vars must be non-empty; optional
 // vars are allowed to be undefined. The messages are surfaced verbatim at startup.
@@ -43,6 +65,10 @@ const EnvZodSchema = z.object({
   PORTKEY_API_KEY: z.string().optional(),
   PORTKEY_COHERE_VIRTUAL_KEY: z.string().optional(),
   COHERE_RERANK_MODEL: z.string().optional(),
+  RERANK_ENABLED: z.boolean(),
+  RERANK_URL: z.string().optional(),
+  LOCAL_LLM_URL: z.string().optional(),
+  LOCAL_EMBED_URL: z.string().optional(),
   CLOUDFLARE_TURNSTILE_SECRET_KEY: z.string().optional(),
   PADDLE_API_KEY: z.string().optional(),
   UPSTASH_REDIS_REST_URL: z.string().optional(),
@@ -70,6 +96,19 @@ export function getCleanEnv(): EnvSchema {
   const pineconeIndexName = cleanValue(process.env.PINECONE_INDEX) || "quickstart";
   const firecrawlKey = cleanValue(process.env.FIRECRAWL_API_KEY) || "";
 
+  // Reranking is governed by an explicit flag. When RERANK_ENABLED is unset we
+  // fall back to the legacy key-presence inference so existing deploys keep
+  // their current behaviour; once set, the flag is authoritative.
+  const rerankUrl = cleanValue(process.env.RERANK_URL);
+  const cohereVK = cleanValue(process.env.PORTKEY_COHERE_VIRTUAL_KEY);
+  const portkeyKey = cleanValue(process.env.PORTKEY_API_KEY);
+  const rerankFlagRaw = cleanValue(process.env.RERANK_ENABLED);
+  const hasRerankProvider = !!((portkeyKey && cohereVK) || rerankUrl);
+  const rerankEnabled =
+    rerankFlagRaw === undefined
+      ? hasRerankProvider
+      : /^(1|true|yes|on)$/i.test(rerankFlagRaw);
+
   return {
     NODE_ENV: mode,
     DATABASE_URL: dbUrl,
@@ -80,8 +119,12 @@ export function getCleanEnv(): EnvSchema {
     FIRECRAWL_API_KEY: firecrawlKey,
     OPENAI_API_KEY: cleanValue(process.env.OPENAI_API_KEY),
     PORTKEY_API_KEY: cleanValue(process.env.PORTKEY_API_KEY),
-    PORTKEY_COHERE_VIRTUAL_KEY: cleanValue(process.env.PORTKEY_COHERE_VIRTUAL_KEY),
+    PORTKEY_COHERE_VIRTUAL_KEY: cohereVK,
     COHERE_RERANK_MODEL: cleanValue(process.env.COHERE_RERANK_MODEL),
+    RERANK_ENABLED: rerankEnabled,
+    RERANK_URL: rerankUrl,
+    LOCAL_LLM_URL: cleanValue(process.env.LOCAL_LLM_URL),
+    LOCAL_EMBED_URL: cleanValue(process.env.LOCAL_EMBED_URL),
     CLOUDFLARE_TURNSTILE_SECRET_KEY: cleanValue(process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY),
     PADDLE_API_KEY: cleanValue(process.env.PADDLE_API_KEY),
     UPSTASH_REDIS_REST_URL: cleanValue(process.env.UPSTASH_REDIS_REST_URL),
@@ -128,14 +171,26 @@ export async function validateEnvAtStartup() {
     );
   }
 
-  // Retrieval-quality diagnostic: reranking is the single biggest answer-quality
-  // lever and stays silently off until both Portkey keys are present.
-  const rerankEnabled = !!(currentEnv.PORTKEY_API_KEY && currentEnv.PORTKEY_COHERE_VIRTUAL_KEY);
+  // Reranking is governed by the explicit RERANK_ENABLED flag (see getCleanEnv),
+  // never silently inferred. A misconfigured "enabled" state — flag on but no
+  // provider configured — must not boot.
+  const rerankEnabled = currentEnv.RERANK_ENABLED;
+  const hasRerankProvider = !!(
+    (currentEnv.PORTKEY_API_KEY && currentEnv.PORTKEY_COHERE_VIRTUAL_KEY) || currentEnv.RERANK_URL
+  );
+  if (rerankEnabled && !hasRerankProvider) {
+    const msg =
+      "CONFIG ERROR: RERANK_ENABLED is on but no reranking provider is configured — set " +
+      "PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY (Cohere via Portkey) or RERANK_URL (self-hosted reranker). " +
+      "Refusing to start with a misconfigured 'enabled' rerank state.";
+    console.error(msg);
+    throw new Error(msg);
+  }
   console.log(
     `[CONFIG] Reranking: ${rerankEnabled ? "ENABLED" : "DISABLED"}` +
       (rerankEnabled
-        ? ` (model: ${currentEnv.COHERE_RERANK_MODEL || "rerank-multilingual-v3.0"})`
-        : " — set PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY to enable Cohere rerank.")
+        ? ` via ${currentEnv.RERANK_URL || "Cohere/Portkey"} (model: ${currentEnv.COHERE_RERANK_MODEL || "rerank-multilingual-v3.0"})`
+        : " — set RERANK_ENABLED=true (with PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY, or RERANK_URL) to enable.")
   );
 
   // Database Connection Validation Check
