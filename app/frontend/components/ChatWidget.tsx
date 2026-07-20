@@ -682,10 +682,13 @@ function ChatWidgetLauncher({ isOpen, onClick }: { isOpen: boolean; onClick: () 
 export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const build = (typeof window !== "undefined" && (window as any).ENV?.BUILD_SHA) || "dev";
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    // Deploy check: confirm from the live page which commit prod is serving.
+    console.log(`[SiteGist] widget build: ${build}`);
+  }, [build]);
 
   if (!mounted) return (
     <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
@@ -694,7 +697,7 @@ export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   );
 
   return (
-    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end" suppressHydrationWarning>
+    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end" data-sitegist-build={build} suppressHydrationWarning>
       <AnimatePresence mode="wait">
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} suggestions={suggestions} />}
       </AnimatePresence>

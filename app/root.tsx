@@ -29,6 +29,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: process.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY || process.env.CLOUDFLARE_TURNSTILE_SITE_KEY,
       VITE_PADDLE_CLIENT_TOKEN: process.env.VITE_PADDLE_CLIENT_TOKEN,
       PADDLE_ENVIRONMENT: process.env.PADDLE_ENVIRONMENT,
+      // Deployed build marker — lets you confirm from the live page which commit
+      // production is actually serving (Vercel sets VERCEL_GIT_COMMIT_SHA).
+      BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || "dev").slice(0, 7),
     },
   });
 }

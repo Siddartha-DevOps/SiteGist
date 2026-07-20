@@ -14,6 +14,7 @@ export interface EnvSchema {
   FIRECRAWL_API_KEY: string;
   OPENAI_API_KEY: string | undefined;
   PORTKEY_API_KEY: string | undefined;
+  PORTKEY_MODEL: string | undefined;
   PORTKEY_COHERE_VIRTUAL_KEY: string | undefined;
   COHERE_RERANK_MODEL: string | undefined;
   RERANK_ENABLED: boolean;
@@ -63,6 +64,7 @@ const EnvZodSchema = z.object({
   FIRECRAWL_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   PORTKEY_API_KEY: z.string().optional(),
+  PORTKEY_MODEL: z.string().optional(),
   PORTKEY_COHERE_VIRTUAL_KEY: z.string().optional(),
   COHERE_RERANK_MODEL: z.string().optional(),
   RERANK_ENABLED: z.boolean(),
@@ -119,6 +121,7 @@ export function getCleanEnv(): EnvSchema {
     FIRECRAWL_API_KEY: firecrawlKey,
     OPENAI_API_KEY: cleanValue(process.env.OPENAI_API_KEY),
     PORTKEY_API_KEY: cleanValue(process.env.PORTKEY_API_KEY),
+    PORTKEY_MODEL: cleanValue(process.env.PORTKEY_MODEL),
     PORTKEY_COHERE_VIRTUAL_KEY: cohereVK,
     COHERE_RERANK_MODEL: cleanValue(process.env.COHERE_RERANK_MODEL),
     RERANK_ENABLED: rerankEnabled,
@@ -192,6 +195,42 @@ export async function validateEnvAtStartup() {
         ? ` via ${currentEnv.RERANK_URL || "Cohere/Portkey"} (model: ${currentEnv.COHERE_RERANK_MODEL || "rerank-multilingual-v3.0"})`
         : " — set RERANK_ENABLED=true (with PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY, or RERANK_URL) to enable.")
   );
+
+  // PORTKEY_MODEL guardrail. The Jul-9 outage was a provider-namespaced model
+  // string ("@org/model") sent to the DIRECT OpenAI client, which 400s every
+  // request. When there's no Portkey routing (PORTKEY_API_KEY=pk-...), a
+  // namespaced model is unambiguously wrong — refuse to boot with it; a
+  // non-OpenAI-looking name gets a loud warning.
+  if (currentEnv.PORTKEY_MODEL) {
+    const model = currentEnv.PORTKEY_MODEL;
+    const hasPortkeyRouting = !!(currentEnv.PORTKEY_API_KEY && currentEnv.PORTKEY_API_KEY.startsWith("pk-"));
+    const looksNamespaced = model.startsWith("@") || model.includes("/");
+    const looksOpenAI = /^(gpt-|o1|o3|o4|chatgpt|text-)/i.test(model);
+    if (!hasPortkeyRouting && looksNamespaced) {
+      const msg =
+        `CONFIG ERROR: PORTKEY_MODEL="${model}" is a provider-namespaced model but no Portkey routing ` +
+        `(PORTKEY_API_KEY=pk-...) is configured — the direct OpenAI client will reject it (HTTP 400). ` +
+        `Set PORTKEY_MODEL to an OpenAI model (e.g. gpt-4o-mini / gpt-4.1-mini) or configure Portkey.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+    if (!hasPortkeyRouting && !looksOpenAI) {
+      console.warn(
+        `CONFIG WARNING: PORTKEY_MODEL="${model}" does not look like an OpenAI model and no Portkey routing is configured. ` +
+        `If the OpenAI client rejects it, set an OpenAI model name (e.g. gpt-4o-mini).`
+      );
+    }
+  }
+
+  // Secret-hygiene guardrail: an OpenAI key parked under a VITE_-prefixed var is
+  // a footgun — VITE_ vars are meant for client exposure. It's not currently
+  // sent to the browser, but the name invites a future leak; recommend renaming.
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_KEY && process.env.VITE_OPENAI_API_KEY) {
+    console.warn(
+      "SECURITY WARNING: your OpenAI key is set as VITE_OPENAI_API_KEY. VITE_-prefixed vars are intended " +
+      "for client-side exposure — rename it to OPENAI_API_KEY so the secret can never leak into the browser bundle."
+    );
+  }
 
   // Database Connection Validation Check
   if (currentEnv.DATABASE_URL) {
