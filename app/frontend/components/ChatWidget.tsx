@@ -371,10 +371,10 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
       transition={{ type: "spring", damping: 25, stiffness: 300 }}
-      className="w-[420px] h-[720px] max-h-[90vh] bg-white rounded-[32px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.25)] border border-zinc-100 overflow-hidden flex flex-col mb-2 ring-1 ring-black/5"
+      className="w-[400px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-40px)] bg-white rounded-2xl shadow-2xl border border-zinc-100 overflow-hidden flex flex-col mb-2 ring-1 ring-black/5"
     >
-      {/* Header */}
-      <div className="bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
+      {/* Header — pinned (never scrolls) */}
+      <div className="shrink-0 bg-white p-5 text-zinc-800 flex items-center justify-between border-b border-zinc-100 relative overflow-hidden group">
         <div className="flex items-center gap-3 relative z-10">
           <BotMark
             variant={botFace}
@@ -396,7 +396,7 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
       </div>
 
       {/* Messages Area */}
-      <div id="chat-messages" className="flex-1 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
+      <div id="chat-messages" className="flex-1 min-h-0 overflow-y-auto p-5 space-y-6 bg-zinc-50/10">
         <div className="flex items-end gap-2">
           <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 border border-zinc-100 shadow-sm overflow-hidden p-1.5 mb-1">
             <BotMark className="w-full h-full" />
@@ -604,8 +604,8 @@ function ChatWidgetPanel({ onClose, suggestions: propSuggestions }: {
         )}
       </div>
 
-      {/* Footer / Input */}
-      <div className="p-4 bg-white border-t border-zinc-100">
+      {/* Footer / Input — pinned (never scrolls) */}
+      <div className="shrink-0 p-4 bg-white border-t border-zinc-100">
         <form 
           onSubmit={(e) => {
             e.preventDefault();
@@ -691,13 +691,13 @@ export function ChatWidget({ suggestions }: { suggestions?: string[] } = {}) {
   }, [build]);
 
   if (!mounted) return (
-    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end opacity-0 pointer-events-none">
        {/* Placeholder to avoid hydration mismatch */}
     </div>
   );
 
   return (
-    <div className="fixed bottom-5 right-6 z-[100] flex flex-col items-end" data-sitegist-build={build} suppressHydrationWarning>
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end" data-sitegist-build={build} suppressHydrationWarning>
       <AnimatePresence mode="wait">
         {isOpen && <ChatWidgetPanel onClose={() => setIsOpen(false)} suggestions={suggestions} />}
       </AnimatePresence>
