@@ -1,12 +1,17 @@
-name: Database migrations
+name: Database schema sync
 
-# Applies Prisma migrations to the production database on merge to main.
-# Runs SEPARATELY from the Vercel web build (per the project guardrail: never run
-# `prisma migrate deploy` inside the web build — it fails on existing tables).
+# Syncs the production database to prisma/schema.prisma via `prisma db push`,
+# on merge to main (schema changes) or on demand. Runs SEPARATELY from the
+# Vercel web build (per the project guardrail: never run schema changes inside
+# the web build). `db push` is used instead of `migrate deploy` because this DB
+# was provisioned with db push and drifts from the migration history; db push
+# applies the missing columns/tables and aborts (no --accept-data-loss) rather
+# than drop anything.
 #
 # Setup (one-time): add a repo secret MIGRATE_DATABASE_URL set to the DIRECT
-# (non-pooled) Postgres connection string. Settings → Secrets and variables →
-# Actions → New repository secret.
+# (non-pooled) Postgres connection string — NOT the Accelerate prisma:// URL.
+# Settings → Secrets and variables → Actions → New repository secret.
+# Then run it: Actions → "Database schema sync" → Run workflow.
 
 on:
   push:
@@ -44,18 +49,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      # The production DB was provisioned with `prisma db push` (no migration
-      # history). Mark the pre-idempotent legacy migrations as already applied so
-      # `migrate deploy` won't try to recreate existing tables. P3008 on re-runs
-      # ("already recorded") is expected and tolerated.
-      - name: Baseline legacy migrations (first run only)
-        run: |
-          for m in 20260521170040_init 20260606082200_fts_gin_index 20260607105700_add_stored_search_vector; do
-            npx prisma migrate resolve --applied "$m" || echo "  ($m already recorded — ok)"
-          done
-
-      - name: Apply pending migrations
-        run: npx prisma migrate deploy
+      # The production DB was provisioned with `prisma db push` (no reliable
+      # migration history), and features have since been added to schema.prisma
+      # the same way — so `migrate deploy` drifts (it can't apply schema-only
+      # changes, and fails on "already exists" against this DB). `db push` syncs
+      # the database to schema.prisma directly: it applies whatever columns/
+      # tables are missing and, without --accept-data-loss, ABORTS rather than
+      # drop anything. This is the reliable, non-destructive sync for this DB.
+      - name: Sync schema to database (prisma db push)
+        run: npx prisma db push
