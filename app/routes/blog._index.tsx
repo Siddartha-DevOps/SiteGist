@@ -82,6 +82,20 @@ export default function BlogIndex() {
             </p>
           </div>
 
+          {blogPosts.length === 0 ? (
+            <div className="text-center py-24 max-w-lg mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-primary-muted border border-primary/10 flex items-center justify-center mx-auto mb-6">
+                <Bot className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-brand-dark mb-3">No articles published yet</h2>
+              <p className="text-brand-gray font-medium mb-8">
+                We're publishing fresh guides on AI automation, customer experience, and lead capture. Check back soon.
+              </p>
+              <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 bg-brand-dark text-white rounded-2xl font-bold hover:scale-[1.02] transition-all">
+                Back to Home <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {blogPosts.map((post, i) => (
               <motion.article 
@@ -136,6 +150,7 @@ export default function BlogIndex() {
               </motion.article>
             ))}
           </div>
+          )}
         </div>
       </main>
 
