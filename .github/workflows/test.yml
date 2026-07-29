@@ -16,12 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      # Install vitest into the project's node_modules (not via npx) so that
-      # vitest.config.ts can resolve `vitest/config`. --no-save keeps
-      # package.json/package-lock.json untouched, so the existing `npm ci`
-      # workflows stay in sync (the tested modules are dependency-free, so we
-      # don't need the app's full dependency tree).
-      - name: Install vitest
-        run: npm install --no-save --no-package-lock --ignore-scripts vitest@2
+      # vitest.config.ts is a plain object (no `vitest/config` import), so vitest
+      # fetched transiently by npx can load it without a project install. The
+      # tested modules are dependency-free, so nothing else is needed.
       - name: Run unit tests
-        run: npx vitest run
+        run: npx --yes vitest@2 run

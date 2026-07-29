@@ -1,11 +1,10 @@
-import { defineConfig } from "vitest/config";
-
-// Unit tests are co-located with the code they cover (app/**/*.test.ts) and
-// import their targets by relative path, so no path-alias or Prisma setup is
-// needed — they stay fast and hermetic.
-export default defineConfig({
+// Plain-object config (no `vitest/config` import) so `npx vitest` can load it
+// without vitest being installed in the project's node_modules. Scopes the run
+// to the co-located app unit tests and excludes the Playwright e2e specs (whose
+// default glob would otherwise be picked up).
+export default {
   test: {
     include: ["app/**/*.test.ts", "app/**/*.test.tsx"],
     environment: "node",
   },
-});
+};
