@@ -1,0 +1,64 @@
+name: Schema drift check
+
+# Detects the recrawl class of bug: a change to prisma/schema.prisma that has no
+# corresponding migration file (features added via `db push`). Replays the
+# migration history onto a throwaway Postgres and diffs it against schema.prisma.
+#
+# Report-only for now (it writes the delta to the run summary and never fails the
+# build) so managed raw-SQL objects (the tsvector search_vector / GIN index)
+# can't spurious-fail a PR. Once confirmed the only diff is those managed bits,
+# add `--exit-code` to the diff step to make it a hard gate.
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - ".github/workflows/schema-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shadow
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Diff migration history vs schema.prisma
+        run: |
+          echo '## Schema drift check' >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          OUT=$(npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "postgresql://postgres:postgres@localhost:5432/shadow" \
+            --script 2>&1)
+          echo "$OUT"
+          if echo "$OUT" | grep -qiE "empty migration|no difference"; then
+            echo '✅ No drift — schema.prisma matches the migration history.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '⚠️ Drift detected — schema.prisma has changes with no migration file.'
+              echo 'Generate one locally: `npx prisma migrate dev --name <change>` (or apply to prod via the Database schema sync workflow).'
+              echo '```sql'
+              echo "$OUT"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
