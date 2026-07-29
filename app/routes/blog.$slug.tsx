@@ -17,18 +17,30 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data || !data.post) {
     return [{ title: "Blog Post Not Found | SiteGist" }];
   }
-  const { post } = data;
+  const { post, canonicalUrl, ogImage } = data;
   const title = post.seoTitle || post.metaTitle || post.title;
   const description = post.seoDescription || post.metaDescription || post.excerpt;
-  
+  const image = ogImage || post.coverImage || undefined;
+
   return [
     { title: `${title} | SiteGist` },
     { name: "description", content: description },
+    ...(canonicalUrl ? [{ tagName: "link", rel: "canonical", href: canonicalUrl }] : []),
+    // Open Graph
+    { property: "og:site_name", content: "SiteGist" },
+    { property: "og:type", content: "article" },
     { property: "og:title", content: title },
     { property: "og:description", content: description },
-    { property: "og:image", content: post.coverImage },
-    { property: "og:type", content: "article" },
+    ...(canonicalUrl ? [{ property: "og:url", content: canonicalUrl }] : []),
+    ...(image ? [{ property: "og:image", content: image }] : []),
+    ...(post.createdAt
+      ? [{ property: "article:published_time", content: new Date(post.createdAt).toISOString() }]
+      : []),
+    // Twitter
     { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: description },
+    ...(image ? [{ name: "twitter:image", content: image }] : []),
   ];
 };
 
@@ -36,7 +48,7 @@ import type { BlogPost, User } from "@prisma/client";
 
 type BlogPostWithAuthor = BlogPost & { author: User };
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ params, request }: LoaderFunctionArgs) {
   try {
     const post = await prisma.blogPost.findUnique({
       where: { slug: params.slug },
@@ -56,16 +68,35 @@ export async function loader({ params }: LoaderFunctionArgs) {
       orderBy: { createdAt: 'desc' }
     });
 
-    return json({ post, relatedPosts, dbError: null });
+    // Absolute URLs for canonical + social cards (OG/Twitter require absolute
+    // image URLs). Fall back to a default image when a post has no cover.
+    const { protocol, host } = new URL(request.url);
+    const origin = `${protocol}//${host}`;
+    const rawImg = post.coverImage || "";
+    const ogImage = rawImg.startsWith("http")
+      ? rawImg
+      : rawImg.startsWith("/")
+      ? `${origin}${rawImg}`
+      : "https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=1200&auto=format&fit=crop";
+
+    return json({
+      post,
+      relatedPosts,
+      dbError: null,
+      canonicalUrl: `${origin}/blog/${post.slug}`,
+      ogImage,
+    });
   } catch (error: any) {
     if (error instanceof Response) throw error; // Re-throw 404s
     console.error("[Blog Detail] Database error:", error.message);
     const isAuthError = error.message.includes("P6002") || error.message.includes("API Key is invalid") || error.message.includes("P1010");
     return json({ 
-      post: null, 
-      relatedPosts: [], 
+      post: null,
+      relatedPosts: [],
       dbError: isAuthError ? "DATABASE_AUTH_ERROR" : "GENERAL_ERROR",
-      errorMessage: error.message 
+      errorMessage: error.message,
+      canonicalUrl: null,
+      ogImage: null,
     });
   }
 }
