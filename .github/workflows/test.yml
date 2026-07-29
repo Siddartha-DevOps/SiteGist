@@ -1,0 +1,23 @@
+name: Unit tests
+
+# Gates PRs on the vitest unit suite. Uses `npx vitest` so it needs no
+# devDependency / package-lock change (the tested modules are dependency-free
+# pure functions, so no app install is required).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  vitest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # vitest.config.ts is a plain object (no `vitest/config` import), so vitest
+      # fetched transiently by npx can load it without a project install. The
+      # tested modules are dependency-free, so nothing else is needed.
+      - name: Run unit tests
+        run: npx --yes vitest@2 run

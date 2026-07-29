@@ -12,7 +12,10 @@
     "postinstall": "prisma generate",
     "start": "remix-serve ./build/server/index.js",
     "clean": "rm -rf build dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",
