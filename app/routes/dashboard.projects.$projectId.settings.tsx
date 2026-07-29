@@ -5,6 +5,7 @@ import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { hasRemoveBrandingAccess } from "~/lib/plans";
 import { recordAudit } from "~/lib/audit.server";
+import { mergeProjectSettings } from "~/lib/settings-merge";
 import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock } from "lucide-react";
 import { useState } from "react";
 
@@ -212,14 +213,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     routing: { mode: ["off", "round_robin", "first_admin"].includes(routingModeRaw) ? routingModeRaw : "off" },
   };
 
-  // Preserve settings keys this form doesn't manage (e.g. notifications, and
-  // anything other flows store under settings) by spreading the existing object
-  // first. Without this, saving Bot Settings would wipe those keys.
+  // Merge over existing settings so keys this form doesn't manage (e.g.
+  // notifications, and anything other flows store under settings) survive the
+  // save — otherwise saving Bot Settings wipes them. See mergeProjectSettings.
   const existingSettings = (owned.settings as Record<string, any>) || {};
-  const existingBranding = (existingSettings.branding as Record<string, any>) || {};
 
-  const settings = {
-    ...existingSettings,
+  const settings = mergeProjectSettings(existingSettings, {
     systemPrompt,
     model,
     language,
@@ -232,7 +231,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     webhookEvents,
     escalation,
     branding: {
-      ...existingBranding,
       primaryColor,
       assistantName,
       assistantLogo,
@@ -244,8 +242,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       removeBranding,
       customDomain,
       leadPolicy,
-    }
-  };
+    },
+  });
 
   await prisma.project.update({
     where: { id: params.projectId },

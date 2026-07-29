@@ -3,6 +3,7 @@
  * Validates and stores environment variables to ensure production safety and early failure.
  */
 import { z } from "zod";
+import { resolveRerankEnabled, portkeyModelProblem } from "./lib/env-rules";
 
 export interface EnvSchema {
   NODE_ENV: "development" | "production" | "test";
@@ -106,10 +107,7 @@ export function getCleanEnv(): EnvSchema {
   const portkeyKey = cleanValue(process.env.PORTKEY_API_KEY);
   const rerankFlagRaw = cleanValue(process.env.RERANK_ENABLED);
   const hasRerankProvider = !!((portkeyKey && cohereVK) || rerankUrl);
-  const rerankEnabled =
-    rerankFlagRaw === undefined
-      ? hasRerankProvider
-      : /^(1|true|yes|on)$/i.test(rerankFlagRaw);
+  const rerankEnabled = resolveRerankEnabled(rerankFlagRaw, hasRerankProvider);
 
   return {
     NODE_ENV: mode,
@@ -204,9 +202,8 @@ export async function validateEnvAtStartup() {
   if (currentEnv.PORTKEY_MODEL) {
     const model = currentEnv.PORTKEY_MODEL;
     const hasPortkeyRouting = !!(currentEnv.PORTKEY_API_KEY && currentEnv.PORTKEY_API_KEY.startsWith("pk-"));
-    const looksNamespaced = model.startsWith("@") || model.includes("/");
-    const looksOpenAI = /^(gpt-|o1|o3|o4|chatgpt|text-)/i.test(model);
-    if (!hasPortkeyRouting && looksNamespaced) {
+    const problem = portkeyModelProblem(model, hasPortkeyRouting);
+    if (problem === "namespaced_no_routing") {
       const msg =
         `CONFIG ERROR: PORTKEY_MODEL="${model}" is a provider-namespaced model but no Portkey routing ` +
         `(PORTKEY_API_KEY=pk-...) is configured — the direct OpenAI client will reject it (HTTP 400). ` +
@@ -214,7 +211,7 @@ export async function validateEnvAtStartup() {
       console.error(msg);
       throw new Error(msg);
     }
-    if (!hasPortkeyRouting && !looksOpenAI) {
+    if (problem === "not_openai_like") {
       console.warn(
         `CONFIG WARNING: PORTKEY_MODEL="${model}" does not look like an OpenAI model and no Portkey routing is configured. ` +
         `If the OpenAI client rejects it, set an OpenAI model name (e.g. gpt-4o-mini).`
