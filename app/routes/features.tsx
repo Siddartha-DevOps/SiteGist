@@ -1,3 +1,11 @@
+import type { MetaFunction as MetaFn } from "@remix-run/node";
+import { pageMeta as makeMeta } from "~/lib/seo";
+export const meta: MetaFn = () =>
+  makeMeta({
+    title: "Features",
+    description:
+      "AI answers from your content, multi-channel deployment, customizable lead capture, human handoff, and integrations — everything SiteGist does.",
+  });
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";

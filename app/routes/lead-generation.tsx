@@ -1,3 +1,11 @@
+import type { MetaFunction as MetaFn } from "@remix-run/node";
+import { pageMeta as makeMeta } from "~/lib/seo";
+export const meta: MetaFn = () =>
+  makeMeta({
+    title: "Lead Generation",
+    description:
+      "Turn website visitors into leads — customizable capture forms, industry templates, and instant CRM/Slack notifications.",
+  });
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";
