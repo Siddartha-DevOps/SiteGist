@@ -98,22 +98,19 @@ export default function Integrations() {
 
   const categories = ["All", "CRM", "Email", "Slack", "Automations", "E-commerce"];
 
-  // `available: true` marks integrations that are actually wired up in the
-  // dashboard today (real connect flow + backend). Everything else is on the
-  // roadmap and is shown as "Coming soon" so the catalog never implies a
-  // connector is ready to configure before it exists.
+  // Public catalog shows only integrations with a real connect flow today.
+  // Keep unavailable roadmap items out of the marketing list so we never
+  // imply a connector is ready before it ships.
   const integrations = [
     { name: "Slack", category: "Slack", description: "Get instant notifications for every new lead.", icon: "S", available: true },
     { name: "Zapier", category: "Automations", description: "Connect with 5,000+ apps using Zapier workflows.", icon: "Z", available: true },
     { name: "Intercom", category: "Slack", description: "Seamlessly handoff chats to human agents.", icon: "I", available: true },
     { name: "HubSpot", category: "CRM", description: "Sync every captured lead into HubSpot as a CRM contact.", icon: "H", available: true },
-    { name: "Salesforce", category: "CRM", description: "Manage leads and opportunities in the world's #1 CRM.", icon: "S", available: false },
     { name: "Zendesk", category: "CRM", description: "Convert escalated chats into Zendesk support tickets automatically.", icon: "Z", available: true },
-    { name: "Resend", category: "Email", description: "Automated event-triggered transactional emails.", icon: "R", available: false },
-    { name: "Shopify", category: "E-commerce", description: "Answer product questions and track orders directly.", icon: "S", available: false },
-    { name: "Make.com", category: "Automations", description: "Advanced automation workflows for your AI bot.", icon: "M", available: false },
-    { name: "Mailchimp", category: "Email", description: "Add new leads to your marketing campaigns.", icon: "M", available: false },
   ];
+
+  // Roadmap (not shown on public catalog): Salesforce, Resend-as-connector,
+  // Shopify, Make.com, Mailchimp — wire up before re-adding with available: true.
 
   const filtered = integrations.filter(int => {
     const matchesSearch = int.name.toLowerCase().includes(searchTerm.toLowerCase());

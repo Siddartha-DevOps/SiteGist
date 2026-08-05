@@ -46,7 +46,7 @@ export default function DocsLayout() {
       title: "Getting started",
       items: [
         { label: "What is SiteGist", to: "/docs" },
-        { label: "Live demo", to: "/#live-demo" },
+        { label: "Live demo", to: "/#demo" },
         { label: "Use cases", to: "/features" },
       ]
     },

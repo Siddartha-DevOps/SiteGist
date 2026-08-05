@@ -23,9 +23,9 @@ export default function TrustCenter() {
   ];
 
   const frameworks = [
-    { name: "SOC 2 Type 2", status: "Active", color: "bg-blue-500" },
-    { name: "GDPR", status: "Active", color: "bg-green-500" },
-    { name: "HIPAA", status: "Active", color: "bg-purple-500" }
+    { name: "SOC 2 Type 2", status: "In progress", color: "bg-blue-500" },
+    { name: "GDPR", status: "Aligned", color: "bg-green-500" },
+    { name: "HIPAA", status: "Planned", color: "bg-purple-500" }
   ];
 
   return (
@@ -40,7 +40,7 @@ export default function TrustCenter() {
             <div className="flex items-center gap-3 mb-6">
               <Logo size="sm" />
               <div className="w-1.5 h-1.5 bg-brand-online rounded-full"></div>
-              <span className="text-xs font-black text-brand-online uppercase tracking-widest">Verified Security</span>
+              <span className="text-xs font-black text-brand-online uppercase tracking-widest">Security Program</span>
             </div>
             
             <h1 className="text-5xl md:text-6xl font-black text-brand-dark mb-6 tracking-tight">SiteGist Trust Center</h1>
@@ -118,11 +118,14 @@ export default function TrustCenter() {
                   <Zap className="w-8 h-8 text-brand-accent mb-4" />
                   <h3 className="text-xl font-black mb-2">Request Access</h3>
                   <p className="text-white/60 text-sm font-medium mb-6 leading-relaxed">
-                    Need the full SOC 2 report or our latest pentest? Request secure access below.
+                    Building toward SOC 2. Need our current security overview or to start a vendor review? Contact us below.
                   </p>
-                  <button className="w-full py-4 bg-brand-accent text-white rounded-xl font-black hover:scale-105 transition-all text-sm">
-                    Open Questionnaire
-                  </button>
+                  <a
+                    href="/contact-us"
+                    className="block w-full py-4 bg-brand-accent text-white rounded-xl font-black hover:scale-105 transition-all text-sm text-center"
+                  >
+                    Contact Security
+                  </a>
                 </div>
               </div>
             </div>

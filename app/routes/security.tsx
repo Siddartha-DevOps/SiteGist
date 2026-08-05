@@ -31,8 +31,8 @@ export default function Security() {
     },
     {
       icon: <UserCheck className="w-8 h-8 text-primary" />,
-      title: "SOC 2 Type II Compliance",
-      description: "SiteGist is built on infrastructure that meets the highest industry standards for security and availability."
+      title: "Security Standards",
+      description: "SiteGist is built on infrastructure that meets high industry standards for encryption, isolation, and availability. SOC 2 Type II certification is in progress."
     },
     {
       icon: <Server className="w-8 h-8 text-primary" />,
