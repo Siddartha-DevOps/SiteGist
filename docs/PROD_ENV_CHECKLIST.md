@@ -57,11 +57,11 @@ DB missing a column. This checklist prevents all of those.
 email must arrive (check spam). Config presence alone isn't proof of delivery —
 verify your Resend sending domain (SPF/DKIM).
 
-## Answer quality (optional)
+## Answer quality (recommended for production)
 
 | Var | Notes |
 |-----|-------|
-| `RERANK_ENABLED` | `true` to enable reranking (needs the Portkey/Cohere keys or `RERANK_URL`). Unset falls back to legacy key-presence inference. |
+| `RERANK_ENABLED` | **Set `true` on production** to enable Cohere/Portkey reranking (needs Portkey/Cohere keys or `RERANK_URL`). Confirm via `/api/health` → `rerank: ok`. |
 | `PORTKEY_COHERE_VIRTUAL_KEY`, `COHERE_RERANK_MODEL` | Cohere rerank via Portkey. |
 | `RERANK_URL` | Self-hosted reranker endpoint (local-LLM path). |
 

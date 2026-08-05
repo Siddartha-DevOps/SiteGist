@@ -29,7 +29,7 @@ export default function LeadGeneration() {
     },
     {
       title: "Instant Routing",
-      description: "Qualified leads are instantly sent to your email, Slack, or favorite CRM (HubSpot, Salesforce, Pipedrive) so your team can act while the iron is hot.",
+      description: "Qualified leads are instantly sent to your email, Slack, HubSpot, or Zapier so your team can act while the iron is hot.",
       icon: <Send className="w-6 h-6" />
     }
   ];
@@ -53,7 +53,7 @@ export default function LeadGeneration() {
             </p>
             <div className="flex flex-col sm:flex-row items-start gap-4">
               <CTAButton to="/signup" variant="primary" className="px-10 py-5 text-base w-full sm:w-auto">Start Generating Leads</CTAButton>
-              <CTAButton to="/book-a-demo" variant="secondary" className="px-10 py-5 text-base w-full sm:w-auto">Book a Demo</CTAButton>
+              <CTAButton to="/contact-us" variant="secondary" className="px-10 py-5 text-base w-full sm:w-auto">Book a Demo</CTAButton>
             </div>
           </div>
           <div className="flex-1 relative">
@@ -134,16 +134,16 @@ export default function LeadGeneration() {
                  <span className="text-white font-bold tracking-tight">HubSpot</span>
                </div>
                <div className="flex items-center gap-3">
-                 <div className="w-12 h-12 bg-[#00A1E0] rounded-full flex items-center justify-center font-bold text-white">S</div>
-                 <span className="text-white font-bold tracking-tight">Salesforce</span>
-               </div>
-               <div className="flex items-center gap-3">
                  <div className="w-12 h-12 bg-[#E11931] rounded-full flex items-center justify-center font-bold text-white">Z</div>
                  <span className="text-white font-bold tracking-tight">Zapier</span>
                </div>
                <div className="flex items-center gap-3">
                  <div className="w-12 h-12 bg-[#4A154B] rounded-full flex items-center justify-center font-bold text-white">S</div>
                  <span className="text-white font-bold tracking-tight">Slack</span>
+               </div>
+               <div className="flex items-center gap-3">
+                 <div className="w-12 h-12 bg-[#03363D] rounded-full flex items-center justify-center font-bold text-white">Z</div>
+                 <span className="text-white font-bold tracking-tight">Zendesk</span>
                </div>
             </div>
             <div className="mt-16">

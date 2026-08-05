@@ -21,7 +21,7 @@ export default function Changelog() {
         {
           week: "Week 16",
           title: "Advanced Integrations",
-          new: ["Zendesk & Salesforce integrations", "Custom webhook triggers"],
+          new: ["Zendesk & HubSpot integrations", "Custom webhook triggers"],
           improvements: ["Enhanced RAG retrieval strategy", "Better lead qualification flows"],
           fixes: ["Resolved mobile menu layout issues"]
         }

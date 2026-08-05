@@ -54,8 +54,8 @@ export default function Features() {
       color: "bg-blue-500/10"
     },
     {
-      title: "Enterprise Grade Security",
-      description: "SOC2 Type II compliant. We use industry-standard encryption and data isolation to keep your training data safe.",
+      title: "Enterprise-Ready Security",
+      description: "Built with industry-standard encryption and data isolation. SOC 2 Type II is in progress — see our Trust Center for the current program status.",
       icon: <Shield className="w-6 h-6 text-gray-700" />,
       color: "bg-gray-700/10"
     },

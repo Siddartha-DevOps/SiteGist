@@ -317,9 +317,9 @@ export default function Pricing() {
         "Webhook Support",
         "Priority Support",
         "Custom Integrations",
-        "HIPAA eligible",
+        "Security review on request",
         "Signed DPA on request",
-        "Custom BAA available"
+        "BAA discussion for Enterprise deals"
       ],
       ctaText: "Contact us",
       monthlyPriceId: "",
@@ -489,7 +489,7 @@ export default function Pricing() {
     "Pricing": [
       {
         q: "Can I try a demo before signing up?",
-        a: "Yes, you can go to sitegist.co/demo and try out the demo. The demo bot you see on sitegist.co/demo is trained on the sitegist.co website content itself. So you can ask any questions related to SiteGist website in that demo bot and it will answer it. You can also sign up for a 7-day free trial and try out everything on your own data."
+        a: "Yes — open the live demo on the homepage (sitegist.co/#demo) and chat with the SiteGist assistant. For a full RAG experience trained on your own content, start a 7-day free trial and create a chatbot from your URL."
       },
       {
         q: "Are there customized enterprise tiers available?",
@@ -522,7 +522,7 @@ export default function Pricing() {
         q: "Is my data secure with SiteGIST?",
         a: (
           <span>
-            Yes. All data pipelines are completely secure, with enterprise SLA compliance and signed contracts. If you require standard integrations, dedicated database clusters, HIPAA agreements or BAA forms, please reach out directly via{" "}
+            Yes. We encrypt data in transit and at rest and isolate customer knowledge bases. SOC 2 Type II is in progress. If you need a security questionnaire, DPA, or to discuss HIPAA/BAA for an Enterprise deal, please reach out via{" "}
             <a 
               href="mailto:support@sitegist.co" 
               className="text-blue-600 font-extrabold hover:underline drop-shadow-[0_0_10px_rgba(37,99,235,0.25)] transition-all cursor-pointer"

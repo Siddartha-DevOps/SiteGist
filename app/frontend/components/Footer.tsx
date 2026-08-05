@@ -42,7 +42,7 @@ export function Footer() {
               <li><Link to="/features" className="hover:text-brand-accent transition-colors">Features</Link></li>
               <li><Link to="/pricing" className="hover:text-brand-accent transition-colors">Pricing</Link></li>
               <li><Link to="/dashboard" className="hover:text-brand-accent transition-colors">Dashboard</Link></li>
-              <li><Link to="/#live-demo" className="hover:text-brand-accent transition-colors">Live Demo</Link></li>
+              <li><Link to="/#demo" className="hover:text-brand-accent transition-colors">Live Demo</Link></li>
             </ul>
           </div>
 
@@ -52,8 +52,8 @@ export function Footer() {
              <ul className="space-y-4 text-[13px] text-brand-dark/70 font-bold">
                <li><Link to="/blog" className="hover:text-brand-accent transition-colors">Blog</Link></li>
                <li><Link to="/docs" className="hover:text-brand-accent transition-colors">Documentation</Link></li>
-               <li><Link to="/help" className="hover:text-brand-accent transition-colors">Help Center</Link></li>
-               <li><Link to="/status" className="hover:text-brand-accent transition-colors">System Status</Link></li>
+               <li><Link to="/docs" className="hover:text-brand-accent transition-colors">Help Center</Link></li>
+               <li><Link to="/TrustCenter" className="hover:text-brand-accent transition-colors">System Status</Link></li>
              </ul>
           </div>
 
@@ -87,7 +87,7 @@ export function Footer() {
               © {currentYear} SiteGist AI Technologies Inc. All rights reserved.
             </p>
             <div className="flex items-center gap-6 text-[11px] font-bold text-brand-dark/50 uppercase tracking-widest">
-              <Link to="/compliance" className="hover:text-brand-accent transition-colors">Compliance</Link>
+              <Link to="/TrustCenter" className="hover:text-brand-accent transition-colors">Compliance</Link>
               <Link to="/security" className="hover:text-brand-accent transition-colors">Security</Link>
               <Link to="/contact-us" className="hover:text-brand-accent transition-colors">Contact Us</Link>
             </div>
