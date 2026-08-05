@@ -90,7 +90,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { projectId, message, sessionId } = body;
+    const { projectId, message, sessionId, pageUrl, pageTitle } = body;
 
     if (!projectId || !message) {
       return json({ error: "Missing required fields (projectId, message)" }, { status: 400 });
@@ -250,7 +250,11 @@ export async function action({ request }: ActionFunctionArgs) {
         
         if (!session) {
           session = await prisma.chatSession.create({
-            data: { projectId },
+            data: {
+              projectId,
+              ...(pageUrl ? { pageUrl: String(pageUrl).slice(0, 2048) } : {}),
+              ...(pageTitle ? { pageTitle: String(pageTitle).slice(0, 512) } : {}),
+            },
           });
         }
 

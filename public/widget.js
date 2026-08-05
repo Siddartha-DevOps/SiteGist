@@ -56,7 +56,10 @@
 
   const iframe = document.createElement('iframe');
   iframe.id = 'sitegist-widget-iframe';
-  iframe.src = `${baseUrl}/embed/${projectId}`;
+  const embedUrl = new URL(`${baseUrl}/embed/${projectId}`);
+  embedUrl.searchParams.set('pageUrl', window.location.href);
+  embedUrl.searchParams.set('pageTitle', document.title);
+  iframe.src = embedUrl.toString();
   container.appendChild(iframe);
 
   bubble.onclick = () => {

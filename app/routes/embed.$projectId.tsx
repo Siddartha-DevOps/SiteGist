@@ -7,15 +7,43 @@ import { useState, useEffect, useRef } from "react";
 import { Send, X, Bot, User, Loader2, ThumbsUp, ThumbsDown, Check, ExternalLink } from "lucide-react";
 import Markdown from "react-markdown";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+function computeIsOffline(bh: any): boolean {
+  if (!bh?.enabled) return false;
+  const tz = bh.timezone || "UTC";
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    weekday: "long",
+  }).formatToParts(now);
+  const weekday = parts.find(p => p.type === "weekday")?.value?.toLowerCase() ?? "";
+  const hour = parseInt(parts.find(p => p.type === "hour")?.value ?? "0", 10);
+  const minute = parseInt(parts.find(p => p.type === "minute")?.value ?? "0", 10);
+  const current = hour * 60 + minute;
+  const dayMap: Record<string, number> = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+  const dayIdx = dayMap[weekday] ?? -1;
+  const enabledDays: number[] = bh.days ?? [1,2,3,4,5];
+  if (!enabledDays.includes(dayIdx)) return true;
+  const [sh, sm] = (bh.startTime || "09:00").split(":").map(Number);
+  const [eh, em] = (bh.endTime || "17:00").split(":").map(Number);
+  return current < sh * 60 + sm || current >= eh * 60 + em;
+}
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
   const project = await prisma.project.findUnique({
     where: { id: params.projectId },
     select: { name: true, settings: true, id: true, status: true, userId: true }
   });
   if (!project) throw new Response("Not Found", { status: 404 });
 
+  const url = new URL(request.url);
+  const pageUrl = url.searchParams.get("pageUrl") || null;
+  const pageTitle = url.searchParams.get("pageTitle") || null;
+
   if (project.status !== "ACTIVE") {
-    return json({ project, notReady: true });
+    return json({ project, notReady: true, isOffline: false, pageUrl, pageTitle });
   }
 
   // Enforce remove-branding gate at render time
@@ -27,11 +55,11 @@ export async function loader({ params }: LoaderFunctionArgs) {
     ]);
     if (!hasRemoveBrandingAccess(user?.subscriptionTier, addons)) {
       const enforced = { ...settings, branding: { ...settings.branding, removeBranding: false } };
-      return json({ project: { ...project, settings: enforced }, notReady: false });
+      return json({ project: { ...project, settings: enforced }, notReady: false, isOffline: computeIsOffline(settings?.businessHours), pageUrl, pageTitle });
     }
   }
 
-  return json({ project, notReady: false });
+  return json({ project, notReady: false, isOffline: computeIsOffline(settings?.businessHours), pageUrl, pageTitle });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -53,7 +81,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function EmbedChat() {
-  const { project, notReady } = useLoaderData<typeof loader>();
+  const { project, notReady, isOffline, pageUrl, pageTitle } = useLoaderData<typeof loader>();
   const [isEmbedded, setIsEmbedded] = useState(true); // default true to avoid flash
   const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
@@ -147,7 +175,7 @@ export default function EmbedChat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, message: messageToSend, sessionId }),
+        body: JSON.stringify({ projectId: project.id, message: messageToSend, sessionId, pageUrl, pageTitle }),
       });
 
       if (response.status === 429) {
