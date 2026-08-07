@@ -4,15 +4,13 @@ import { prisma } from "~/database/db.server";
 import { getUsageForUser, getBillingCycleStart } from "~/lib/usage.server";
 import { sendEmail } from "~/lib/email.server";
 import { getRedis } from "~/lib/redis.server";
+import { isCronAuthorized } from "~/lib/cron-auth.server";
 
 // Fallback memory cache for local development if Redis is not active/configured
 const localDedupeCache = new Set<string>();
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get("token") || request.headers.get("x-cron-secret");
-
-  if (!process.env.CRON_SECRET || token !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(request)) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 

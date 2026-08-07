@@ -194,6 +194,29 @@ export async function validateEnvAtStartup() {
         : " — set RERANK_ENABLED=true (with PORTKEY_API_KEY + PORTKEY_COHERE_VIRTUAL_KEY, or RERANK_URL) to enable.")
   );
 
+  const hasInngest = !!(process.env.INNGEST_EVENT_KEY?.trim() || process.env.INNGEST_DEV?.trim());
+  const ingestAsyncOff = process.env.INGEST_ASYNC?.trim() === "0";
+  if (hasInngest && !ingestAsyncOff) {
+    console.log(
+      "[CONFIG] Async ingestion via Inngest is ENABLED. Sync the app at the Inngest dashboard " +
+        "(serve URL: /api/inngest). If sources stall in 'queued', set INGEST_ASYNC=0 to force inline ingestion."
+    );
+  } else if (!hasInngest && currentEnv.NODE_ENV === "production") {
+    console.warn(
+      "[CONFIG WARNING] INNGEST_EVENT_KEY not set — ingestion runs INLINE inside HTTP requests. " +
+        "Large crawls may timeout. Configure Inngest for production async ingestion."
+    );
+  } else if (ingestAsyncOff) {
+    console.log("[CONFIG] INGEST_ASYNC=0 — ingestion runs inline (sync override).");
+  }
+
+  if (!process.env.CRON_SECRET?.trim() && currentEnv.NODE_ENV === "production") {
+    console.warn(
+      "[CONFIG WARNING] CRON_SECRET is not set — scheduled jobs (/api/cron/*) will reject all requests. " +
+        "Set CRON_SECRET in Vercel env for daily summary, usage warnings, recrawl, and weekly report crons."
+    );
+  }
+
   // PORTKEY_MODEL guardrail. The Jul-9 outage was a provider-namespaced model
   // string ("@org/model") sent to the DIRECT OpenAI client, which 400s every
   // request. When there's no Portkey routing (PORTKEY_API_KEY=pk-...), a

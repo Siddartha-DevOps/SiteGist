@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { getRedis } from "~/lib/redis.server";
 import { env } from "~/env.server";
+import { isAsyncIngestionEnabled } from "~/ai-layer/ingestion.server";
 
 /**
  * GET /api/health — production health/readiness probe.
@@ -77,9 +78,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? { status: "ok" }
     : { status: "not_configured", note: "Reranking disabled — set RERANK_ENABLED=true (+ Portkey/Cohere keys or RERANK_URL) for best relevance." };
 
+  // Ingestion — async durability (optional but recommended in production).
+  const asyncIngest = isAsyncIngestionEnabled();
+  services.ingestion = asyncIngest
+    ? { status: "ok", mode: "inngest", note: "Async via Inngest — ensure /api/inngest is synced in the Inngest dashboard." }
+    : {
+        status: process.env.NODE_ENV === "production" ? "not_configured" : "ok",
+        mode: "inline",
+        note:
+          process.env.INGEST_ASYNC?.trim() === "0"
+            ? "INGEST_ASYNC=0 — inline ingestion override."
+            : "Inline ingestion — set INNGEST_EVENT_KEY (+ sync /api/inngest) for durable async crawls.",
+      };
+
+  // Scheduled jobs — Vercel crons require CRON_SECRET.
+  services.cron = process.env.CRON_SECRET?.trim()
+    ? { status: "ok" }
+    : { status: "not_configured", note: "CRON_SECRET missing — /api/cron/* routes will reject scheduled invocations." };
+
   const dbOk = services.database.status === "ok";
   const llmOk = services.llm.status === "ok";
-  const degraded = ["redis", "pinecone", "email", "rerank"].some((k) => services[k].status !== "ok");
+  const degraded = ["redis", "pinecone", "email", "rerank", "ingestion", "cron"].some((k) => services[k].status !== "ok");
   const overall = !dbOk || !llmOk ? "unhealthy" : degraded ? "degraded" : "ok";
 
   // Public callers get status enums only — strip detail/notes/providers/etc.

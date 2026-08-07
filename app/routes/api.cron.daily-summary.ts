@@ -2,14 +2,11 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { sendEmail } from "~/lib/email.server";
+import { isCronAuthorized } from "~/lib/cron-auth.server";
 
-// Hit this daily from an external scheduler (Cloud Scheduler, cron-job.org, etc.) or QStash / Vercel Crons
-//   GET /api/cron/daily-summary?token=YOUR_CRON_SECRET
+// Hit this daily from Vercel Crons (vercel.json) or an external scheduler.
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get("token") || request.headers.get("x-cron-secret");
-
-  if (!process.env.CRON_SECRET || token !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(request)) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
