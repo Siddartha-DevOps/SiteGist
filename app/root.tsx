@@ -11,7 +11,8 @@ import {
   useRouteError,
   useRouteLoaderData
 } from "@remix-run/react";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { pageMeta } from "~/lib/seo";
 import React from "react";
 import { Bot, Database, Key, AlertTriangle } from "lucide-react";
 
@@ -32,9 +33,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Deployed build marker — lets you confirm from the live page which commit
       // production is actually serving (Vercel sets VERCEL_GIT_COMMIT_SHA).
       BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || "dev").slice(0, 7),
+      // Sentry DSN is public by design (it's a write-only key) — safe to ship to
+      // the client for browser error capture. NODE_ENV tags the environment.
+      SENTRY_DSN: process.env.SENTRY_DSN,
+      NODE_ENV: process.env.NODE_ENV,
     },
   });
 }
+
+// Default meta for every route that doesn't export its own (Remix v2: a leaf
+// route's meta replaces this). Gives sane link previews site-wide.
+export const meta: MetaFunction = () =>
+  pageMeta({
+    title: "SiteGist — AI chatbot & lead generation for your website",
+    description:
+      "Train an AI chatbot on your website content in minutes. Answer customer questions 24/7, capture leads, and hand off to humans — embeddable anywhere.",
+  });
 
 export const links: LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },

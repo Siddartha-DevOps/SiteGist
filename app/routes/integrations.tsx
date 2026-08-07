@@ -1,3 +1,11 @@
+import type { MetaFunction as MetaFn } from "@remix-run/node";
+import { pageMeta as makeMeta } from "~/lib/seo";
+export const meta: MetaFn = () =>
+  makeMeta({
+    title: "Integrations",
+    description:
+      "Connect SiteGist to Slack, Zapier, HubSpot, Zendesk, Notion, Google Drive and more to sync data and route conversations.",
+  });
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";
 import { ChatWidget } from "~/frontend/components/ChatWidget";

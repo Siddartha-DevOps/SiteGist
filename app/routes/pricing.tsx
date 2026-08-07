@@ -1,3 +1,11 @@
+import type { MetaFunction as MetaFn } from "@remix-run/node";
+import { pageMeta as makeMeta } from "~/lib/seo";
+export const meta: MetaFn = () =>
+  makeMeta({
+    title: "Pricing",
+    description:
+      "Simple plans for every stage — a free starter tier, Pro for growing teams, and Enterprise. 7-day free trial, cancel anytime.",
+  });
 import { useState, useEffect } from "react";
 import { Header } from "~/frontend/components/Header";
 import { Footer } from "~/frontend/components/Footer";

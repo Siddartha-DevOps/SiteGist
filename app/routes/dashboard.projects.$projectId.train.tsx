@@ -1588,7 +1588,26 @@ export default function TrainProject() {
             </div>
           </div>
         </div>
-        
+
+        {(() => {
+          const failed = sources.filter((s: any) => s.status === "failed");
+          if (failed.length === 0) return null;
+          return (
+            <div className="mx-6 mt-4 -mb-2 flex items-start gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
+              <span className="text-red-500 text-sm leading-none mt-0.5">⚠</span>
+              <div className="text-xs">
+                <p className="font-bold text-red-600">
+                  {failed.length} source{failed.length !== 1 ? "s" : ""} failed to train
+                </p>
+                <p className="text-red-500/80 font-medium mt-0.5">
+                  Review the error under each one below and click Retry. Common causes: an unreachable URL,
+                  an unsupported file, or a transient provider error.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="divide-y divide-zinc-50">
           {(project as any).knowledgeSources.map((source: any) => (
             <div key={source.id} className="p-6 flex items-center justify-between group hover:bg-zinc-50/50 transition-all">
