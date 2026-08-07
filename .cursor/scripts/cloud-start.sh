@@ -8,6 +8,15 @@ if [[ -z "${SESSION_SECRET:-}" || "${SESSION_SECRET}" == "DEFAULT_SESSION_SECRET
   export SESSION_SECRET="$(openssl rand -hex 32)"
 fi
 
+# Namespaced PORTKEY_MODEL values (e.g. @org/model) 400 against the direct OpenAI
+# client unless PORTKEY_API_KEY is configured. Fall back to a safe default.
+if [[ -n "${PORTKEY_MODEL:-}" && -z "${PORTKEY_API_KEY:-}" ]]; then
+  if [[ "$PORTKEY_MODEL" == @* ]] || [[ "$PORTKEY_MODEL" == */* ]]; then
+    export PORTKEY_MODEL="gpt-4o-mini"
+    echo "PORTKEY_MODEL overridden to gpt-4o-mini (namespaced model without PORTKEY_API_KEY)"
+  fi
+fi
+
 # Prefer hosted Postgres from Vercel/Neon/Accelerate secrets. Fall back to a
 # local cluster only when DATABASE_URL is not configured.
 if [[ -z "${DATABASE_URL:-}" ]]; then

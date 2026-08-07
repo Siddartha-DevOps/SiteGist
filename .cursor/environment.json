@@ -10,7 +10,7 @@
   "terminals": [
     {
       "name": "dev-server",
-      "command": "npm run dev"
+      "command": "bash .cursor/scripts/dev-server.sh"
     }
   ],
   "ports": [3000]
