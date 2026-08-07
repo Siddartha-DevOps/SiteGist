@@ -1,0 +1,17 @@
+{
+  "name": "SiteGist",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "user": "ubuntu",
+  "install": "npm ci",
+  "start": "bash .cursor/scripts/cloud-start.sh",
+  "terminals": [
+    {
+      "name": "dev-server",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [3000]
+}
