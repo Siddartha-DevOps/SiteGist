@@ -161,6 +161,8 @@ model ChatSession {
   isStarred   Boolean   @default(false)
   isArchived  Boolean   @default(false)
   assignedTo  String?
+  pageUrl     String?   // Page visitor was on when they started chatting
+  pageTitle   String?   // Page title at chat start
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   messages    Message[]

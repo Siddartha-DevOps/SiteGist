@@ -258,6 +258,18 @@ export default function SessionDetail() {
               <div className="flex items-center gap-2 text-[10px] text-text-muted font-bold uppercase tracking-wider">
                 <span className="flex items-center gap-1"><Globe className="w-3 h-3" /> {session.project.name}</span>
                 <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> ID: {session.id.slice(0, 8)}</span>
+                {(session as any).pageUrl && (
+                  <a
+                    href={(session as any).pageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={(session as any).pageTitle || (session as any).pageUrl}
+                    className="flex items-center gap-1 text-primary hover:underline max-w-[200px] truncate normal-case"
+                  >
+                    <MessageSquare className="w-3 h-3 shrink-0" />
+                    {(session as any).pageTitle || new URL((session as any).pageUrl).pathname}
+                  </a>
+                )}
               </div>
             </div>
           </div>
