@@ -82,27 +82,33 @@ export async function getUser(request: Request) {
       include: { subscriptions: true }
     });
 
-    if (user && user.email === "sidduchitiki@gmail.com") {
-      // Ensure the founder always has OWNER role
+    const founderEmail = process.env.FOUNDER_EMAIL?.trim().toLowerCase();
+    if (user && founderEmail && user.email.toLowerCase() === founderEmail) {
       return { ...user, role: "OWNER" };
     }
 
     return user;
   } catch (err) {
-    console.warn("[Auth Server] Failed to fetch user from DB, bypassing with elegant session fallback:", err);
-    let fallbackEmail = "demo-user@stegist.co";
+    console.error("[Auth Server] Failed to fetch user from DB:", err);
+    // Fail closed in production — never impersonate an OWNER when the database is down.
+    if (env.NODE_ENV === "production") {
+      return null;
+    }
+    console.warn("[Auth Server] Dev-only session fallback active (DB unavailable).");
+    let fallbackEmail = "dev-session@localhost";
     if (userId.startsWith("usr_hex_")) {
       try {
         const hex = userId.substring("usr_hex_".length);
         fallbackEmail = Buffer.from(hex, "hex").toString("utf-8");
-      } catch (e) {}
+      } catch {
+        /* keep default */
+      }
     }
-    // Return a valid mock profile if database is offline or Prisma Key is invalid
     return {
       id: userId,
       email: fallbackEmail,
-      role: "OWNER",
-      subscriptionTier: "pro",
+      role: "USER",
+      subscriptionTier: "free",
       createdAt: new Date(),
       updatedAt: new Date(),
       subscriptions: []

@@ -8,6 +8,7 @@ import { AI } from "./provider.server";
 import { maskSecret } from "~/lib/maskSecret";
 import { isPlainGreeting } from "~/lib/chat-intents";
 import { captureException } from "~/lib/monitoring.server";
+import { recordUnansweredQuestion } from "~/backend/unanswered.server";
 import { log, startTimer } from "~/lib/logger.server";
 import { cacheGet, cacheSet, cacheKey } from "~/lib/cache.server";
 import { languageDirective } from "~/lib/language.server";
@@ -930,6 +931,12 @@ export async function* streamRAG(
     ? "I am specialized only in SiteGist platform support. I can help you with pricing, features, crawling, or policies. For other topics, please contact our human support team."
     : "I don't have information about that. Please contact our support team for more help.";
 
+  function* yieldKnowledgeFallback(metadata: Record<string, unknown> = { source: "knowledge" }) {
+    if (!isDemo) recordUnansweredQuestion(projectId, query);
+    yield `METADATA:${JSON.stringify(metadata)}`;
+    yield fallbackMessage;
+  }
+
   let context = "";
   let citationMetadata: { url?: string; title?: string }[] = [];
   
@@ -1123,8 +1130,7 @@ export async function* streamRAG(
       if (initialMatches.length === 0) {
         console.warn(`[Hybrid Search] Stage 3 WARNING: Zero matches found for project ${projectId}.`);
         console.log(`[Zero Context Guard] No knowledge sources found for projectId: ${projectId}. Short-circuiting with fallback message.`);
-        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-        yield fallbackMessage;
+        yield* yieldKnowledgeFallback();
         return;
       }
 
@@ -1134,8 +1140,7 @@ export async function* streamRAG(
       
       if (rankedSources.length === 0) {
         console.log(`[Zero Context Guard] Reranked sources are empty for projectId: ${projectId}. Short-circuiting with fallback message.`);
-        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-        yield fallbackMessage;
+        yield* yieldKnowledgeFallback();
         return;
       }
 
@@ -1150,8 +1155,7 @@ export async function* streamRAG(
       console.log(`[Grounding] top relevance=${topRelevance.toFixed(4)} (abstain threshold=${minRelevance})`);
       if (minRelevance > 0 && topRelevance < minRelevance) {
         console.log(`[Grounding] top relevance ${topRelevance.toFixed(4)} < ${minRelevance} — abstaining to avoid a low-confidence answer.`);
-        yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-        yield fallbackMessage;
+        yield* yieldKnowledgeFallback();
         return;
       }
 
@@ -1177,8 +1181,7 @@ export async function* streamRAG(
       console.error("[Hybrid Search] Retrieval failed, short-circuiting with fallback message:", e);
       captureException(e, { where: "streamRAG.retrieval", projectId });
       endRetrieval({ ok: false });
-      yield `METADATA:${JSON.stringify({ source: "knowledge" })}`;
-      yield fallbackMessage;
+      yield* yieldKnowledgeFallback();
       return;
     }
   } else {

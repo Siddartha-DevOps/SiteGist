@@ -1459,7 +1459,7 @@ export default function TrainProject() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-sm text-zinc-800">Found {actionData.sitemapUrls.length} URLs</h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 1,000 pages and train your chatbot.</p>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />
@@ -1531,7 +1531,7 @@ export default function TrainProject() {
                           </span>
                         )}
                       </h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 30 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 1,000 pages and train your chatbot.</p>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />

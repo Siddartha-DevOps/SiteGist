@@ -2,14 +2,12 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { prisma } from "~/database/db.server";
 import { enqueueSourceIngestion } from "~/ai-layer/ingestion.server";
+import { isCronAuthorized } from "~/lib/cron-auth.server";
 
 // Daily auto-recrawl. Re-indexes every web/youtube KnowledgeSource whose
 // nextRecrawlAt has passed, then schedules its next refresh.
 //
-// Hit daily from Vercel Crons (configured in vercel.json) or any external
-// scheduler. Secured with CRON_SECRET, matching the other cron routes:
-//   GET /api/cron/recrawl?token=YOUR_CRON_SECRET
-//   GET /api/cron/recrawl   (header: x-cron-secret: YOUR_CRON_SECRET)
+// Hit daily from Vercel Crons (configured in vercel.json) or any external scheduler.
 
 // Bounded per run so a single invocation can't time out; whatever isn't picked
 // up stays due (nextRecrawlAt in the past) and is processed on the next run.
@@ -17,10 +15,7 @@ const RECRAWL_BATCH = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get("token") || request.headers.get("x-cron-secret");
-
-  if (!process.env.CRON_SECRET || token !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(request)) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
