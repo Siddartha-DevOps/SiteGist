@@ -819,16 +819,17 @@ export default function Billing() {
             <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
           </div>
 
-          <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] hover:border-primary transition-all group">
-            <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0 group-hover:bg-primary-muted transition-colors">
+          <div className="flex items-center gap-6 p-8 bg-white border border-zinc-100 rounded-[40px] opacity-80">
+            <div className="w-16 h-16 bg-zinc-50 rounded-[20px] flex items-center justify-center shrink-0">
               <Globe className="w-8 h-8 text-primary" />
             </div>
             <div>
               <h4 className="text-xl font-black mb-1 font-display">Custom Domains</h4>
-              <p className="text-sm font-bold text-zinc-400 mb-2">Host the widget on your own subdomain.</p>
-              <span className="text-primary font-black">+ $29/mo</span>
+              <p className="text-sm font-bold text-zinc-400 mb-2">
+                DNS verify + host routing is available in Bot Settings (free while in beta). Paid add-on checkout coming later.
+              </p>
+              <span className="text-zinc-500 font-black text-sm">Included in beta</span>
             </div>
-            <Plus className="w-6 h-6 text-zinc-200 ml-auto" />
           </div>
         </div>
       </div>
