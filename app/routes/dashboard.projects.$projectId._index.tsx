@@ -5,7 +5,7 @@ import { useLoaderData, Link, useFetcher } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { createOrGetKnowledgeQA, clearUnansweredForQuestion } from "~/backend/knowledge-qa.server";
-import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight, Loader2, AlertTriangle, Plus, Check, X } from "lucide-react";
+import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight, Loader2, AlertTriangle, Plus, Check } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
