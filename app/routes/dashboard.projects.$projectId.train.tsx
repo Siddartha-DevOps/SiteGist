@@ -678,6 +678,7 @@ export default function TrainProject() {
   const [searchParams, setSearchParams] = useSearchParams();
   type TrainTab = "web" | "bulk" | "text" | "youtube" | "files" | "qa";
   const tabParam = searchParams.get("tab") as TrainTab | null;
+  const isOnboarding = searchParams.get("onboarding") === "1";
   const validTabs: TrainTab[] = ["web", "bulk", "text", "youtube", "files", "qa"];
   const initialTab: TrainTab = tabParam && validTabs.includes(tabParam) ? tabParam : "web";
   const [activeTab, setActiveTab] = useState<TrainTab>(initialTab);
@@ -694,6 +695,14 @@ export default function TrainProject() {
   const [editingQa, setEditingQa] = useState<any | null>(null);
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
+  // Sitemap / docs-sitemap URL picker — default all selected when results arrive
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (actionData?.sitemapUrls && Array.isArray(actionData.sitemapUrls)) {
+      setSelectedUrls(actionData.sitemapUrls as string[]);
+    }
+  }, [actionData?.sitemapUrls]);
 
   useEffect(() => {
     if (actionData?.success) {
@@ -779,6 +788,12 @@ export default function TrainProject() {
         <h1 className="text-4xl font-black mb-2">Train Chatbot</h1>
         <p className="text-text-muted">Import content from various sources to teach your AI.</p>
       </div>
+
+      {isOnboarding && (
+        <div className="mb-8 px-5 py-4 rounded-2xl border border-primary/20 bg-primary/5 text-sm font-medium text-brand-dark">
+          We're training on your site — pages will appear below as they finish.
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-100 rounded-2xl w-fit mb-12">
         <button 
@@ -1449,27 +1464,69 @@ export default function TrainProject() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-sm text-zinc-800">Found {actionData.sitemapUrls.length} URLs</h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 1,000 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Select pages to crawl (up to 1,000) and train your chatbot.</p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUrls(actionData.sitemapUrls as string[])}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
+                        >
+                          Select all
+                        </button>
+                        <span className="text-zinc-200">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUrls([])}
+                          className="text-[11px] font-bold text-zinc-500 hover:text-zinc-700"
+                        >
+                          Select none
+                        </button>
+                        <span className="text-[11px] text-zinc-400">
+                          {selectedUrls.length} of {actionData.sitemapUrls.length} selected
+                        </span>
+                      </div>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />
-                      <input type="hidden" name="urls" value={JSON.stringify(actionData.sitemapUrls)} />
-                      <button 
-                        type="submit" 
-                        disabled={isCrawling}
-                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer"
+                      <input type="hidden" name="urls" value={JSON.stringify(selectedUrls)} />
+                      <button
+                        type="submit"
+                        disabled={isCrawling || selectedUrls.length === 0}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Index All Sitemap URLs"}
+                        {isCrawling ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          `Index selected (${selectedUrls.length})`
+                        )}
                       </button>
                     </Form>
                   </div>
                   <div className="max-h-60 overflow-y-auto space-y-2 pr-2 border border-zinc-50 rounded-xl p-2 bg-zinc-50/20">
-                    {actionData.sitemapUrls.map((url: string) => (
-                      <div key={url} className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center justify-between gap-2 shadow-sm">
-                        <span className="truncate text-zinc-600">{url}</span>
-                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded">Pending</span>
-                      </div>
-                    ))}
+                    {actionData.sitemapUrls.map((url: string) => {
+                      const checked = selectedUrls.includes(url);
+                      return (
+                        <label
+                          key={url}
+                          className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center gap-3 shadow-sm cursor-pointer hover:border-zinc-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedUrls((prev) =>
+                                checked ? prev.filter((u) => u !== url) : [...prev, url]
+                              );
+                            }}
+                            className="shrink-0 rounded border-zinc-300 text-blue-600 focus:ring-blue-500/30"
+                          />
+                          <span className="truncate text-zinc-600 flex-1">{url}</span>
+                          <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded shrink-0">
+                            Pending
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1521,27 +1578,69 @@ export default function TrainProject() {
                           </span>
                         )}
                       </h3>
-                      <p className="text-[11px] text-zinc-400">Click below to crawl up to 1,000 pages and train your chatbot.</p>
+                      <p className="text-[11px] text-zinc-400">Select pages to crawl (up to 1,000) and train your chatbot.</p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUrls(actionData.sitemapUrls as string[])}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
+                        >
+                          Select all
+                        </button>
+                        <span className="text-zinc-200">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUrls([])}
+                          className="text-[11px] font-bold text-zinc-500 hover:text-zinc-700"
+                        >
+                          Select none
+                        </button>
+                        <span className="text-[11px] text-zinc-400">
+                          {selectedUrls.length} of {actionData.sitemapUrls.length} selected
+                        </span>
+                      </div>
                     </div>
                     <Form method="post" className="shrink-0">
                       <input type="hidden" name="_action" value="crawl_sitemap_urls" />
-                      <input type="hidden" name="urls" value={JSON.stringify(actionData.sitemapUrls)} />
-                      <button 
-                        type="submit" 
-                        disabled={isCrawling}
-                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer"
+                      <input type="hidden" name="urls" value={JSON.stringify(selectedUrls)} />
+                      <button
+                        type="submit"
+                        disabled={isCrawling || selectedUrls.length === 0}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-lg shadow-blue-500/15 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Index All Sitemap URLs"}
+                        {isCrawling ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          `Index selected (${selectedUrls.length})`
+                        )}
                       </button>
                     </Form>
                   </div>
                   <div className="max-h-60 overflow-y-auto space-y-2 pr-2 border border-zinc-50 rounded-xl p-2 bg-zinc-50/20">
-                    {actionData.sitemapUrls.map((url: string) => (
-                      <div key={url} className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center justify-between gap-2 shadow-sm">
-                        <span className="truncate text-zinc-600">{url}</span>
-                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded">Pending</span>
-                      </div>
-                    ))}
+                    {actionData.sitemapUrls.map((url: string) => {
+                      const checked = selectedUrls.includes(url);
+                      return (
+                        <label
+                          key={url}
+                          className="p-3 bg-white rounded-xl text-xs font-mono truncate border border-zinc-100 flex items-center gap-3 shadow-sm cursor-pointer hover:border-zinc-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedUrls((prev) =>
+                                checked ? prev.filter((u) => u !== url) : [...prev, url]
+                              );
+                            }}
+                            className="shrink-0 rounded border-zinc-300 text-blue-600 focus:ring-blue-500/30"
+                          />
+                          <span className="truncate text-zinc-600 flex-1">{url}</span>
+                          <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none bg-blue-50 px-2 py-1 rounded shrink-0">
+                            Pending
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}
