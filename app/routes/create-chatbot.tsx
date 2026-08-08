@@ -4,9 +4,24 @@ import { Form, useActionData, useNavigation, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { enforceChatbotQuota } from "~/lib/usage.server";
+import { enqueueSourceIngestion } from "~/ai-layer/ingestion.server";
 import { Bot, ArrowLeft, Loader2, Sparkles, Globe, Shield } from "lucide-react";
 import React from 'react';
 import { Logo } from "~/frontend/components/Logo";
+
+/** Add https:// when missing; return null if not a valid http(s) URL. */
+function normalizeWebsiteUrl(raw: string): string | null {
+  let value = raw.trim();
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireUserId(request);
@@ -17,9 +32,18 @@ export async function action({ request }: ActionFunctionArgs) {
   const userId = await requireUserId(request);
   const formData = await request.formData();
   const name = formData.get("name");
+  const websiteRaw = formData.get("websiteUrl");
 
   if (typeof name !== "string" || name.length < 3) {
     return json({ error: "Chatbot name must be at least 3 characters" }, { status: 400 });
+  }
+
+  let websiteUrl: string | null = null;
+  if (typeof websiteRaw === "string" && websiteRaw.trim()) {
+    websiteUrl = normalizeWebsiteUrl(websiteRaw);
+    if (!websiteUrl) {
+      return json({ error: "Enter a valid website URL (e.g. example.com or https://example.com)" }, { status: 400 });
+    }
   }
 
   const quotaError = await enforceChatbotQuota(userId);
@@ -34,12 +58,27 @@ export async function action({ request }: ActionFunctionArgs) {
           systemPrompt: "You are a helpful AI assistant. Answer based on the knowledge provided.",
           branding: { 
             primaryColor: "#155DEE",
-            botName: name,
-            welcomeMessage: `Hi! I'm ${name}. How can I help you today?`
+            assistantName: name,
+            greetingMessage: `Hi! I'm ${name}. How can I help you today?`
           }
         }
       },
     });
+
+    if (websiteUrl) {
+      // Same pattern as crawl_single on the train page: queue a web source, then ingest.
+      const src = await prisma.knowledgeSource.create({
+        data: {
+          projectId: project.id,
+          type: "web",
+          source: websiteUrl,
+          title: websiteUrl,
+          status: "queued",
+        },
+      });
+      await enqueueSourceIngestion(project.id, src.id);
+      return redirect(`/dashboard/projects/${project.id}/train?tab=web&onboarding=1`);
+    }
 
     // Redirect to dashboard so the project list loads fresh (avoids Prisma Accelerate read-after-write lag)
     return redirect(`/dashboard?new=${project.id}`);
@@ -69,7 +108,7 @@ export default function CreateChatbot() {
               <Bot className="w-10 h-10 text-primary" />
             </div>
             <h1 className="text-4xl font-black text-brand-dark mb-3 tracking-tight">Create New Chatbot</h1>
-            <p className="text-brand-gray font-medium text-lg">Give your digital assistant a name to get started.</p>
+            <p className="text-brand-gray font-medium text-lg">Name your assistant — optionally paste a site to start training.</p>
           </div>
 
           <Form method="post" className="space-y-8">
@@ -93,13 +132,35 @@ export default function CreateChatbot() {
                       <Sparkles className="w-5 h-5 text-primary opacity-40 group-focus-within:opacity-100 transition-opacity" />
                     </div>
                   </div>
-                  {actionData?.error && (
-                    <p className="mt-3 text-sm text-red-500 font-bold ml-1 flex items-center gap-2">
-                      <span className="w-1 h-1 bg-red-500 rounded-full" />
-                      {actionData.error}
-                    </p>
-                  )}
                 </div>
+
+                <div>
+                  <label htmlFor="websiteUrl" className="block text-[13px] font-black text-brand-gray uppercase tracking-widest mb-3 ml-1">
+                    Website URL <span className="font-medium normal-case tracking-normal text-brand-gray/60">(optional)</span>
+                  </label>
+                  <div className="relative group">
+                    <input
+                      type="text"
+                      id="websiteUrl"
+                      name="websiteUrl"
+                      placeholder="e.g. example.com or https://docs.example.com"
+                      className="w-full px-6 py-5 bg-brand-light/30 border-2 border-transparent rounded-[24px] text-lg font-bold text-brand-dark placeholder:text-brand-gray/40 focus:outline-none focus:border-primary focus:bg-white transition-all group-hover:bg-brand-light/50"
+                    />
+                    <div className="absolute right-6 top-1/2 -translate-y-1/2">
+                      <Globe className="w-5 h-5 text-primary opacity-40 group-focus-within:opacity-100 transition-opacity" />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-brand-gray font-medium ml-1">
+                    We'll crawl this page and send you to the train screen to watch progress.
+                  </p>
+                </div>
+
+                {actionData?.error && (
+                  <p className="text-sm text-red-500 font-bold ml-1 flex items-center gap-2">
+                    <span className="w-1 h-1 bg-red-500 rounded-full" />
+                    {actionData.error}
+                  </p>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-5 bg-brand-light/30 rounded-3xl border border-transparent hover:border-brand-border transition-all">
