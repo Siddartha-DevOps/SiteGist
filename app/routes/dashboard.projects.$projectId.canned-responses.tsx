@@ -14,10 +14,15 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   });
   if (!project) return redirect("/dashboard");
 
-  const cannedResponses = await prisma.cannedResponse.findMany({
-    where: { projectId: project.id },
-    orderBy: { title: "asc" },
-  });
+  let cannedResponses: Awaited<ReturnType<typeof prisma.cannedResponse.findMany>> = [];
+  try {
+    cannedResponses = await prisma.cannedResponse.findMany({
+      where: { projectId: project.id },
+      orderBy: { title: "asc" },
+    });
+  } catch (e: any) {
+    console.warn("[CannedResponses] table missing or query failed:", e?.message || e);
+  }
 
   return json({ project, cannedResponses });
 }

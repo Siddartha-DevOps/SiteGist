@@ -45,6 +45,7 @@ export default function ProjectWorkspace() {
       heading: "Customizations",
       items: [
         { label: "Quick Prompts", icon: Tag, to: `${base}/settings` },
+        { label: "Canned Replies", icon: MessageSquare, to: `${base}/canned-responses` },
         { label: "Personas", icon: Layers, to: `${base}/settings` },
         { label: "Appearance", icon: Palette, to: `${base}/settings` },
       ],
