@@ -43,11 +43,17 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const pageTitle = url.searchParams.get("pageTitle") || null;
 
   if (project.status !== "ACTIVE") {
-    return json({ project, notReady: true, isOffline: false, pageUrl, pageTitle });
+    return json({ project, notReady: true, isOffline: false, offlineMessage: null, pageUrl, pageTitle });
   }
 
   // Enforce remove-branding gate at render time
   const settings = project.settings as any;
+  const isOffline = computeIsOffline(settings?.businessHours);
+  const offlineMessage =
+    (typeof settings?.businessHours?.offlineMessage === "string" && settings.businessHours.offlineMessage.trim())
+      ? settings.businessHours.offlineMessage.trim()
+      : "We're currently outside business hours. Please check back soon.";
+
   if (settings?.branding?.removeBranding) {
     const [user, addons] = await Promise.all([
       prisma.user.findUnique({ where: { id: project.userId }, select: { subscriptionTier: true } }),
@@ -55,11 +61,11 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     ]);
     if (!hasRemoveBrandingAccess(user?.subscriptionTier, addons)) {
       const enforced = { ...settings, branding: { ...settings.branding, removeBranding: false } };
-      return json({ project: { ...project, settings: enforced }, notReady: false, isOffline: computeIsOffline(settings?.businessHours), pageUrl, pageTitle });
+      return json({ project: { ...project, settings: enforced }, notReady: false, isOffline, offlineMessage, pageUrl, pageTitle });
     }
   }
 
-  return json({ project, notReady: false, isOffline: computeIsOffline(settings?.businessHours), pageUrl, pageTitle });
+  return json({ project, notReady: false, isOffline, offlineMessage, pageUrl, pageTitle });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -81,7 +87,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function EmbedChat() {
-  const { project, notReady, isOffline, pageUrl, pageTitle } = useLoaderData<typeof loader>();
+  const { project, notReady, isOffline, offlineMessage, pageUrl, pageTitle } = useLoaderData<typeof loader>();
   const [isEmbedded, setIsEmbedded] = useState(true); // default true to avoid flash
   const [messages, setMessages] = useState<{ id?: string, role: 'user' | 'assistant', content: string, feedback?: number, citations?: any[], followups?: string[], timestamp?: Date }[]>([]);
   const [input, setInput] = useState("");
@@ -95,6 +101,7 @@ export default function EmbedChat() {
   const chatFetcher = useFetcher();
   const leadFetcher = useFetcher();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const offlineNotice = offlineMessage || "We're currently outside business hours. Please check back soon.";
 
   useEffect(() => {
     setIsEmbedded(window.self !== window.top);
@@ -162,7 +169,7 @@ export default function EmbedChat() {
 
   const handleSend = async (text?: string) => {
     const messageToSend = text || input;
-    if (!messageToSend.trim() || isStreaming) return;
+    if (!messageToSend.trim() || isStreaming || isOffline) return;
     
     setInput("");
     setIsStreaming(true);
@@ -475,7 +482,12 @@ export default function EmbedChat() {
           </div>
           <div>
             <h1 className="font-bold text-sm">{assistantName}</h1>
-            <p className="text-[10px] opacity-80 uppercase tracking-widest font-medium">Assistant • Online</p>
+            <p className="text-[10px] opacity-80 uppercase tracking-widest font-medium">
+              {isOffline ? "Assistant • Offline" : "Assistant • Online"}
+            </p>
+            {isOffline && (
+              <p className="text-[10px] opacity-70 font-medium mt-0.5">Outside business hours</p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -496,6 +508,14 @@ export default function EmbedChat() {
         </div>
       </header>
 
+      {/* Offline banner */}
+      {isOffline && (
+        <div className={`px-4 py-3 text-sm border-b ${isDarkMode ? 'bg-amber-950/40 border-zinc-800 text-amber-200' : 'bg-amber-50 border-amber-100 text-amber-900'}`}>
+          <p className="font-bold text-xs uppercase tracking-wider mb-0.5">Outside business hours</p>
+          <p className="text-xs leading-relaxed opacity-90">{offlineNotice}</p>
+        </div>
+      )}
+
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
@@ -508,9 +528,11 @@ export default function EmbedChat() {
               )}
             </div>
             <h2 className="font-bold mb-2">Welcome to {project.name}!</h2>
-            <p className={`text-sm mb-8 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>{greetingMessage}</p>
+            <p className={`text-sm mb-8 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+              {isOffline ? offlineNotice : greetingMessage}
+            </p>
             
-            {suggestions.length > 0 && (
+            {!isOffline && suggestions.length > 0 && (
               <div className="flex flex-col gap-2">
                 {suggestions.map((s: string) => (
                   <button 
@@ -589,7 +611,7 @@ export default function EmbedChat() {
               </div>
             )}
 
-            {msg.role === 'assistant' && !isStreaming && (msg.followups?.length ?? 0) > 0 && (
+            {msg.role === 'assistant' && !isStreaming && !isOffline && (msg.followups?.length ?? 0) > 0 && (
               <div className="flex flex-col gap-1.5 mt-2 ml-1">
                 {msg.followups!.map((f, fi) => (
                   <button
@@ -613,6 +635,11 @@ export default function EmbedChat() {
 
       {/* Input */}
       <div className={`p-4 border-t ${isDarkMode ? 'border-zinc-800' : 'border-zinc-100'}`}>
+        {isOffline ? (
+          <div className={`px-4 py-3 rounded-2xl text-sm text-center ${isDarkMode ? 'bg-zinc-900 text-zinc-400 border border-zinc-800' : 'bg-zinc-50 text-zinc-500 border border-zinc-100'}`}>
+            Chat is unavailable outside business hours.
+          </div>
+        ) : (
         <div className={`flex items-center gap-2 border rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-primary/20 transition-all ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-zinc-50 border-zinc-100'}`}>
           <input 
             type="text" 
@@ -631,6 +658,7 @@ export default function EmbedChat() {
             {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
+        )}
         {rateLimit && rateLimit.remaining <= 5 && (
           <p className="text-[10px] text-center text-zinc-400 mt-2 font-bold tracking-wide uppercase select-none">
             {rateLimit.remaining} message{rateLimit.remaining !== 1 ? 's' : ''} remaining {rateLimit.window === 'hour' ? 'this hour' : 'today'}
