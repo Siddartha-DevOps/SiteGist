@@ -1,10 +1,11 @@
 import { useState } from "react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
+import { useLoaderData, Link, useFetcher } from "@remix-run/react";
 import { requireUserId, getUser } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight, Loader2, AlertTriangle } from "lucide-react";
+import { createOrGetKnowledgeQA, clearUnansweredForQuestion } from "~/backend/knowledge-qa.server";
+import { Globe, Send, Code, Layers, Trash2, MessageSquare, Users, Share2, Zap, CheckCircle2, Circle, ArrowRight, Loader2, AlertTriangle, Plus, Check } from "lucide-react";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -76,9 +77,62 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   }
 }
 
+export async function action({ params, request }: ActionFunctionArgs) {
+  const userId = await requireUserId(request);
+  const user = await getUser(request);
+  const project = await prisma.project.findFirst({
+    where: {
+      id: params.projectId,
+      OR: [{ userId }, { members: { some: { email: user?.email || "" } } }],
+    },
+    select: { id: true },
+  });
+  if (!project) return json({ error: "Project not found" }, { status: 404 });
+
+  const formData = await request.formData();
+  const intent = String(formData.get("_action") || "");
+
+  if (intent === "promote_unanswered") {
+    const unansweredId = String(formData.get("unansweredId") || "");
+    const question = String(formData.get("question") || "");
+    const answer = String(formData.get("answer") || "");
+    const row = unansweredId
+      ? await prisma.unansweredQuestion.findFirst({ where: { id: unansweredId, projectId: project.id } })
+      : null;
+    if (unansweredId && !row) return json({ error: "Unanswered question not found." }, { status: 404 });
+
+    const result = await createOrGetKnowledgeQA({
+      projectId: project.id,
+      question: question || row?.question || "",
+      answer,
+    });
+    if (!result.ok) return json({ error: result.error }, { status: result.status });
+
+    await clearUnansweredForQuestion(project.id, question || row?.question || "");
+    if (row) await prisma.unansweredQuestion.deleteMany({ where: { id: row.id, projectId: project.id } });
+
+    return json({
+      success: true,
+      message: result.created ? "Q&A saved." : "Q&A updated.",
+    });
+  }
+
+  if (intent === "dismiss_unanswered") {
+    const unansweredId = String(formData.get("unansweredId") || "");
+    if (!unansweredId) return json({ error: "Missing id" }, { status: 400 });
+    await prisma.unansweredQuestion.deleteMany({ where: { id: unansweredId, projectId: project.id } });
+    return json({ success: true, message: "Dismissed." });
+  }
+
+  return json({ error: "Unknown action" }, { status: 400 });
+}
+
 export default function ProjectDetails() {
   const { project, messageCount, unanswered, baseUrl, setup } = useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const promoteFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const isPromoting = promoteFetcher.state !== "idle";
 
   // Actionable setup-validation banner derived from real ingestion status.
   const trainHref = `/dashboard/projects/${project.id}/train`;
@@ -299,9 +353,60 @@ export default function ProjectDetails() {
                   <div key={u.id} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
                     <p className="text-xs font-medium text-zinc-600 italic">"{u.question}"</p>
                     <p className="text-[10px] text-zinc-400 mt-2 font-bold uppercase tracking-wider">{new Date(u.createdAt).toLocaleDateString()}</p>
+
+                    {editingId === u.id ? (
+                      <promoteFetcher.Form method="post" className="mt-3 space-y-2">
+                        <input type="hidden" name="_action" value="promote_unanswered" />
+                        <input type="hidden" name="unansweredId" value={u.id} />
+                        <input type="hidden" name="question" value={u.question} />
+                        <textarea
+                          name="answer"
+                          required
+                          rows={3}
+                          placeholder="Write the answer…"
+                          className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={isPromoting}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-white text-[10px] font-black uppercase tracking-wider disabled:opacity-50"
+                          >
+                            {isPromoting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            Save Q&amp;A
+                          </button>
+                          <button type="button" onClick={() => setEditingId(null)} className="text-[10px] font-bold text-zinc-400 uppercase">
+                            Cancel
+                          </button>
+                        </div>
+                      </promoteFetcher.Form>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(u.id)}
+                          className="inline-flex items-center gap-1 text-[10px] font-black text-primary uppercase tracking-wider hover:underline"
+                        >
+                          <Plus className="w-3 h-3" /> Add as Q&amp;A
+                        </button>
+                        <promoteFetcher.Form method="post">
+                          <input type="hidden" name="_action" value="dismiss_unanswered" />
+                          <input type="hidden" name="unansweredId" value={u.id} />
+                          <button type="submit" className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider hover:text-zinc-600">
+                            Dismiss
+                          </button>
+                        </promoteFetcher.Form>
+                      </div>
+                    )}
                   </div>
                 ))}
-                <p className="text-[10px] text-center text-zinc-400 font-bold uppercase tracking-widest pt-2">Add more content to fix these</p>
+                <Link
+                  to={`/dashboard/projects/${project.id}/insights`}
+                  className="block text-[10px] text-center text-primary font-bold uppercase tracking-widest pt-2 hover:underline"
+                >
+                  View all on Insights →
+                </Link>
               </div>
             ) : (
               <div className="text-center py-6">
