@@ -15,6 +15,8 @@ export type AuditAction =
   | "integration.connect"
   | "integration.disconnect"
   | "project.settings.update"
+  | "project.custom_domain.verify"
+  | "project.custom_domain.verify_failed"
   | "project.delete";
 
 function clientIp(request?: Request): string | undefined {

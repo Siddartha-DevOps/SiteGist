@@ -1,13 +1,19 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Form, useNavigation, useActionData, Link } from "@remix-run/react";
+import { useLoaderData, Form, useNavigation, useActionData, Link, useFetcher, useRevalidator } from "@remix-run/react";
 import { prisma } from "~/database/db.server";
 import { hasRemoveBrandingAccess } from "~/lib/plans";
 import { recordAudit } from "~/lib/audit.server";
 import { requireProjectAccess } from "~/lib/project-access.server";
 import { mergeProjectSettings } from "~/lib/settings-merge";
-import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock } from "lucide-react";
-import { useState } from "react";
+import {
+  normalizeCustomDomainInput,
+  verifyCustomDomainDns,
+  getCustomDomainCnameTarget,
+  findProjectByVerifiedCustomDomain,
+} from "~/lib/custom-domain.server";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Globe, AlertCircle, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const PERSONAS = [
   {
@@ -90,7 +96,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     prisma.userAddon.findMany({ where: { userId: access.userId, status: "active" }, select: { type: true, status: true } }),
   ]);
   const canRemoveBranding = hasRemoveBrandingAccess(user?.subscriptionTier, addons);
-  return json({ project: access.project, canRemoveBranding });
+  const cnameTarget = getCustomDomainCnameTarget();
+  return json({ project: access.project, canRemoveBranding, cnameTarget });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -129,6 +136,76 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return redirect("/dashboard");
   }
 
+  if (actionType === "verify_custom_domain") {
+    const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
+    const userId = access.userId;
+    const existingSettings = (access.project.settings as Record<string, any>) || {};
+    const branding = (existingSettings.branding as Record<string, any>) || {};
+    const host =
+      normalizeCustomDomainInput((formData.get("customDomain") as string) || branding.customDomain || "");
+
+    if (!host) {
+      return json({
+        success: false,
+        verify: true,
+        error: "Enter a hostname first (e.g. chat.example.com), then save or verify.",
+      }, { status: 400 });
+    }
+
+    const taken = await findProjectByVerifiedCustomDomain(host);
+    if (taken && taken.id !== access.project.id) {
+      const settings = mergeProjectSettings(existingSettings, {
+        branding: {
+          customDomain: host,
+          customDomainStatus: "failed",
+          customDomainError: "This domain is already verified on another project.",
+          customDomainVerifiedAt: null,
+        },
+      });
+      await prisma.project.update({
+        where: { id: access.project.id },
+        data: { settings: settings as any },
+      });
+      return json({
+        success: false,
+        verify: true,
+        error: "This domain is already verified on another project.",
+        customDomainStatus: "failed",
+      }, { status: 409 });
+    }
+
+    const result = await verifyCustomDomainDns(host);
+    const settings = mergeProjectSettings(existingSettings, {
+      branding: {
+        customDomain: host,
+        customDomainStatus: result.ok ? "verified" : "failed",
+        customDomainError: result.ok ? null : result.error,
+        customDomainVerifiedAt: result.ok ? new Date().toISOString() : null,
+      },
+    });
+    await prisma.project.update({
+      where: { id: access.project.id },
+      data: { settings: settings as any },
+    });
+    recordAudit({
+      userId,
+      action: result.ok ? "project.custom_domain.verify" : "project.custom_domain.verify_failed",
+      projectId: params.projectId,
+      request,
+      metadata: { host, ok: result.ok },
+    });
+    return json({
+      success: result.ok,
+      verify: true,
+      message: result.ok
+        ? `${host} is verified. Visitors to that hostname will open this chatbot.`
+        : undefined,
+      error: result.ok ? undefined : result.error,
+      customDomainStatus: result.ok ? "verified" : "failed",
+      cnameTarget: getCustomDomainCnameTarget(),
+    });
+  }
+
   const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
   const userId = access.userId;
 
@@ -141,7 +218,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const greetingMessage = formData.get("greetingMessage") as string;
   const suggestionsString = formData.get("suggestions") as string;
   const webhookUrl = formData.get("webhookUrl") as string;
-  const customDomain = formData.get("customDomain") as string;
+  const customDomainRaw = (formData.get("customDomain") as string) || "";
+  const customDomain = normalizeCustomDomainInput(customDomainRaw);
   const allowedDomainsString = formData.get("allowedDomains") as string;
   let removeBranding = formData.get("removeBranding") === "true";
   if (removeBranding) {
@@ -204,6 +282,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // notifications, and anything other flows store under settings) survive the
   // save — otherwise saving Bot Settings wipes them. See mergeProjectSettings.
   const existingSettings = (access.project.settings as Record<string, any>) || {};
+  const prevDomain = normalizeCustomDomainInput(
+    ((existingSettings.branding as Record<string, any>) || {}).customDomain || ""
+  );
+  const domainChanged = prevDomain !== customDomain;
+  // Changing the hostname invalidates prior DNS verification.
+  const brandingDomainPatch = domainChanged
+    ? {
+        customDomain,
+        customDomainStatus: customDomain ? "unverified" : null,
+        customDomainError: null,
+        customDomainVerifiedAt: null,
+      }
+    : { customDomain };
 
   const settings = mergeProjectSettings(existingSettings, {
     systemPrompt,
@@ -227,7 +318,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       position,
       font,
       removeBranding,
-      customDomain,
+      ...brandingDomainPatch,
       leadPolicy,
     },
   });
@@ -255,10 +346,12 @@ interface LeadField {
 }
 
 export default function ProjectSettings() {
-  const { project, canRemoveBranding } = useLoaderData<typeof loader>();
+  const { project, canRemoveBranding, cnameTarget } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSaving = navigation.state === "submitting";
+  const verifyFetcher = useFetcher<typeof action>();
+  const revalidator = useRevalidator();
   
   const currentSettings = (project.settings as any) || {};
   const [leadFields, setLeadFields] = useState<LeadField[]>(
@@ -271,7 +364,22 @@ export default function ProjectSettings() {
   const [slackTestError, setSlackTestError] = useState<string>('');
   const branding = currentSettings.branding || {};
   const removeBranding = branding.removeBranding || false;
-  const customDomain = branding.customDomain || "";
+  const [customDomainInput, setCustomDomainInput] = useState<string>(branding.customDomain || "");
+  const customDomainStatus =
+    (verifyFetcher.data as any)?.customDomainStatus ||
+    branding.customDomainStatus ||
+    (branding.customDomain ? "unverified" : null);
+  const customDomainError =
+    (verifyFetcher.data as any)?.error ||
+    branding.customDomainError ||
+    null;
+  const isVerifying = verifyFetcher.state !== "idle";
+
+  useEffect(() => {
+    if (verifyFetcher.state === "idle" && verifyFetcher.data) {
+      revalidator.revalidate();
+    }
+  }, [verifyFetcher.state, verifyFetcher.data, revalidator]);
 
   const [systemPrompt, setSystemPrompt] = useState<string>(
     currentSettings.systemPrompt || "You are a helpful customer support assistant for a website. Use the provided context to answer questions accurately and concisely."
@@ -679,17 +787,76 @@ export default function ProjectSettings() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-bold mb-2 text-brand-dark">Custom CNAME Domain</label>
-                  <input
-                    type="text"
-                    name="customDomain"
-                    placeholder="chat.yourdomain.com"
-                    defaultValue={customDomain}
-                    className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
-                  />
-                  <p className="mt-2 text-xs text-zinc-400 font-medium leading-relaxed">
-                    Point your CNAME record to <code className="bg-zinc-100 px-1 py-0.5 rounded">custom.sitegist.co{/* pragma: allowlist secret */}</code> to enable custom domain hosting.
-                  </p>
+                  <label className="block text-sm font-bold mb-2 text-brand-dark flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-primary" /> Custom Domain
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      name="customDomain"
+                      placeholder="chat.yourdomain.com"
+                      value={customDomainInput}
+                      onChange={(e) => setCustomDomainInput(e.target.value)}
+                      className="flex-1 px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      disabled={isVerifying || !customDomainInput.trim()}
+                      onClick={() => {
+                        const fd = new FormData();
+                        fd.set("_action", "verify_custom_domain");
+                        fd.set("customDomain", customDomainInput);
+                        verifyFetcher.submit(fd, { method: "post" });
+                      }}
+                      className="inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl bg-zinc-900 text-white text-sm font-bold hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    >
+                      {isVerifying ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Verify DNS
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {customDomainStatus === "verified" && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full bg-green-50 text-green-700">
+                        <Check className="w-3 h-3" /> Verified
+                      </span>
+                    )}
+                    {customDomainStatus === "unverified" && customDomainInput.trim() && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full bg-amber-50 text-amber-700">
+                        Unverified
+                      </span>
+                    )}
+                    {customDomainStatus === "failed" && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full bg-red-50 text-red-700">
+                        <AlertCircle className="w-3 h-3" /> Failed
+                      </span>
+                    )}
+                  </div>
+                  {customDomainError && customDomainStatus === "failed" && (
+                    <p className="mt-2 text-xs text-red-600 font-medium leading-relaxed">{customDomainError}</p>
+                  )}
+                  {(verifyFetcher.data as any)?.success && (verifyFetcher.data as any)?.verify && (
+                    <p className="mt-2 text-xs text-green-700 font-medium leading-relaxed">
+                      {(verifyFetcher.data as any).message}
+                    </p>
+                  )}
+                  <div className="mt-3 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-2">
+                    <p className="text-xs text-zinc-600 font-medium leading-relaxed">
+                      1. Create a <strong>CNAME</strong> record for your hostname pointing to{" "}
+                      <code className="bg-white px-1.5 py-0.5 rounded border border-zinc-200 font-mono text-[11px]">
+                        {cnameTarget}
+                      </code>
+                    </p>
+                    <p className="text-xs text-zinc-600 font-medium leading-relaxed">
+                      2. Click <strong>Verify DNS</strong> (propagation can take a few minutes). Save settings after changing the hostname.
+                    </p>
+                    <p className="text-xs text-zinc-400 font-medium leading-relaxed">
+                      Once verified, visitors to that hostname are sent to this chatbot&apos;s embed page. TLS for arbitrary customer domains may require platform-side domain attachment — contact support if verify succeeds but HTTPS fails.
+                    </p>
+                  </div>
                 </div>
               </div>
             </section>
@@ -1113,7 +1280,9 @@ export default function ProjectSettings() {
             </section>
 
             <div className="flex items-center justify-between gap-4 pt-4">
-              {actionData?.success && <p className="text-green-500 font-bold">{actionData.message}</p>}
+              {actionData && "success" in actionData && actionData.success && "message" in actionData && actionData.message && (
+                <p className="text-green-500 font-bold">{actionData.message}</p>
+              )}
               <div className="flex-1" />
               <button 
                 type="submit" 

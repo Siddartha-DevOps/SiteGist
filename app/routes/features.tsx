@@ -150,7 +150,7 @@ export default function Features() {
                    "How do I set up my custom domain?"
                  </div>
                  <div className="bg-brand-accent/5 p-4 rounded-2xl rounded-tr-none ml-12 text-sm font-medium text-brand-dark border border-brand-accent/10">
-                   "You can set up a custom domain in your Dashboard under 'Settings &gt; Widget'. Just add your CNAME record!"
+                   "You can set a custom domain in Dashboard → Bot Settings, add a CNAME to our target, then click Verify DNS."
                  </div>
                  <div className="bg-brand-online/10 p-3 rounded-xl text-[11px] font-bold text-brand-online text-center border border-brand-online/20">
                    System improved the confidence score for this answer.
