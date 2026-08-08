@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, Link, useFetcher } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download } from "lucide-react";
+import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download, MessageSquareText } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useRef, useState } from "react";
 import { createChatSocket } from "~/lib/partykit.client";
@@ -14,7 +14,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     where: { id: params.sessionId },
     include: {
       messages: { orderBy: { createdAt: "asc" } },
-      project: { select: { name: true, userId: true } },
+      project: { select: { id: true, name: true, userId: true } },
       tags: { orderBy: { createdAt: "asc" } },
     },
   });
@@ -28,7 +28,19 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     data: { isRead: true },
   });
 
-  return json({ session });
+  let cannedResponses: { id: string; title: string; body: string }[] = [];
+  try {
+    cannedResponses = await prisma.cannedResponse.findMany({
+      where: { projectId: session.project.id },
+      orderBy: { title: "asc" },
+      select: { id: true, title: true, body: true },
+    });
+  } catch (e) {
+    // Table may not exist until migration/schema-sync runs — inbox still works.
+    console.warn("[Inbox] cannedResponse lookup failed:", (e as any)?.message || e);
+  }
+
+  return json({ session, cannedResponses });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -143,10 +155,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function SessionDetail() {
-  const { session } = useLoaderData<typeof loader>();
+  const { session, cannedResponses } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const formRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
   
   const fetcher = useFetcher();
   const replyFetcher = useFetcher();
@@ -157,6 +170,20 @@ export default function SessionDetail() {
   const [localMessages, setLocalMessages] = useState<any[]>(session.messages);
   const [showTagInput, setShowTagInput] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [showCanned, setShowCanned] = useState(false);
+
+  const insertCanned = (body: string) => {
+    const el = replyTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const next = el.value.slice(0, start) + body + el.value.slice(end);
+    el.value = next;
+    const caret = start + body.length;
+    el.focus();
+    el.setSelectionRange(caret, caret);
+    setShowCanned(false);
+  };
 
   useEffect(() => {
     setLocalMessages(session.messages);
@@ -429,8 +456,54 @@ export default function SessionDetail() {
       <div className="p-6 bg-white border-t border-zinc-50">
         {session.mode === 'human' ? (
           <div>
+            <div className="relative mb-3">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCanned((v) => !v)}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-primary hover:bg-primary/5 px-2.5 py-1.5 rounded-lg transition-colors"
+                >
+                  <MessageSquareText className="w-3.5 h-3.5" />
+                  Canned replies
+                  {cannedResponses.length > 0 && (
+                    <span className="text-zinc-400 normal-case tracking-normal font-bold">({cannedResponses.length})</span>
+                  )}
+                </button>
+                <Link
+                  to={`/dashboard/projects/${session.project.id}/canned-responses`}
+                  className="text-[10px] font-bold text-zinc-400 hover:text-primary uppercase tracking-wider"
+                >
+                  Manage →
+                </Link>
+              </div>
+              {showCanned && (
+                <div className="mb-3 max-h-48 overflow-y-auto rounded-2xl border border-zinc-100 bg-zinc-50 p-2 space-y-1">
+                  {cannedResponses.length === 0 ? (
+                    <p className="text-xs text-zinc-500 px-2 py-3">
+                      No canned replies yet.{" "}
+                      <Link to={`/dashboard/projects/${session.project.id}/canned-responses`} className="text-primary font-bold hover:underline">
+                        Create one
+                      </Link>
+                    </p>
+                  ) : (
+                    cannedResponses.map((cr) => (
+                      <button
+                        key={cr.id}
+                        type="button"
+                        onClick={() => insertCanned(cr.body)}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-white border border-transparent hover:border-zinc-100 transition-all"
+                      >
+                        <p className="text-xs font-black text-brand-dark">{cr.title}</p>
+                        <p className="text-[11px] text-zinc-500 line-clamp-2 mt-0.5">{cr.body}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             <form ref={formRef as any} onSubmit={handleAgentReplySubmit} className="relative">
               <textarea 
+                ref={replyTextareaRef}
                 name="content" 
                 placeholder="Type your live response to the visitor..." 
                 rows={3}

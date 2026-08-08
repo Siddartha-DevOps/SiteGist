@@ -87,6 +87,7 @@ model Project {
   knowledgeQAs         KnowledgeQA[]
   members              ProjectMember[]
   actions              ProjectAction[]
+  cannedResponses      CannedResponse[]
 }
 
 model ProjectAction {
@@ -255,6 +256,19 @@ model KnowledgeQA {
   updatedAt    DateTime @updatedAt
 
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+/// Quick-reply templates for human agents in the inbox.
+model CannedResponse {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
 }
 
 enum ProjectStatus {
