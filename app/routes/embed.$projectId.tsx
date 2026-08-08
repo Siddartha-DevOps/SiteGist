@@ -121,6 +121,27 @@ export default function EmbedChat() {
     }
   }, [primaryColor]);
 
+  useEffect(() => {
+    const proactive = branding.proactive || {};
+    const delayMs =
+      typeof proactive.delayMs === "number" && Number.isFinite(proactive.delayMs)
+        ? Math.max(0, Math.round(proactive.delayMs))
+        : 5000;
+    const message =
+      typeof proactive.message === "string" && proactive.message.trim()
+        ? proactive.message.trim()
+        : "Need help?";
+    window.parent.postMessage(
+      {
+        type: "sitegist:proactive", // pragma: allowlist secret
+        enabled: !!proactive.enabled,
+        delayMs,
+        message,
+      },
+      "*"
+    );
+  }, [branding.proactive]);
+
   const handleFeedback = async (messageId: string, val: number) => {
     if (!sessionId) return; // feedback is scoped to the visitor's session
     setFeedbackLoading(messageId);
