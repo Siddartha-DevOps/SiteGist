@@ -9,19 +9,44 @@ import { Layout, AlertCircle } from "lucide-react";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
+  const user = await getUser(request);
+  const email = user?.email?.trim().toLowerCase() || "";
   try {
-    const projects = await prisma.project.findMany({
-      where: { userId },
-      include: { 
-        _count: { 
-          select: { 
-            knowledgeSources: true, 
+    const projectsRaw = await prisma.project.findMany({
+      where: {
+        OR: [
+          { userId },
+          ...(email ? [{ members: { some: { email } } }] : []),
+        ],
+      },
+      include: {
+        members: email
+          ? { where: { email }, select: { role: true }, take: 1 }
+          : { take: 0 },
+        _count: {
+          select: {
+            knowledgeSources: true,
             sessions: true,
-            leads: true
-          } 
-        } 
+            leads: true,
+          },
+        },
       },
       orderBy: { updatedAt: "desc" },
+    });
+
+    const projects = projectsRaw.map((p) => {
+      const isOwner = p.userId === userId;
+      const accessRole = isOwner
+        ? "OWNER"
+        : p.members[0]?.role === "ADMIN"
+          ? "ADMIN"
+          : "VIEWER";
+      const { members: _m, ...rest } = p;
+      return {
+        ...rest,
+        isShared: !isOwner,
+        accessRole,
+      };
     });
 
     const projectIds = projects.map(p => p.id);

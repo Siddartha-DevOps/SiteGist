@@ -414,6 +414,11 @@ export function DashboardIndexPage({ projects, isCreating, analyticsData, hasTre
                     <div className="flex items-center gap-2 flex-wrap">
                       <div className="w-2 h-2 bg-brand-online rounded-full"></div>
                       <span className="text-[11px] font-bold text-brand-gray uppercase tracking-widest">Active</span>
+                      {project.isShared && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 uppercase tracking-widest">
+                          Shared · {project.accessRole === "ADMIN" ? "Admin" : "Viewer"}
+                        </span>
+                      )}
                       {project._count.knowledgeSources > 0 ? (
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-100 uppercase tracking-widest">
                           Trained

@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData, Link, useFetcher, useSearchParams } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import React, { useState } from "react";
 import {
   ChevronLeft, Search, Star, Archive, Trash2, Download,
@@ -12,13 +12,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-
-  // Verify project ownership
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-  if (!project) return redirect("/dashboard");
+  await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
 
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
@@ -129,11 +123,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-  if (!project) return redirect("/dashboard");
+  const access = await requireProjectAccess(request, params.projectId);
+  const project = access.project;
 
   const url = new URL(request.url);
   const activeFilter = url.searchParams.get("filter") || "open";

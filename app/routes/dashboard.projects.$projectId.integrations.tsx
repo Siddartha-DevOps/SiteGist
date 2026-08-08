@@ -1,19 +1,16 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData, Link, useRevalidator, useFetcher } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { recordAudit } from "~/lib/audit.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { ChevronLeft, Share2, Database, Github, Globe, FileText, Check, AlertCircle, ExternalLink, MessageSquare, MessageCircle, Headphones, BookText, Loader2, RefreshCw } from "lucide-react";
 import { useState, useEffect } from "react";
 
 export async function action({ params, request }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-  if (!project) return json({ error: "Not found" }, { status: 404 });
+  const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
+  const project = access.project;
+  const userId = access.userId;
 
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
@@ -196,13 +193,13 @@ export async function action({ params, request }: ActionFunctionArgs) {
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
+  const access = await requireProjectAccess(request, params.projectId);
   const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
+    where: { id: access.project.id },
     include: { integrations: true },
   });
 
-  if (!project) return redirect("/dashboard");
+  if (!project) throw json({ error: "Project not found" }, { status: 404 });
 
   return json({ project });
 }

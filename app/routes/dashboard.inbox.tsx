@@ -2,20 +2,20 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, Link, useSearchParams, useFetcher } from "@remix-run/react";
 import React from "react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { getAccessibleProjectScope, requireProjectAccess } from "~/lib/project-access.server";
 import { MessageSquare, ChevronRight, User, Bot, Calendar, Search, Star, Archive, AlertTriangle, Tag, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export async function action({ request }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
   const formData = await request.formData();
   const _action = formData.get("_action") as string;
 
   // CSV Export — returns file download (respects the active filter)
   if (_action === "export_csv") {
+    const scope = await getAccessibleProjectScope(request);
     const filter = (formData.get("filter") as string) || "open";
-    const baseWhere: any = { project: { userId } };
+    const baseWhere: any = { project: scope.projectWhere };
     if (filter === "open")      { baseWhere.isArchived = false; baseWhere.status = "active"; }
     if (filter === "resolved")  { baseWhere.isArchived = false; baseWhere.status = "resolved"; }
     if (filter === "starred")   { baseWhere.isStarred = true; baseWhere.isArchived = false; }
@@ -57,11 +57,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const sessionId = formData.get("sessionId") as string;
 
-  // Verify this session belongs to this user
+  // Verify this session belongs to an accessible project, then require write role
+  const scope = await getAccessibleProjectScope(request);
   const session = await prisma.chatSession.findFirst({
-    where: { id: sessionId, project: { userId } },
+    where: { id: sessionId, project: scope.projectWhere },
+    select: { id: true, projectId: true, isStarred: true, isArchived: true },
   });
   if (!session) return json({ error: "Not found" }, { status: 404 });
+  await requireProjectAccess(request, session.projectId, { minRole: "ADMIN" });
 
   if (_action === "toggle_star") {
     await prisma.chatSession.update({
@@ -83,11 +86,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
+  const scope = await getAccessibleProjectScope(request);
   const url = new URL(request.url);
   const activeFilter = url.searchParams.get("filter") || "open";
 
-  const baseWhere: any = { project: { userId } };
+  const baseWhere: any = { project: scope.projectWhere };
 
   if (activeFilter === "open")      { baseWhere.isArchived = false; baseWhere.status = "active"; }
   if (activeFilter === "resolved")  { baseWhere.isArchived = false; baseWhere.status = "resolved"; }
@@ -109,12 +112,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Count unread for badge
   const unreadCount = await prisma.chatSession.count({
-    where: { project: { userId }, isRead: false, isArchived: false },
+    where: { project: scope.projectWhere, isRead: false, isArchived: false },
   });
 
   // Count active escalated sessions for badge
   const escalatedCount = await prisma.chatSession.count({
-    where: { project: { userId }, mode: "human", status: "active", isArchived: false },
+    where: { project: scope.projectWhere, mode: "human", status: "active", isArchived: false },
   });
 
   return json({ sessions, activeFilter, unreadCount, escalatedCount });
