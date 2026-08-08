@@ -1,13 +1,125 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
+import { useLoaderData, Link, useSearchParams, useFetcher } from "@remix-run/react";
+import { useEffect, useState } from "react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
-import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar, Zap } from "lucide-react";
+import {
+  createOrGetKnowledgeQA,
+  clearUnansweredForQuestion,
+  findPrecedingUserQuestion,
+} from "~/backend/knowledge-qa.server";
+import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar, Zap, Plus, Check, Loader2, X } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar
 } from 'recharts';
+
+export async function action({ params, request }: ActionFunctionArgs) {
+  const userId = await requireUserId(request);
+  const project = await prisma.project.findFirst({
+    where: { id: params.projectId, userId },
+    select: { id: true },
+  });
+  if (!project) return json({ error: "Project not found" }, { status: 404 });
+
+  const formData = await request.formData();
+  const intent = String(formData.get("_action") || "");
+
+  if (intent === "promote_unanswered") {
+    const unansweredId = String(formData.get("unansweredId") || "");
+    const question = String(formData.get("question") || "");
+    const answer = String(formData.get("answer") || "");
+
+    const row = unansweredId
+      ? await prisma.unansweredQuestion.findFirst({
+          where: { id: unansweredId, projectId: project.id },
+        })
+      : null;
+    if (unansweredId && !row) {
+      return json({ error: "Unanswered question not found." }, { status: 404 });
+    }
+
+    const result = await createOrGetKnowledgeQA({
+      projectId: project.id,
+      question: question || row?.question || "",
+      answer,
+    });
+    if (!result.ok) return json({ error: result.error }, { status: result.status });
+
+    await clearUnansweredForQuestion(project.id, question || row?.question || "");
+    if (row) {
+      await prisma.unansweredQuestion.deleteMany({ where: { id: row.id, projectId: project.id } });
+    }
+
+    return json({
+      success: true,
+      qaId: result.qaId,
+      created: result.created,
+      message: result.created
+        ? "Q&A saved — the bot will use this answer next time."
+        : "Q&A updated — existing override refreshed.",
+    });
+  }
+
+  if (intent === "promote_feedback") {
+    const messageId = String(formData.get("messageId") || "");
+    const question = String(formData.get("question") || "");
+    const answer = String(formData.get("answer") || "");
+
+    const msg = await prisma.message.findFirst({
+      where: {
+        id: messageId,
+        feedback: -1,
+        session: { projectId: project.id },
+      },
+      select: { id: true, sessionId: true, createdAt: true, content: true, role: true },
+    });
+    if (!msg) return json({ error: "Feedback message not found." }, { status: 404 });
+
+    let q = question.trim();
+    if (!q) {
+      q =
+        (await findPrecedingUserQuestion(msg.sessionId, msg.createdAt)) ||
+        (msg.role === "user" ? msg.content : "");
+    }
+    if (!q) {
+      return json(
+        { error: "Could not find the visitor question for this feedback." },
+        { status: 400 }
+      );
+    }
+
+    const result = await createOrGetKnowledgeQA({
+      projectId: project.id,
+      question: q,
+      answer,
+    });
+    if (!result.ok) return json({ error: result.error }, { status: result.status });
+
+    await clearUnansweredForQuestion(project.id, q);
+
+    return json({
+      success: true,
+      qaId: result.qaId,
+      created: result.created,
+      message: result.created
+        ? "Q&A saved from thumbs-down — the bot will use this answer next time."
+        : "Q&A updated from thumbs-down feedback.",
+    });
+  }
+
+  if (intent === "dismiss_unanswered") {
+    const unansweredId = String(formData.get("unansweredId") || "");
+    if (!unansweredId) return json({ error: "Missing id" }, { status: 400 });
+    await prisma.unansweredQuestion.deleteMany({
+      where: { id: unansweredId, projectId: project.id },
+    });
+    return json({ success: true, message: "Dismissed." });
+  }
+
+  return json({ error: "Unknown action" }, { status: 400 });
+}
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -22,7 +134,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     rawRange === 30 ? 30 : rawRange === 90 ? 90 : rawRange === 365 ? 365 : 7;
 
   // Get messages with feedback
-  const messagesWithFeedback = await prisma.message.findMany({
+  const messagesWithFeedbackRaw = await prisma.message.findMany({
     where: { 
       session: { projectId: params.projectId },
       feedback: { not: null }
@@ -30,6 +142,20 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     orderBy: { createdAt: "desc" },
     take: 50,
   });
+
+  const messagesWithFeedback = await Promise.all(
+    messagesWithFeedbackRaw.map(async (msg) => {
+      let userQuestion: string | null = null;
+      if (msg.feedback === -1) {
+        if (msg.role === "assistant") {
+          userQuestion = await findPrecedingUserQuestion(msg.sessionId, msg.createdAt);
+        } else if (msg.role === "user") {
+          userQuestion = msg.content;
+        }
+      }
+      return { ...msg, userQuestion };
+    })
+  );
 
   const thumbsUpCount = await prisma.message.count({
     where: { session: { projectId: params.projectId }, feedback: 1 }
@@ -244,6 +370,24 @@ export default function ProjectInsights() {
   } = useLoaderData<typeof loader>();
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const promoteFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const [editingUnansweredId, setEditingUnansweredId] = useState<string | null>(null);
+  const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (promoteFetcher.state === "idle" && promoteFetcher.data) {
+      if (promoteFetcher.data.success) {
+        setBanner(promoteFetcher.data.message || "Saved.");
+        setEditingUnansweredId(null);
+        setEditingFeedbackId(null);
+      } else if (promoteFetcher.data.error) {
+        setBanner(promoteFetcher.data.error);
+      }
+    }
+  }, [promoteFetcher.state, promoteFetcher.data]);
+
+  const isPromoting = promoteFetcher.state !== "idle";
 
   return (
     <div className="max-w-6xl">
@@ -254,6 +398,14 @@ export default function ProjectInsights() {
       <div className="mb-12">
         <h1 className="text-4xl font-black mb-2 tracking-tight">Intelligence & ROI</h1>
         <p className="text-text-muted font-medium">Track your AI's effectiveness and the leads it's generating for your business.</p>
+        {banner && (
+          <div className="mt-4 flex items-start justify-between gap-3 rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm font-medium text-brand-dark">
+            <span>{banner}</span>
+            <button type="button" onClick={() => setBanner(null)} className="text-zinc-400 hover:text-zinc-600" aria-label="Dismiss">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* High Level Stats */}
@@ -509,7 +661,57 @@ export default function ProjectInsights() {
                   )}
                   <span className="text-[10px] text-zinc-400 font-bold uppercase">{new Date(msg.createdAt).toLocaleDateString()}</span>
                 </div>
-                <p className="text-sm text-brand-dark leading-relaxed italic border-l-2 border-zinc-100 pl-4 mb-2">"{msg.content}"</p>
+                {msg.feedback === -1 && msg.userQuestion && (
+                  <p className="text-xs font-bold text-zinc-500 mb-2">Visitor asked: <span className="text-brand-dark italic font-medium">"{msg.userQuestion}"</span></p>
+                )}
+                <p className="text-sm text-brand-dark leading-relaxed italic border-l-2 border-zinc-100 pl-4 mb-4">"{msg.content}"</p>
+
+                {msg.feedback === -1 && (
+                  editingFeedbackId === msg.id ? (
+                    <promoteFetcher.Form method="post" className="space-y-3 mt-2">
+                      <input type="hidden" name="_action" value="promote_feedback" />
+                      <input type="hidden" name="messageId" value={msg.id} />
+                      <input type="hidden" name="question" value={msg.userQuestion || ""} />
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400">Correct answer</label>
+                      <textarea
+                        name="answer"
+                        required
+                        rows={4}
+                        defaultValue={msg.role === "assistant" ? msg.content : ""}
+                        placeholder="Write the answer the bot should give next time…"
+                        className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={isPromoting || !msg.userQuestion}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary text-white text-xs font-black uppercase tracking-wider disabled:opacity-50"
+                        >
+                          {isPromoting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          Save as Q&amp;A
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingFeedbackId(null)}
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-zinc-500 hover:bg-zinc-50"
+                        >
+                          <X className="w-3.5 h-3.5" /> Cancel
+                        </button>
+                      </div>
+                      {!msg.userQuestion && (
+                        <p className="text-[11px] text-amber-600 font-medium">Couldn’t find the visitor’s question for this reply.</p>
+                      )}
+                    </promoteFetcher.Form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingFeedbackId(msg.id); setEditingUnansweredId(null); }}
+                      className="text-xs font-black text-primary hover:underline inline-flex items-center gap-1.5 uppercase tracking-wider"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Fix with Q&amp;A override
+                    </button>
+                  )
+                )}
               </div>
             ))}
             {messagesWithFeedback.length === 0 && (
@@ -530,10 +732,61 @@ export default function ProjectInsights() {
             {unanswered.map((u: any) => (
               <div key={u.id} className="bg-white p-6 rounded-[24px] border border-zinc-100 shadow-sm">
                  <p className="text-sm font-bold text-brand-dark mb-2">User asked:</p>
-                 <p className="text-sm text-zinc-600 leading-relaxed bg-zinc-50 p-4 rounded-xl border border-zinc-100 mb-6 italic">"{u.question}"</p>
-                 <Link to={`/dashboard/projects/${project.id}/train`} className="text-xs font-black text-primary hover:underline flex items-center gap-1.5 uppercase tracking-wider">
-                   Fix by providing answer
-                 </Link>
+                 <p className="text-sm text-zinc-600 leading-relaxed bg-zinc-50 p-4 rounded-xl border border-zinc-100 mb-4 italic">"{u.question}"</p>
+
+                 {editingUnansweredId === u.id ? (
+                   <promoteFetcher.Form method="post" className="space-y-3">
+                     <input type="hidden" name="_action" value="promote_unanswered" />
+                     <input type="hidden" name="unansweredId" value={u.id} />
+                     <input type="hidden" name="question" value={u.question} />
+                     <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400">Answer</label>
+                     <textarea
+                       name="answer"
+                       required
+                       rows={4}
+                       placeholder="Write the answer the bot should give…"
+                       className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                       autoFocus
+                     />
+                     <div className="flex flex-wrap items-center gap-2">
+                       <button
+                         type="submit"
+                         disabled={isPromoting}
+                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary text-white text-xs font-black uppercase tracking-wider disabled:opacity-50"
+                       >
+                         {isPromoting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                         Save as Q&amp;A
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => setEditingUnansweredId(null)}
+                         className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-zinc-500 hover:bg-zinc-50"
+                       >
+                         <X className="w-3.5 h-3.5" /> Cancel
+                       </button>
+                     </div>
+                   </promoteFetcher.Form>
+                 ) : (
+                   <div className="flex flex-wrap items-center gap-3">
+                     <button
+                       type="button"
+                       onClick={() => { setEditingUnansweredId(u.id); setEditingFeedbackId(null); }}
+                       className="text-xs font-black text-primary hover:underline inline-flex items-center gap-1.5 uppercase tracking-wider"
+                     >
+                       <Plus className="w-3.5 h-3.5" /> Add as Q&amp;A
+                     </button>
+                     <promoteFetcher.Form method="post">
+                       <input type="hidden" name="_action" value="dismiss_unanswered" />
+                       <input type="hidden" name="unansweredId" value={u.id} />
+                       <button type="submit" className="text-[11px] font-bold text-zinc-400 hover:text-zinc-600 uppercase tracking-wider">
+                         Dismiss
+                       </button>
+                     </promoteFetcher.Form>
+                     <Link to={`/dashboard/projects/${project.id}/train`} className="text-[11px] font-bold text-zinc-400 hover:text-primary uppercase tracking-wider">
+                       Open Train
+                     </Link>
+                   </div>
+                 )}
               </div>
             ))}
             {unanswered.length === 0 && (
