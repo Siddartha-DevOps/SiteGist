@@ -17,7 +17,7 @@ export default function ApiReference() {
       </h1>
 
       <p className="text-xl text-brand-gray font-medium leading-relaxed mb-10">
-        Send messages to your chatbots, list bots, and read conversations programmatically. REST over HTTPS, JSON in and out.
+        Send messages to your chatbots, list bots, conversations, leads, and knowledge sources programmatically. REST over HTTPS, JSON in and out. All read endpoints are owner-only — the API key must belong to the chatbot owner.
       </p>
 
       <div className="prose prose-brand max-w-none">
@@ -75,7 +75,7 @@ export default function ApiReference() {
 }`} />
 
         <div className="mt-12" />
-        <Endpoint method="GET" path="/chatbots" desc="List the chatbots owned by the API key." />
+        <Endpoint method="GET" path="/chatbots" desc="List the chatbots owned by the API key. Owner-only." />
         <p className="text-sm font-bold text-brand-dark mt-4 mb-2">Response</p>
         <CodeBlock title="200 OK" code={`{
   "data": [
@@ -84,7 +84,7 @@ export default function ApiReference() {
 }`} />
 
         <div className="mt-12" />
-        <Endpoint method="GET" path="/conversations?chatbotId=proj_abc123" desc="List recent conversations (latest 100). chatbotId is optional." />
+        <Endpoint method="GET" path="/conversations?chatbotId=proj_abc123" desc="List recent conversations (latest 100). chatbotId is optional. Owner-only." />
         <p className="text-sm font-bold text-brand-dark mt-4 mb-2">Response</p>
         <CodeBlock title="200 OK" code={`{
   "data": [
@@ -97,6 +97,77 @@ export default function ApiReference() {
       "messageCount": 6,
       "createdAt": "2026-06-20T09:00:00.000Z",
       "updatedAt": "2026-06-20T09:05:00.000Z"
+    }
+  ]
+}`} />
+
+        <div className="mt-12" />
+        <Endpoint method="GET" path="/conversations/:id/messages" desc="List messages for a conversation (oldest first, capped at 500). Owner-only." />
+        <p className="text-sm font-bold text-brand-dark mt-4 mb-2">Example</p>
+        <CodeBlock
+          title="cURL"
+          code={`curl ${BASE_URL}/conversations/sess_xyz/messages \\
+  -H "Authorization: Bearer sk_live_YOUR_KEY"`}
+        />
+        <p className="text-sm font-bold text-brand-dark mt-6 mb-2">Response</p>
+        <CodeBlock title="200 OK" code={`{
+  "data": [
+    {
+      "id": "msg_abc",
+      "role": "user",
+      "content": "What are your pricing plans?",
+      "createdAt": "2026-06-20T09:00:01.000Z"
+    },
+    {
+      "id": "msg_def",
+      "role": "assistant",
+      "content": "Our plans are Free, Pro ($19/mo) and Enterprise…",
+      "createdAt": "2026-06-20T09:00:03.000Z"
+    }
+  ]
+}`} />
+
+        <div className="mt-12" />
+        <Endpoint method="GET" path="/leads?chatbotId=proj_abc123" desc="List leads for a chatbot (latest 100). chatbotId is required. Owner-only." />
+        <p className="text-sm font-bold text-brand-dark mt-4 mb-2">Example</p>
+        <CodeBlock
+          title="cURL"
+          code={`curl "${BASE_URL}/leads?chatbotId=proj_abc123" \\
+  -H "Authorization: Bearer sk_live_YOUR_KEY"`}
+        />
+        <p className="text-sm font-bold text-brand-dark mt-6 mb-2">Response</p>
+        <CodeBlock title="200 OK" code={`{
+  "data": [
+    {
+      "id": "lead_abc",
+      "name": "Jane Doe",
+      "email": "jane@example.com",
+      "phone": "+1-555-0100",
+      "company": "Acme Inc",
+      "status": "new",
+      "createdAt": "2026-06-20T09:10:00.000Z"
+    }
+  ]
+}`} />
+
+        <div className="mt-12" />
+        <Endpoint method="GET" path="/sources?chatbotId=proj_abc123" desc="List knowledge sources for a chatbot (latest 100, no full content). chatbotId is required. Owner-only." />
+        <p className="text-sm font-bold text-brand-dark mt-4 mb-2">Example</p>
+        <CodeBlock
+          title="cURL"
+          code={`curl "${BASE_URL}/sources?chatbotId=proj_abc123" \\
+  -H "Authorization: Bearer sk_live_YOUR_KEY"`}
+        />
+        <p className="text-sm font-bold text-brand-dark mt-6 mb-2">Response</p>
+        <CodeBlock title="200 OK" code={`{
+  "data": [
+    {
+      "id": "src_abc",
+      "type": "web",
+      "source": "https://example.com/docs",
+      "title": "Product docs",
+      "status": "indexed",
+      "lastIndexedAt": "2026-06-18T12:00:00.000Z"
     }
   ]
 }`} />
