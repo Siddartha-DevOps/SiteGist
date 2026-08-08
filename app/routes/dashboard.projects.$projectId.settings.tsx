@@ -12,7 +12,11 @@ import {
   getCustomDomainCnameTarget,
   findProjectByVerifiedCustomDomain,
 } from "~/lib/custom-domain.server";
+<<<<<<< HEAD
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Globe, AlertCircle, RefreshCw, Megaphone } from "lucide-react";
+=======
 import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Globe, AlertCircle, RefreshCw, Clock } from "lucide-react";
+>>>>>>> origin/main
 import { useEffect, useState } from "react";
 
 const COMMON_TIMEZONES = [
@@ -253,6 +257,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const assistantName = formData.get("assistantName") as string;
   const assistantLogo = formData.get("assistantLogo") as string;
   const greetingMessage = formData.get("greetingMessage") as string;
+  const proactiveEnabled = formData.get("proactive_enabled") === "on";
+  const proactiveDelaySecRaw = parseFloat((formData.get("proactive_delaySec") as string) || "5");
+  const proactiveDelaySec = Number.isFinite(proactiveDelaySecRaw) && proactiveDelaySecRaw >= 0
+    ? proactiveDelaySecRaw
+    : 5;
+  const proactiveMessage = ((formData.get("proactive_message") as string) || "").trim() || "Need help?";
+  const proactive = {
+    enabled: proactiveEnabled,
+    delayMs: Math.round(proactiveDelaySec * 1000),
+    message: proactiveMessage,
+  };
   const suggestionsString = formData.get("suggestions") as string;
   const webhookUrl = formData.get("webhookUrl") as string;
   const customDomainRaw = (formData.get("customDomain") as string) || "";
@@ -379,6 +394,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       removeBranding,
       ...brandingDomainPatch,
       leadPolicy,
+      proactive,
     },
   });
 
@@ -793,6 +809,67 @@ export default function ProjectSettings() {
                     <option value="bottom-left">Bottom Left</option>
                   </select>
                 </div>
+              </div>
+            </section>
+
+            {/* Proactive Message */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Megaphone className="text-primary w-5 h-5" /> Proactive Message
+              </h2>
+              <div className="space-y-6">
+                {(() => {
+                  const proactive = branding.proactive || {};
+                  const delaySec =
+                    typeof proactive.delayMs === "number" && Number.isFinite(proactive.delayMs)
+                      ? Math.max(0, proactive.delayMs / 1000)
+                      : 5;
+                  return (
+                    <>
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          name="proactive_enabled"
+                          defaultChecked={!!proactive.enabled}
+                          className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
+                        />
+                        <div>
+                          <span className="block text-sm font-bold">Show a delayed teaser on the widget</span>
+                          <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">
+                            After the delay, visitors see a small message bubble they can click to open chat. Dismissed once per browser.
+                          </span>
+                        </div>
+                      </label>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label htmlFor="proactive_delaySec" className="block text-sm font-bold mb-2">Delay (seconds)</label>
+                          <input
+                            id="proactive_delaySec"
+                            type="number"
+                            name="proactive_delaySec"
+                            min={0}
+                            step={0.5}
+                            defaultValue={delaySec}
+                            className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="proactive_message" className="block text-sm font-bold mb-2">Teaser message</label>
+                          <input
+                            id="proactive_message"
+                            type="text"
+                            name="proactive_message"
+                            defaultValue={proactive.message || "Need help?"}
+                            placeholder="Need help?"
+                            maxLength={120}
+                            className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </section>
 
