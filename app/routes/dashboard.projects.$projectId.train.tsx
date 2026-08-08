@@ -678,6 +678,7 @@ export default function TrainProject() {
   const [searchParams, setSearchParams] = useSearchParams();
   type TrainTab = "web" | "bulk" | "text" | "youtube" | "files" | "qa";
   const tabParam = searchParams.get("tab") as TrainTab | null;
+  const isOnboarding = searchParams.get("onboarding") === "1";
   const validTabs: TrainTab[] = ["web", "bulk", "text", "youtube", "files", "qa"];
   const initialTab: TrainTab = tabParam && validTabs.includes(tabParam) ? tabParam : "web";
   const [activeTab, setActiveTab] = useState<TrainTab>(initialTab);
@@ -779,6 +780,12 @@ export default function TrainProject() {
         <h1 className="text-4xl font-black mb-2">Train Chatbot</h1>
         <p className="text-text-muted">Import content from various sources to teach your AI.</p>
       </div>
+
+      {isOnboarding && (
+        <div className="mb-8 px-5 py-4 rounded-2xl border border-primary/20 bg-primary/5 text-sm font-medium text-brand-dark">
+          We're training on your site — pages will appear below as they finish.
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-100 rounded-2xl w-fit mb-12">
         <button 
