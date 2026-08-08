@@ -12,8 +12,45 @@ import {
   getCustomDomainCnameTarget,
   findProjectByVerifiedCustomDomain,
 } from "~/lib/custom-domain.server";
-import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Globe, AlertCircle, RefreshCw } from "lucide-react";
+import { Save, Settings, Loader2, ChevronLeft, Palette, MessageSquare, Bot, Zap, Users, Check, Trash2, Lock, Globe, AlertCircle, RefreshCw, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
+
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "America/Vancouver",
+  "America/Sao_Paulo",
+  "America/Mexico_City",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Europe/Amsterdam",
+  "Europe/Moscow",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
+  "Australia/Melbourne",
+  "Pacific/Auckland",
+] as const;
+
+const WEEKDAY_LABELS: { value: number; label: string }[] = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+];
 
 const PERSONAS = [
   {
@@ -278,6 +315,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
     routing: { mode: ["off", "round_robin", "first_admin"].includes(routingModeRaw) ? routingModeRaw : "off" },
   };
 
+  // Business hours — when enabled, embed shows Offline outside the configured window.
+  const bhEnabled = formData.get("bh_enabled") === "on";
+  const bhTimezone = ((formData.get("bh_timezone") as string) || "UTC").trim() || "UTC";
+  const bhDays = WEEKDAY_LABELS
+    .map((d) => d.value)
+    .filter((d) => formData.get(`bh_day_${d}`) === "on");
+  const bhStartRaw = ((formData.get("bh_startTime") as string) || "09:00").trim();
+  const bhEndRaw = ((formData.get("bh_endTime") as string) || "17:00").trim();
+  const hhmm = /^\d{2}:\d{2}$/;
+  const bhStartTime = hhmm.test(bhStartRaw) ? bhStartRaw : "09:00";
+  const bhEndTime = hhmm.test(bhEndRaw) ? bhEndRaw : "17:00";
+  const bhOfflineMessage = ((formData.get("bh_offlineMessage") as string) || "").trim();
+  const businessHours = {
+    enabled: bhEnabled,
+    timezone: bhTimezone,
+    days: bhDays.length > 0 ? bhDays : [1, 2, 3, 4, 5],
+    startTime: bhStartTime,
+    endTime: bhEndTime,
+    offlineMessage: bhOfflineMessage || undefined,
+  };
+
   // Merge over existing settings so keys this form doesn't manage (e.g.
   // notifications, and anything other flows store under settings) survive the
   // save — otherwise saving Bot Settings wipes them. See mergeProjectSettings.
@@ -308,6 +366,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     slackWebhookUrl,
     webhookEvents,
     escalation,
+    businessHours,
     branding: {
       primaryColor,
       assistantName,
@@ -1076,6 +1135,111 @@ export default function ProjectSettings() {
                     Comma-separated list of domains allowed to embed this chatbot. Example: mysite.com, app.mysite.com — leave blank to allow all domains.
                   </p>
                 </div>
+              </div>
+            </section>
+
+
+            {/* Business Hours */}
+            <section className="bg-white p-8 rounded-[32px] border border-zinc-100 shadow-sm">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+                <Clock className="text-primary w-5 h-5" /> Business Hours
+              </h2>
+              <div className="space-y-6">
+                {(() => {
+                  const bh = currentSettings.businessHours || {};
+                  const enabledDays: number[] = Array.isArray(bh.days) ? bh.days : [1, 2, 3, 4, 5];
+                  return (
+                    <>
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          name="bh_enabled"
+                          defaultChecked={!!bh.enabled}
+                          className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
+                        />
+                        <div>
+                          <span className="block text-sm font-bold">Enable business hours</span>
+                          <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">
+                            When enabled, the widget shows Offline and disables chat outside the schedule below.
+                          </span>
+                        </div>
+                      </label>
+
+                      <div>
+                        <label htmlFor="bh_timezone" className="block text-sm font-bold mb-2">Timezone</label>
+                        <select
+                          id="bh_timezone"
+                          name="bh_timezone"
+                          defaultValue={bh.timezone || "America/New_York"}
+                          className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all font-sans"
+                        >
+                          {bh.timezone && !(COMMON_TIMEZONES as readonly string[]).includes(bh.timezone) && (
+                            <option value={bh.timezone}>{String(bh.timezone).replace(/_/g, " ")}</option>
+                          )}
+                          {COMMON_TIMEZONES.map((tz) => (
+                            <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold mb-2">Active days</label>
+                        <div className="flex flex-wrap gap-2">
+                          {WEEKDAY_LABELS.map((d) => (
+                            <label
+                              key={d.value}
+                              className="inline-flex items-center gap-2 px-3 py-2 bg-zinc-50 border border-zinc-100 rounded-xl text-sm font-semibold cursor-pointer select-none"
+                            >
+                              <input
+                                type="checkbox"
+                                name={`bh_day_${d.value}`}
+                                defaultChecked={enabledDays.includes(d.value)}
+                                className="w-4 h-4 rounded border-zinc-300 text-primary focus:ring-primary/10 cursor-pointer"
+                              />
+                              {d.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label htmlFor="bh_startTime" className="block text-sm font-bold mb-2">Start time</label>
+                          <input
+                            id="bh_startTime"
+                            type="time"
+                            name="bh_startTime"
+                            defaultValue={bh.startTime || "09:00"}
+                            className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="bh_endTime" className="block text-sm font-bold mb-2">End time</label>
+                          <input
+                            id="bh_endTime"
+                            type="time"
+                            name="bh_endTime"
+                            defaultValue={bh.endTime || "17:00"}
+                            className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label htmlFor="bh_offlineMessage" className="block text-sm font-bold mb-2">Offline message</label>
+                        <input
+                          id="bh_offlineMessage"
+                          type="text"
+                          name="bh_offlineMessage"
+                          defaultValue={bh.offlineMessage || ""}
+                          placeholder="We're currently outside business hours. Please check back soon."
+                          className="w-full px-5 py-4 bg-zinc-50 border border-zinc-100 rounded-2xl focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                        />
+                        <p className="mt-2 text-xs text-zinc-400">Shown in the widget when visitors open chat outside your hours.</p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </section>
 
