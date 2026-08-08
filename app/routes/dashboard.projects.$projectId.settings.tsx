@@ -1,10 +1,10 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData, Link, useFetcher, useRevalidator } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { hasRemoveBrandingAccess } from "~/lib/plans";
 import { recordAudit } from "~/lib/audit.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { mergeProjectSettings } from "~/lib/settings-merge";
 import {
   normalizeCustomDomainInput,
@@ -90,38 +90,22 @@ const LEAD_TEMPLATES: { id: string; label: string; description: string; fields: 
 ];
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
-  const [project, user, addons] = await Promise.all([
-    prisma.project.findFirst({ where: { id: params.projectId, userId } }),
-    prisma.user.findUnique({ where: { id: userId }, select: { subscriptionTier: true } }),
-    prisma.userAddon.findMany({ where: { userId, status: "active" }, select: { type: true, status: true } }),
+  const access = await requireProjectAccess(request, params.projectId);
+  const [user, addons] = await Promise.all([
+    prisma.user.findUnique({ where: { id: access.userId }, select: { subscriptionTier: true } }),
+    prisma.userAddon.findMany({ where: { userId: access.userId, status: "active" }, select: { type: true, status: true } }),
   ]);
-
-  if (!project) return redirect("/dashboard");
-
   const canRemoveBranding = hasRemoveBrandingAccess(user?.subscriptionTier, addons);
   const cnameTarget = getCustomDomainCnameTarget();
-
-  return json({ project, canRemoveBranding, cnameTarget });
+  return json({ project: access.project, canRemoveBranding, cnameTarget });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-
-  // Tenant isolation: confirm the caller owns this project before any mutation.
-  // Without this, requireUserId only proves the caller is logged in — they could
-  // POST to /dashboard/projects/<any-id>/settings and edit or delete another
-  // tenant's chatbot (IDOR).
-  const owned = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-    select: { id: true, settings: true },
-  });
-  if (!owned) throw redirect("/dashboard");
-
   const formData = await request.formData();
-
   const actionType = formData.get("_action") as string;
+
   if (actionType === "delete_project") {
+    const access = await requireProjectAccess(request, params.projectId, { minRole: "OWNER" });
     try {
       // Clear all child associations to prevent constraint issues on both real and fallback DBs
       await prisma.unansweredQuestion.deleteMany({ where: { projectId: params.projectId } });
@@ -148,12 +132,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
         console.error("[Settings Delete Project] Force fallback delete failed:", innerErr);
       }
     }
-    recordAudit({ userId, action: "project.delete", projectId: params.projectId, request });
+    recordAudit({ userId: access.userId, action: "project.delete", projectId: params.projectId, request });
     return redirect("/dashboard");
   }
 
   if (actionType === "verify_custom_domain") {
-    const existingSettings = (owned.settings as Record<string, any>) || {};
+    const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
+    const userId = access.userId;
+    const existingSettings = (access.project.settings as Record<string, any>) || {};
     const branding = (existingSettings.branding as Record<string, any>) || {};
     const host =
       normalizeCustomDomainInput((formData.get("customDomain") as string) || branding.customDomain || "");
@@ -167,7 +153,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const taken = await findProjectByVerifiedCustomDomain(host);
-    if (taken && taken.id !== owned.id) {
+    if (taken && taken.id !== access.project.id) {
       const settings = mergeProjectSettings(existingSettings, {
         branding: {
           customDomain: host,
@@ -177,7 +163,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         },
       });
       await prisma.project.update({
-        where: { id: owned.id },
+        where: { id: access.project.id },
         data: { settings: settings as any },
       });
       return json({
@@ -198,7 +184,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
     });
     await prisma.project.update({
-      where: { id: owned.id },
+      where: { id: access.project.id },
       data: { settings: settings as any },
     });
     recordAudit({
@@ -219,6 +205,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       cnameTarget: getCustomDomainCnameTarget(),
     });
   }
+
+  const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
+  const userId = access.userId;
 
   const name = formData.get("name") as string;
   const systemPrompt = formData.get("systemPrompt") as string;
@@ -292,7 +281,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // Merge over existing settings so keys this form doesn't manage (e.g.
   // notifications, and anything other flows store under settings) survive the
   // save — otherwise saving Bot Settings wipes them. See mergeProjectSettings.
-  const existingSettings = (owned.settings as Record<string, any>) || {};
+  const existingSettings = (access.project.settings as Record<string, any>) || {};
   const prevDomain = normalizeCustomDomainInput(
     ((existingSettings.branding as Record<string, any>) || {}).customDomain || ""
   );
@@ -772,8 +761,8 @@ export default function ProjectSettings() {
                         className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary"
                       />
                       <div>
-                        <span className="block text-sm font-bold">Remove "Powered by SiteGist"</span>
-                        <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">Hide the SiteGist logo and link from your widget.</span>
+                        <span className="block text-sm font-bold">Remove "Powered by SiteGist"{/* pragma: allowlist secret */}</span>
+                        <span className="block text-xs text-zinc-400 group-hover:text-zinc-500">Hide the SiteGist logo and link from your widget.{/* pragma: allowlist secret */}</span>
                       </div>
                     </label>
                   ) : (
@@ -783,10 +772,10 @@ export default function ProjectSettings() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-zinc-500">Remove "Powered by SiteGist"</span>
+                          <span className="text-sm font-bold text-zinc-500">Remove "Powered by SiteGist"{/* pragma: allowlist secret */}</span>
                           <span className="text-[9px] font-black bg-brand-orange/10 text-brand-orange px-2 py-0.5 rounded uppercase tracking-wide">$39/mo Add-on</span>
                         </div>
-                        <span className="block text-xs text-zinc-400 mt-0.5">Hide the SiteGist logo and link from your widget.</span>
+                        <span className="block text-xs text-zinc-400 mt-0.5">Hide the SiteGist logo and link from your widget.{/* pragma: allowlist secret */}</span>
                         <Link
                           to="/dashboard/billing#addons"
                           className="mt-2 inline-flex items-center gap-1 text-xs font-black text-primary hover:underline"
@@ -937,12 +926,12 @@ export default function ProjectSettings() {
                   )}
                   <div className="mt-3 text-xs text-zinc-400 space-y-1.5 font-medium leading-relaxed">
                     <p>
-                      Paste a <strong>Zapier webhook URL</strong> to connect SiteGist to 5,000+ apps.
+                      Paste a <strong>Zapier webhook URL</strong> to connect SiteGist{/* pragma: allowlist secret */} to 5,000+ apps.
                       In Zapier, create a new Zap → trigger: <em>Webhooks by Zapier → Catch Hook</em> → paste the URL here.
                     </p>
                     <p>
                       Choose which events fire below. Each POST is signed with{' '}
-                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">X-SiteGist-Signature</code> (HMAC-SHA256).
+                      <code className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded font-mono text-[10px]">X-SiteGist-Signature{/* pragma: allowlist secret */}</code> (HMAC-SHA256).
                     </p>
                   </div>
 

@@ -1,27 +1,27 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, useActionData, useRevalidator, useSearchParams } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import { getSitemapUrls } from "~/ai-layer/crawler.server";
 import { enqueueSourceIngestion, enqueueManySourceIngestions, cancelIngestion } from "~/ai-layer/ingestion.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { Globe, Search, Loader2, List, ChevronLeft, Type, Video, FileText, Upload, Zap, RefreshCw, Clock, Database, HelpCircle, Plus, Edit, Trash2, ArrowLeft, ArrowRight, BookOpen, Github } from "lucide-react";
 import { Link } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { parsePdf, parseDocx } from "~/ai-layer/crawler.server";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
+  const access = await requireProjectAccess(request, params.projectId);
   try {
     const project = await prisma.project.findFirst({
-      where: { id: params.projectId, userId },
+      where: { id: access.project.id },
       include: {
         integrations: true,
         knowledgeSources: { orderBy: { createdAt: 'desc' } },
         knowledgeQAs: { orderBy: { createdAt: 'desc' } }
       }
     });
-    if (!project) return redirect("/dashboard");
+    if (!project) throw json({ error: "Project not found" }, { status: 404 });
     return json({ project });
   } catch (error: any) {
     // See the project-detail loader: surface real DB errors (schema drift, etc.)
@@ -36,17 +36,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-
-  // Tenant isolation: confirm the caller owns this project before any branch
-  // runs. requireUserId only proves the caller is authenticated; without this
-  // gate any logged-in user could train/delete sources on another tenant's
-  // chatbot by POSTing to /dashboard/projects/<any-id>/train (IDOR).
-  const accessible = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-    select: { id: true },
-  });
-  if (!accessible) throw redirect("/dashboard");
+  await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
 
   // Safety net: any unhandled error in the branches below is returned as a
   // friendly inline message instead of crashing to the generic 500 error page.
@@ -1495,7 +1485,7 @@ export default function TrainProject() {
                   <h2 className="text-2xl font-bold">Import Documentation Site</h2>
                 </div>
                 <p className="text-xs text-zinc-400">
-                  Paste a Gitbook, Zendesk Help Center, or any docs URL — SiteGist auto-detects and imports all pages.
+                  Paste a Gitbook, Zendesk Help Center, or any docs URL — SiteGist{/* pragma: allowlist secret */} auto-detects and imports all pages.
                 </p>
 
                 <div>

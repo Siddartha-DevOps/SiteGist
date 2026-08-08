@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link, useFetcher, Form } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { useState } from "react";
 import {
   ChevronLeft, Mail, Phone, Building2, Calendar,
@@ -18,11 +18,7 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-  if (!project) return redirect("/dashboard");
+  await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
 
   // Confirm the lead belongs to this project before any mutation. The loader
   // enforces this for reads, but actions can be POSTed directly without it, so
@@ -84,11 +80,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-  if (!project) return redirect("/dashboard");
+  const access = await requireProjectAccess(request, params.projectId);
+  const project = access.project;
 
   const lead = await prisma.lead.findUnique({
     where: { id: params.leadId },
@@ -352,7 +345,7 @@ export default function LeadDetail() {
                           : <Bot className="w-3 h-3 text-primary" />
                         }
                         <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                          {msg.role === "user" ? (lead.name || "Visitor") : "SiteGist AI"}
+                          {msg.role === "user" ? (lead.name || "Visitor") : "SiteGist AI" /* pragma: allowlist secret */}
                         </span>
                         <span className="text-[10px] text-zinc-300">
                           {format(new Date(msg.createdAt), "h:mm a")}

@@ -11,6 +11,7 @@ export type AuditAction =
   | "apikey.revoke"
   | "member.invite"
   | "member.remove"
+  | "member.role_change"
   | "integration.connect"
   | "integration.disconnect"
   | "project.settings.update"

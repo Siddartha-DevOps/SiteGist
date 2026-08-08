@@ -3,12 +3,12 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useFetcher, Link } from "@remix-run/react";
 import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { useState, useEffect, useRef } from "react";
 import { Send, ChevronLeft, Bot, Sparkles, MessageSquare, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
 import Markdown from "react-markdown";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId");
   
@@ -19,23 +19,23 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 
     if (projectId === "mock-proj-1") {
       // Allow any logged-in user to preview the Acme Website Chatbot (mock-proj-1)
+      await requireUserId(request);
       project = await prisma.project.findFirst({
         where: { id: projectId },
       });
     } else {
-      // Enforce owner checks for real user-defined projects
-      project = await prisma.project.findFirst({
-        where: { id: projectId, userId },
-      });
+      const access = await requireProjectAccess(request, projectId);
+      project = access.project;
     }
 
     if (!project) {
-      console.warn(`[Playground Loader] Project of ID ${projectId} not found or doesn't belong to userId ${userId}. Redirecting to dashboard.`);
+      console.warn(`[Playground Loader] Project of ID ${projectId} not found or inaccessible. Redirecting to dashboard.`);
       return redirect("/dashboard");
     }
 
     return json({ project });
   } catch (err: any) {
+    if (err instanceof Response) throw err;
     console.error("[Playground Loader] Failed to load the project:", err);
     throw new Response("Internal Server Error during playground project load: " + (err.message || String(err)), { status: 500 });
   }

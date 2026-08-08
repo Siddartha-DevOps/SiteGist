@@ -1,14 +1,14 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData, Link, useSearchParams, useFetcher } from "@remix-run/react";
 import { useEffect, useState } from "react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
 import {
   createOrGetKnowledgeQA,
   clearUnansweredForQuestion,
   findPrecedingUserQuestion,
 } from "~/backend/knowledge-qa.server";
+import { requireProjectAccess } from "~/lib/project-access.server";
 import { ChevronLeft, ThumbsUp, ThumbsDown, MessageSquare, AlertCircle, TrendingUp, BarChart3, Users, Clock, Calendar, Zap, Plus, Check, Loader2, X } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -16,12 +16,8 @@ import {
 } from 'recharts';
 
 export async function action({ params, request }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-    select: { id: true },
-  });
-  if (!project) return json({ error: "Project not found" }, { status: 404 });
+  const access = await requireProjectAccess(request, params.projectId, { minRole: "ADMIN" });
+  const project = access.project;
 
   const formData = await request.formData();
   const intent = String(formData.get("_action") || "");
@@ -122,12 +118,8 @@ export async function action({ params, request }: ActionFunctionArgs) {
 }
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
-  const project = await prisma.project.findFirst({
-    where: { id: params.projectId, userId },
-  });
-
-  if (!project) return redirect("/dashboard");
+  const access = await requireProjectAccess(request, params.projectId);
+  const project = access.project;
 
   const rawRange = Number(new URL(request.url).searchParams.get("range"));
   const range: 7 | 30 | 90 | 365 =

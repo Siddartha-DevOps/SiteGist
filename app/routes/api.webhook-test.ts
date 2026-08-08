@@ -1,7 +1,7 @@
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { getAccessibleProjectScope } from "~/lib/project-access.server";
 import { sendWebhook } from "~/lib/webhook.server";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -10,7 +10,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const userId = await requireUserId(request);
+    const scope = await getAccessibleProjectScope(request);
     const { projectId } = await request.json();
 
     if (!projectId) {
@@ -18,7 +18,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const project = await prisma.project.findFirst({
-      where: { id: projectId, userId },
+      where: { id: projectId, ...scope.projectWhere },
       select: { id: true, name: true, webhookUrl: true },
     });
 

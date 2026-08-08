@@ -1,17 +1,17 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Form, useNavigation, Link, useFetcher } from "@remix-run/react";
-import { requireUserId } from "~/backend/auth.server";
 import { prisma } from "~/database/db.server";
+import { getAccessibleProjectScope, requireProjectAccess } from "~/lib/project-access.server";
 import { ChevronLeft, User, Bot, Send, Calendar, Globe, Clock, MessageSquare, Star, Archive, Tag, X, UserPlus, Download, MessageSquareText } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useRef, useState } from "react";
 import { createChatSocket } from "~/lib/partykit.client";
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
-  const userId = await requireUserId(request);
-  const session = await prisma.chatSession.findUnique({
-    where: { id: params.sessionId },
+  const scope = await getAccessibleProjectScope(request);
+  const session = await prisma.chatSession.findFirst({
+    where: { id: params.sessionId, project: scope.projectWhere },
     include: {
       messages: { orderBy: { createdAt: "asc" } },
       project: { select: { id: true, name: true, userId: true } },
@@ -19,7 +19,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     },
   });
 
-  if (!session || session.project.userId !== userId) {
+  if (!session) {
     return redirect("/dashboard/inbox");
   }
 
@@ -44,19 +44,38 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const userId = await requireUserId(request);
   const formData = await request.formData();
   const action = formData.get("_action");
-  
+
+  // Authorize: session must be on an accessible project
+  const scope = await getAccessibleProjectScope(request);
+  const sessionMeta = await prisma.chatSession.findFirst({
+    where: { id: params.sessionId, project: scope.projectWhere },
+    select: {
+      id: true,
+      projectId: true,
+      isStarred: true,
+      isArchived: true,
+      mode: true,
+      project: { select: { name: true } },
+    },
+  });
+  if (!sessionMeta) {
+    return action === "export_transcript"
+      ? json({ error: "Not found" }, { status: 404 })
+      : redirect("/dashboard/inbox");
+  }
+
   if (action === "export_transcript") {
+    // Read-only export — VIEWER+ already authorized via membership scope above
     const session = await (prisma.chatSession as any).findUnique({
       where: { id: params.sessionId },
       include: {
         messages: { orderBy: { createdAt: "asc" } },
-        project: { select: { userId: true, name: true } },
+        project: { select: { name: true } },
       },
     });
-    if (!session || session.project.userId !== userId) {
+    if (!session) {
       return json({ error: "Not found" }, { status: 404 });
     }
 
@@ -78,10 +97,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
     });
   }
+
+  // Mutations require ADMIN+
+  await requireProjectAccess(request, sessionMeta.projectId, { minRole: "ADMIN" });
   
   if (action === "toggle_mode") {
-    const session = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
-    const newMode = (session as any).mode === "human" ? "ai" : "human";
+    const newMode = sessionMeta.mode === "human" ? "ai" : "human";
     await prisma.chatSession.update({
       where: { id: params.sessionId },
       data: { mode: newMode }
@@ -90,19 +111,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (action === "toggle_star") {
-    const sess = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
     await prisma.chatSession.update({
       where: { id: params.sessionId },
-      data: { isStarred: !sess!.isStarred },
+      data: { isStarred: !sessionMeta.isStarred },
     });
     return json({ success: true });
   }
 
   if (action === "toggle_archive") {
-    const sess = await prisma.chatSession.findUnique({ where: { id: params.sessionId } });
     await prisma.chatSession.update({
       where: { id: params.sessionId },
-      data: { isArchived: !sess!.isArchived },
+      data: { isArchived: !sessionMeta.isArchived },
     });
     return json({ success: true });
   }
